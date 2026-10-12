@@ -539,4 +539,259 @@ describe("document gateway routing, no live CLI", () => {
       "new-session",
     ]);
   });
+  it("sets, persists and restores the document session marker across a gateway restart", async () => {
+    const { command, config } = await fixture();
+    await command("marker-create", { workspaceId: root });
+    const saved = JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0];
+    expect(saved.sessions).toEqual(["new-session"]);
+    expect(saved.creations).toEqual(["marker-create"]);
+    await gateway!.dispose();
+    gateway = undefined;
+    gateway = await startDocumentGateway(
+      { get: (key: string) => (key === "agent" ? state.agent : state.mcp) } as any,
+      path.join(root, "config.json"),
+    );
+    const reopened = new Socket();
+    state.wss.emit("connection", reopened);
+    const rpc2 = async (method: string, params: any = {}) => {
+      const id = crypto.randomUUID();
+      reopened.emit("message", Buffer.from(JSON.stringify({ id, method, params })));
+      await vi.waitFor(() => expect(reopened.replies.some((item) => item.id === id)).toBe(true));
+      return reopened.replies.find((item) => item.id === id);
+    };
+    await rpc2("pair", { token: config.token });
+    const bind = await rpc2("bind", {
+      workspacePath: root,
+      document: {
+        host: "word",
+        documentId: "document-1",
+        documentInstanceId: "instance-2",
+        name: "Sample.docx",
+      },
+    });
+    expect(bind.result.sessions).toEqual(["new-session"]);
+    await rpc2("agent", { name: "helloConversationV4" });
+    await rpc2("agent", {
+      name: "initializeConversationV4",
+      args: {
+        kind: "clientHello",
+        protocolVersion: V4_WIRE_PROTOCOL_VERSION,
+        clientId: "test-client",
+        clientKind: "web",
+        appVersion: "test",
+      },
+    });
+    const rename = (commandId: string, sessionId: string) =>
+      rpc2("agent", {
+        name: "sendConversationCommandV4",
+        args: {
+          envelope: {
+            type: "renameSession",
+            commandId,
+            clientId: "test-client",
+            sessionId,
+            payload: { title: "Doc thread" },
+            issuedAt: Date.now(),
+          },
+        },
+      });
+    expect((await rename("rename-restored", "new-session")).error).toBeUndefined();
+    expect((await rename("rename-foreign", "desktop-made-session")).error).toMatch(
+      /does not belong/,
+    );
+    expect(
+      (
+        await rpc2("agent", {
+          name: "queryConversationCommandsV4",
+          args: { commands: [{ sessionId: null, commandId: "marker-create" }] },
+        })
+      ).error,
+    ).toBeUndefined();
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0].sessions).toEqual([
+      "new-session",
+      "recovered-session",
+    ]);
+  });
+  it("marks side sessions created through the pane and recovers a lost ACK via the creations ring", async () => {
+    const { command, rpc } = await fixture();
+    await command("side-parent", { workspaceId: root });
+    const sideSession = (commandId: string) =>
+      rpc("agent", {
+        name: "sendConversationCommandV4",
+        args: {
+          envelope: {
+            type: "createSelectionSideSession",
+            commandId,
+            clientId: "test-client",
+            sessionId: "new-session",
+            payload: {},
+            issuedAt: Date.now(),
+          },
+        },
+      });
+    state.agent.sendConversationCommandV4.mockResolvedValueOnce({
+      commandId: "side-ok",
+      status: "accepted",
+      revisionAtDecision: 0,
+      result: { type: "createSelectionSideSession", sessionId: "side-child" },
+    });
+    expect((await sideSession("side-ok")).error).toBeUndefined();
+    let saved = JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0];
+    expect(saved.sessions).toEqual(["new-session", "side-child"]);
+    state.agent.sendConversationCommandV4.mockRejectedValueOnce(
+      new Error("transport lost after admission"),
+    );
+    expect((await sideSession("side-lost")).error).toMatch(/transport lost/);
+    saved = JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0];
+    expect(saved.creations).toEqual(["side-parent", "side-ok", "side-lost"]);
+    state.agent.queryConversationCommandsV4.mockResolvedValueOnce({
+      results: [
+        {
+          key: { sessionId: null, commandId: "side-lost" },
+          result: {
+            status: "accepted",
+            result: { type: "createSelectionSideSession", sessionId: "side-recovered" },
+          },
+        },
+      ],
+    });
+    expect(
+      (
+        await rpc("agent", {
+          name: "queryConversationCommandsV4",
+          args: { commands: [{ sessionId: null, commandId: "side-lost" }] },
+        })
+      ).error,
+    ).toBeUndefined();
+    saved = JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0];
+    expect(saved.sessions).toEqual(["new-session", "side-child", "side-recovered"]);
+    expect(state.agent.sendConversationCommandV4).toHaveBeenCalledTimes(3);
+  });
+  it("refuses marker spoofing through command payloads: binding membership is gateway-owned", async () => {
+    const { command, rpc } = await fixture();
+    await command("spoof-create", { workspaceId: root });
+    const envelope = (type: string, commandId: string, sessionId: string | null, payload: any) =>
+      rpc("agent", {
+        name: "sendConversationCommandV4",
+        args: {
+          envelope: {
+            type,
+            commandId,
+            clientId: "test-client",
+            sessionId,
+            payload,
+            issuedAt: Date.now(),
+          },
+        },
+      });
+    expect(
+      (await envelope("createSession", "adopt-1", "desktop-session", { workspaceId: root })).error,
+    ).toMatch(/Gateway alone/);
+    expect(
+      (
+        await envelope("sendText", "spoof-foreign", "desktop-session", {
+          text: "hello",
+          documentBinding: true,
+          surface: "document",
+        })
+      ).error,
+    ).toMatch(/does not belong/);
+    state.agent.sendConversationCommandV4.mockClear();
+    expect(
+      (
+        await envelope("sendText", "spoof-bound", "new-session", {
+          text: "hello",
+          surface: "desktop",
+          documentMarker: true,
+        })
+      ).error,
+    ).toBeUndefined();
+    expect(state.agent.sendConversationCommandV4.mock.calls[0][0].envelope.payload).toEqual({
+      text: "hello",
+    });
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0].sessions).toEqual([
+      "new-session",
+    ]);
+    expect(state.agent.sendConversationCommandV4).toHaveBeenCalledTimes(1);
+  });
+  it("keeps surface attribution observational and never injects MCP retroactively into active sessions", async () => {
+    const { command, rpc } = await fixture();
+    expect(
+      (
+        await rpc("agent", {
+          name: "initializeConversationV4",
+          args: {
+            kind: "clientHello",
+            protocolVersion: V4_WIRE_PROTOCOL_VERSION,
+            clientId: "test-client",
+            clientKind: "desktop",
+            appVersion: "test",
+          },
+        })
+      ).error,
+    ).toMatch(/web client handshake/);
+    await command("attr-create", { workspaceId: root });
+    state.agent.sendConversationCommandV4.mockClear();
+    expect(
+      (
+        await rpc("agent", {
+          name: "sendConversationCommandV4",
+          args: {
+            envelope: {
+              type: "sendText",
+              commandId: "attr-send",
+              clientId: "test-client",
+              sessionId: "new-session",
+              payload: { text: "hi" },
+              issuedAt: Date.now(),
+            },
+          },
+        })
+      ).error,
+    ).toBeUndefined();
+    expect(state.agent.sendConversationCommandV4.mock.calls[0][0].envelope.payload).toEqual({
+      text: "hi",
+    });
+    state.agent.sendConversationCommandV4.mockClear();
+    expect(
+      (
+        await rpc("agent", {
+          name: "sendConversationCommandV4",
+          args: {
+            envelope: {
+              type: "createSelectionSideSession",
+              commandId: "attr-side",
+              clientId: "test-client",
+              sessionId: "new-session",
+              payload: {},
+              issuedAt: Date.now(),
+            },
+          },
+        })
+      ).error,
+    ).toBeUndefined();
+    const side = state.agent.sendConversationCommandV4.mock.calls[0][0].envelope;
+    expect(side.type).toBe("createSelectionSideSession");
+    expect(side.payload).toEqual({});
+    expect(
+      (
+        await rpc("agent", {
+          name: "sendConversationCommandV4",
+          args: {
+            envelope: {
+              type: "sendText",
+              commandId: "attr-impersonate",
+              clientId: "desktop-main-window",
+              sessionId: "new-session",
+              payload: { text: "hi" },
+              issuedAt: Date.now(),
+            },
+          },
+        })
+      ).error,
+    ).toMatch(/Client identity mismatch/);
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0].sessions).toEqual([
+      "new-session",
+    ]);
+  });
 });

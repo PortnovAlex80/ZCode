@@ -49,6 +49,13 @@ export function armHighspeedFooterExpiryClock(
   const catchUpFromWindowWake = () => {
     // 切到隐藏态不补偿（与 SessionPane 同口径）；只在回到前台时追平时钟。
     if (documentTarget.visibilityState === "hidden") return;
+    // Bug 根因（P-03 热点 2）：补偿曾无条件触发 onExpire——只要存在未到期卡片，空闲窗口
+    // 的每次 focus/visibilitychange 都会推进 liveNowMs，使 ConversationTimeline 全量重建
+    // render units（O(rows)）。而 footer 只在 nowMs 越过 expiresAt 时才有显隐变化，运行中
+    // 轮次的时长显示由挂载内的 duration clock（ConversationClockedTurnGroup）自行追平，
+    // 边界未越过时补偿不会产生任何可见差异。修复依据：只在真实越过本次挂起的到期边界时
+    // 补偿；定时器被冻结错过边界的场景（补偿的本意）仍立即唤醒，footer 不依赖新消息出现。
+    if (now() < nextExpiryMs) return;
     onExpire();
   };
   documentTarget.addEventListener("visibilitychange", catchUpFromWindowWake);

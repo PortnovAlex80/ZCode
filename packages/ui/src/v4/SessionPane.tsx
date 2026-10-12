@@ -41,6 +41,7 @@ import type {
   CommandAck,
   CommandEnvelope,
   CommandType,
+  ConversationRow,
   ConversationSnapshot,
   ConversationRowTarget,
   SessionErrorInfo,
@@ -213,7 +214,7 @@ import {
   resolveConversationShareSelectionPanelVisible,
 } from "@/v4/conversationShareModePolicy.js";
 import { buildConversationTurnRenderUnits } from "@/v4/conversationTurnRenderUnits.js";
-import { buildConversationTurnNavigatorItems } from "@/v4/conversationTurnNavigatorHelpers.js";
+import { createCachedConversationTurnNavigatorItemsBuilder } from "@/v4/conversationTurnNavigatorHelpers.js";
 import { SessionPluginReferenceIconBoundary } from "@/v4/SessionPluginReferenceIconProvider.js";
 import {
   resolveConversationStatusPanelVariant,
@@ -457,6 +458,16 @@ const EMPTY_SUBAGENT_PROJECTION: NonNullable<ConversationSnapshot["subagents"]> 
 };
 
 const MAX_CONVERSATION_FILE_CHANGES_CACHE_ENTRIES = 20;
+
+/**
+ * 分享面未激活（shareActive=false）时 share memos 的稳定空窗依赖。
+ * Bug 根因（P-03 热点 1）：分享渲染单元/导航目录曾对每次流式 snapshot 身份变化全量重建
+ * （O(rows)：1000 轮约 25ms 渲染单元 + 12ms 未缓存目录），而它们的全部消费面——选择面板、
+ * 底部 dock、timeline 勾选与 syncAvailableTurns——都只在分享面激活时可见/生效。
+ * 修复依据：未激活时把 memo 依赖钉在恒定空窗上，流式期间不再重建；激活的当次渲染因
+ * 依赖从空窗切换到真实 window 会重建一次，语义与激活前可见性一致（面板此前本就不可见）。
+ */
+const EMPTY_SHARE_ROWS_WINDOW: readonly ConversationRow[] = [];
 
 function toComposerUiError(
   sessionId: string | null | undefined,
@@ -736,23 +747,40 @@ export function SessionPane({
     enabled: shareSelectionPanelVisible,
     onDismiss: dismissShareSelectionPanel,
   });
+  // 见 EMPTY_SHARE_ROWS_WINDOW 注释：未激活分享时依赖恒定为空窗，流式 snapshot 身份
+  // 变化不再触发 O(rows) 重建；激活当次渲染切换回真实 window 重建一次。
+  const shareRowsWindow = shareActive
+    ? (snapshot?.rows.window ?? EMPTY_SHARE_ROWS_WINDOW)
+    : EMPTY_SHARE_ROWS_WINDOW;
   const shareRenderUnits = useMemo(
-    () => buildConversationTurnRenderUnits(snapshot?.rows.window ?? []),
-    [snapshot?.rows.window],
+    () => buildConversationTurnRenderUnits(shareRowsWindow),
+    [shareRowsWindow],
   );
+  // 目录构建改用挂载级缓存 builder（与 ConversationTurnNavigator 同一模式）：
+  // 流式期间未变化轮次直接复用命中项，稳态成本从全量未缓存构建（~12ms@1000 轮）
+  // 降到缓存命中（~0.4ms@1000 轮），且输出与 buildConversationTurnNavigatorItems 一致
+  // （由 conversationTurnNavigatorHelpers 的对照测试约束）。缓存属于本挂载，随组件卸载释放。
+  const shareNavigatorBuilderRef = useRef<
+    ReturnType<typeof createCachedConversationTurnNavigatorItemsBuilder> | null
+  >(null);
+  if (shareNavigatorBuilderRef.current === null) {
+    shareNavigatorBuilderRef.current = createCachedConversationTurnNavigatorItemsBuilder();
+  }
   const shareItems = useMemo(
     () =>
-      buildConversationTurnNavigatorItems(shareRenderUnits, {
-        assistantEmptyPreview: intl.formatMessage({
-          id: "chat.turnNavigator.emptyAssistant",
-        }),
-        assistantRunningPreview: intl.formatMessage({
-          id: "chat.turnNavigator.runningAssistant",
-        }),
-        userFallbackPreview: intl.formatMessage({
-          id: "chat.turnNavigator.userFallback",
-        }),
-      }),
+      shareRenderUnits.length === 0
+        ? []
+        : shareNavigatorBuilderRef.current!(shareRenderUnits, {
+            assistantEmptyPreview: intl.formatMessage({
+              id: "chat.turnNavigator.emptyAssistant",
+            }),
+            assistantRunningPreview: intl.formatMessage({
+              id: "chat.turnNavigator.runningAssistant",
+            }),
+            userFallbackPreview: intl.formatMessage({
+              id: "chat.turnNavigator.userFallback",
+            }),
+          }),
     [intl, shareRenderUnits],
   );
   const eligibleShareItems = useMemo(

@@ -200,7 +200,14 @@ export async function dispatchDocumentAgent(
     ];
     envelope.payload = payload;
   } else requireSession(current, envelope.sessionId);
-  if (envelope.type === "createSession") {
+  // 原因：三车道绑定模型中 Side 会话同样经面板创建（createSelectionSideSession 自已绑定的
+  // 父会话），但 creations 环此前只记录 createSession 的 commandId——Side 创建的 ACK 在传输层
+  // 丢失后，query-by-commandId 恢复会被「Creation command is not owned...」拒绝，经面板创建的
+  // 子会话永远进不了 binding.sessions，绑定标记丢失且无法补录。修复依据：冻结决策
+  // （DOCUMENT-HOSTS.md「Маркер документных сессий」）规定未决创建一律以 query-by-commandId
+  // 恢复并写入 binding，不区分创建车道；query 处理端已同时识别两种创建结果，因此两条创建
+  // 车道都记入同一个 512 上限的 creations 环。
+  if (envelope.type === "createSession" || envelope.type === "createSelectionSideSession") {
     if (!binding.creations.includes(envelope.commandId)) binding.creations.push(envelope.commandId);
     binding.creations = binding.creations.slice(-512);
     await persist();

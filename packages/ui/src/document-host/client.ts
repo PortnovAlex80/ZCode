@@ -3,9 +3,11 @@ import type { DocumentAdapter, DocumentProposal } from "./types.js";
 export type { DocumentAdapter, DocumentProposal } from "./types.js";
 import { createAgentConversationTransport } from "@/v4/agentConversationTransport.js";
 import { createCommandEnvelope } from "@/v4/commandFactory.js";
+import { hasOlderRows } from "@/v4/conversationProjectionStore.js";
 import { SessionDataLayer, type SessionLease } from "@/v4/sessionDataLayer.js";
 import {
   COMMANDS_REQUIRING_BASE_REVISION,
+  PROTOCOL_V4_LIMITS,
   type CommandPayloadMap,
   type CommandType,
 } from "@zcode/shared/zcode-protocol-v4";
@@ -68,6 +70,20 @@ export class DocumentSessionClient {
   }
   get unresolvedCommands() {
     return [...this.unresolved.values()];
+  }
+  get loadingOlder() {
+    return this.lease?.store.getState().loadingOlder ?? false;
+  }
+  get hasOlderRows() {
+    return hasOlderRows(this.snapshot);
+  }
+  /**
+   * 旧历史分页（DOCUMENT-HOSTS 冻结契约）：文档面板与 desktop 走同一条原生游标路径
+   * （store.loadOlder → transport.rowsRange → conversationRowsRangeV4），不在面板里
+   * 维护第二份完整历史拷贝；未连接/未打开会话时是只读 no-op。
+   */
+  async loadOlder(limit: number = PROTOCOL_V4_LIMITS.snapshotTailWindowRows) {
+    await this.lease?.store.loadOlder(limit);
   }
   private saveRecovery() {
     try {
@@ -289,8 +305,15 @@ export class DocumentSessionClient {
     }
     this.unresolved.delete(envelope.commandId);
     this.saveRecovery();
-    if (!["accepted", "duplicate", "noop"].includes(ack.status))
-      throw new Error(ack.message ?? ack.reasonCode ?? ack.status);
+    if (!["accepted", "duplicate", "noop"].includes(ack.status)) {
+      // 原因：rejected ACK 的 message 可能不含 reasonCode，旧的 `message ?? reasonCode`
+      // 拼接会把唯一的结构化信号（如 proto.sessionNotFound——会话已被外部删除，gateway
+      // 同时撤销绑定）藏进自然语言，面板无法据此显示「线程已不存在」。修复依据：
+      // reasonCode 是协议规定 rejected/stale/noop/failed 必带的机器信号，固定前置
+      // 输出，message 仅作补充，两者同时可见。
+      const detail = [ack.reasonCode, ack.message].filter(Boolean).join(": ");
+      throw new Error(detail || ack.status);
+    }
     return ack;
   }
   async reconcile() {

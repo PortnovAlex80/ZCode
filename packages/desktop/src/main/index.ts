@@ -1827,6 +1827,24 @@ function openUpdateStatusWindow() {
   });
 }
 
+// 原因：spec-harness 的 close-view 判定（关闭视图=隐藏保活，显式退出=走真实关闭）原先内联在
+// handleBeforeClose 闭包里，协调器套件无法驱动生产代码，只能复述逻辑（Wave 1 Impl E 标记的缺口）。
+// 修复：提取为顶层导出的纯判定 seam，由 specProjectWindows.test.mjs 从本文件源码提取执行；
+// forceQuitRef/explicitQuitRef 等窗口状态所有权仍在 Main，隐藏与退出的行为保持不变。
+// A view may hide while native Hosts keep running; only explicit Quit owns shutdown.
+export function handleSpecHarnessViewCloseRequest(options: {
+  specHarnessWindowsEnabled: boolean;
+  forceQuit: boolean;
+  explicitQuit: boolean;
+  hideView: () => void;
+}): boolean {
+  if (options.specHarnessWindowsEnabled && !options.forceQuit && !options.explicitQuit) {
+    options.hideView();
+    return true;
+  }
+  return false;
+}
+
 function createWindowInstance(
   startupBootstrap: StartupWindowBootstrap = {},
   persistSession = true,
@@ -1838,13 +1856,14 @@ function createWindowInstance(
     logger,
     forceQuitRef,
     handleBeforeClose: (win, label) => {
-      // A view may hide while native Hosts keep running; only explicit Quit owns shutdown.
       if (
-        process.env.ZCODE_SPEC_HARNESS_WINDOWS === "1" &&
-        !forceQuitRef.current &&
-        !explicitQuitRef.current
+        handleSpecHarnessViewCloseRequest({
+          specHarnessWindowsEnabled: process.env.ZCODE_SPEC_HARNESS_WINDOWS === "1",
+          forceQuit: forceQuitRef.current,
+          explicitQuit: explicitQuitRef.current,
+          hideView: () => win.hide(),
+        })
       ) {
-        win.hide();
         return true;
       }
       return handleDesktopWindowCloseRequest({
