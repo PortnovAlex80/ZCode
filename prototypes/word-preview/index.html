@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Spec Harness — Word</title>
+    <link rel="stylesheet" href="/panel.css" />
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script type="module" src="/panel.js"></script>
+  </head>
+  <body>
+    <header class="toolbar">
+      <img src="/icon.png" class="brand" alt="ZCODE" />
+      <div class="heading">
+        <strong class="text-ui-base">ZCODE · Word</strong
+        ><span class="text-ui-sm" id="host">Панель Word</span>
+      </div>
+      <button id="theme" class="icon" title="Сменить тему" aria-label="Сменить тему">◐</button>
+    </header>
+    <div class="offline text-ui-sm"><span class="dot"></span>Без подключения к ZCODE</div>
+    <nav class="tabs" aria-label="Режим беседы">
+      <button id="document-tab" class="active text-ui-base">Документ</button>
+      <button id="discussion-tab" class="text-ui-base">Обсуждения <span id="count">0</span></button>
+    </nav>
+    <section class="selection">
+      <div class="section-label text-ui-sm">
+        <span id="selection-label">Выделенный фрагмент</span
+        ><button id="read" class="link text-ui-sm">Взять из Word</button>
+      </div>
+      <blockquote id="quote" class="text-ui-base">
+        Выделите текст в документе слева, затем нажмите «Взять из Word».
+      </blockquote>
+      <button id="discuss" class="outline text-ui-caption">
+        Обсудить отдельно <span aria-hidden="true">↗</span>
+      </button>
+      <p id="status" class="text-ui-sm" role="status">Документ остаётся под управлением Word.</p>
+    </section>
+    <section id="threads" class="threads" hidden aria-label="Список обсуждений"></section>
+    <main id="messages" class="messages" aria-live="polite">
+      <div class="welcome">
+        <img class="welcome-mark" src="/icon.png" alt="" />
+        <h1 class="text-ui-lg">Работаем прямо в документе</h1>
+        <p class="text-ui-base">
+          Задайте вопрос о документе или начните отдельное обсуждение выделенного фрагмента.
+        </p>
+        <div class="suggestions">
+          <button class="outline text-ui-caption" data-prompt="Как улучшить этот фрагмент?">
+            Улучшить текст</button
+          ><button class="outline text-ui-caption" data-prompt="Выдели основные требования">
+            Разобрать требования
+          </button>
+        </div>
+      </div>
+    </main>
+    <footer>
+      <form id="composer" class="composer">
+        <div id="context" class="context text-ui-sm">Документ · локальный макет</div>
+        <textarea
+          id="prompt"
+          class="text-ui-base"
+          rows="3"
+          placeholder="Спросите о документе…"
+          aria-label="Сообщение"
+        ></textarea>
+        <div class="composer-actions">
+          <button
+            type="button"
+            id="add-context"
+            class="icon"
+            title="Добавить выделение из Word"
+            aria-label="Добавить выделение из Word"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
+          <span class="permission text-ui-sm" title="Панель читает выделение, документ не изменяет">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M18 11V7a4 4 0 0 0-8 0v5M8 10l-2-1a2 2 0 0 0-2 3l4 7a4 4 0 0 0 4 2h4a5 5 0 0 0 5-5v-4a2 2 0 0 0-3-1Z"
+              />
+            </svg>
+            Только чтение
+          </span>
+          <span class="model text-ui-sm" title="В этом preview модель отключена"
+            >Модель не подключена</span
+          >
+          <button
+            type="submit"
+            id="send"
+            class="send"
+            title="Отправить demo-сообщение"
+            aria-label="Отправить demo-сообщение"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>
+          </button>
+        </div>
+      </form>
+      <p class="footnote text-ui-xs">Ответы демонстрационные. Модель и транспорт отключены.</p>
+    </footer>
+  </body>
+</html>
