@@ -11,6 +11,7 @@ const state = createPreviewState();
 const $ = (id) => document.getElementById(id);
 $("quote").textContent = $("quote").textContent.replace(/\s+/g, " ").trim();
 let officeReady = false;
+let hostName = "Word";
 function render() {
   const thread = state.threads.find((item) => item.id === state.activeId);
   $("count").textContent = String(state.threads.length);
@@ -19,11 +20,17 @@ function render() {
   $("quote").textContent =
     thread?.quote ||
     state.selected ||
-    "Выделите текст в документе слева, затем нажмите «Взять из Word».";
-  $("selection-label").textContent = thread ? "Контекст дискуссии" : "Выделенный фрагмент";
+    (hostName === "Excel"
+      ? "Выберите ячейки, затем нажмите «Взять из Excel»."
+      : "Выделите текст в документе слева, затем нажмите «Взять из Word».");
+  $("selection-label").textContent = thread
+    ? "Контекст дискуссии"
+    : hostName === "Excel"
+      ? "Выбранный диапазон"
+      : "Выделенный фрагмент";
   $("context").textContent = thread
     ? "Фрагмент · независимая дискуссия"
-    : "Документ · локальный макет";
+    : `${hostName === "Excel" ? "Книга" : "Документ"} · локальный макет`;
   $("threads").replaceChildren();
   for (const item of state.threads) {
     const row = document.createElement("div");
@@ -84,6 +91,27 @@ async function readSelection(intent = "add") {
     return;
   }
   $("read").disabled = true;
+  if (hostName === "Excel") {
+    try {
+      const { readExcelSelection } = await import("./excel-selection.js");
+      state.selected = await readExcelSelection(Excel);
+      state.activeId = "document";
+      if (intent === "discuss") {
+        addDiscussion(state, crypto.randomUUID());
+        $("threads").hidden = false;
+      }
+      $("status").textContent = "Адрес, значения и формулы находятся только в этой панели.";
+      render();
+      return true;
+    } catch (error) {
+      $("status").textContent = error.message.includes("1000")
+        ? error.message
+        : "Выберите один смежный диапазон и повторите чтение.";
+      return false;
+    } finally {
+      $("read").disabled = false;
+    }
+  }
   return new Promise((resolve) =>
     Office.context.document.getSelectedDataAsync(Office.CoercionType.Text, (result) => {
       $("read").disabled = false;
@@ -150,7 +178,18 @@ document.querySelectorAll("[data-prompt]").forEach((button) =>
 );
 if (typeof Office !== "undefined") {
   Office.onReady((info) => {
-    officeReady = info.host === Office.HostType.Word;
+    hostName = info.host === Office.HostType.Excel ? "Excel" : "Word";
+    officeReady = info.host === Office.HostType.Word || info.host === Office.HostType.Excel;
+    if (hostName === "Excel") {
+      $("document-tab").textContent = "Книга";
+      $("selection-label").textContent = "Выбранный диапазон";
+      $("quote").textContent = "Выберите ячейки на листе, затем нажмите «Взять из Excel».";
+      $("prompt").placeholder = "Спросите о таблице или формулах…";
+      $("context").textContent = "Книга · локальный макет";
+      document.querySelector(".welcome h1").textContent = "Работаем прямо в книге";
+      document.querySelector(".welcome p").textContent =
+        "Выберите диапазон и обсудите значения, формулы или структуру таблицы.";
+    }
     if (officeReady) {
       const showPane = () => Office.addin.showAsTaskpane();
       const reportError = (message) => {
@@ -173,9 +212,9 @@ if (typeof Office !== "undefined") {
       const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
       document.documentElement.classList.toggle("dark", luminance < 128);
     }
-    $("host").textContent = officeReady ? "Внутри Microsoft Word" : "Preview панели";
+    $("host").textContent = officeReady ? `Внутри Microsoft ${hostName}` : "Preview панели";
     $("status").textContent = officeReady
-      ? "Word подключён. Можно взять выделенный текст."
+      ? `${hostName} подключён. Можно взять выделение.`
       : "Откройте этот макет как надстройку Word.";
     if (officeReady) void fetch("/ready", { method: "POST" }).catch(() => {});
     const intent = new URLSearchParams(location.search).get("action");

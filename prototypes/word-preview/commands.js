@@ -4,7 +4,7 @@ export function selectionCommand(readSelection, showPane, reportError, intent) {
       await readSelection(intent);
       await showPane();
     } catch {
-      reportError("Word не смог открыть обсуждение. Повторите команду.");
+      reportError("Office не смог открыть обсуждение. Повторите команду.");
     } finally {
       event.completed();
     }

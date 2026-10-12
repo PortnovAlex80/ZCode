@@ -8,41 +8,49 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const toolRoot = path.join(process.env.LOCALAPPDATA, "SpecHarness", "word-preview-tools");
 const require = createRequire(path.join(toolRoot, "package.json"));
 const { getHttpsServerOptions } = require("office-addin-dev-certs");
-const tls = await getHttpsServerOptions();
-if (process.argv.includes("--certificates-only")) process.exit(0);
-let wordReady = false;
 const files = new Map([
   ["/", ["index.html", "text/html"]],
   ["/panel.css", ["panel.css", "text/css"]],
   ["/panel.js", ["panel.js", "text/javascript"]],
   ["/model.js", ["model.js", "text/javascript"]],
   ["/commands.js", ["commands.js", "text/javascript"]],
+  ["/excel-selection.js", ["excel-selection.js", "text/javascript"]],
   ["/icon.png", ["../../packages/desktop/build/icon.png", "image/png"]],
 ]);
-createServer(tls, async (request, response) => {
-  response.setHeader("Cache-Control", "no-store");
-  response.setHeader("X-Content-Type-Options", "nosniff");
-  if (request.url === "/ready" && request.method === "POST") {
-    wordReady = true;
-    request.resume();
-    response.writeHead(204).end();
-    return;
-  }
-  if (request.url === "/health" && request.method === "GET") {
-    response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ preview: true, wordReady }));
-    return;
-  }
-  const file = files.get(new URL(request.url, "https://localhost:43481").pathname);
-  if (!file || request.method !== "GET") {
-    response.writeHead(404).end();
-    return;
-  }
-  try {
-    const bytes = await readFile(path.resolve(here, file[0]));
-    response.writeHead(200, { "Content-Type": `${file[1]}; charset=utf-8` });
-    response.end(bytes);
-  } catch {
-    response.writeHead(500).end("Preview asset unavailable");
-  }
-}).listen(43481, "127.0.0.1", () => console.info("Word preview: https://localhost:43481"));
+export async function startPreviewServer({ port = 43481, host = "Word" } = {}) {
+  const tls = await getHttpsServerOptions();
+  let wordReady = false;
+  return createServer(tls, async (request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    if (request.url === "/ready" && request.method === "POST") {
+      wordReady = true;
+      request.resume();
+      response.writeHead(204).end();
+      return;
+    }
+    if (request.url === "/health" && request.method === "GET") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ preview: true, host, wordReady }));
+      return;
+    }
+    const file = files.get(new URL(request.url, "https://localhost:43481").pathname);
+    if (!file || request.method !== "GET") {
+      response.writeHead(404).end();
+      return;
+    }
+    try {
+      let bytes = await readFile(path.resolve(here, file[0]));
+      if (host === "Excel" && file[0] === "index.html")
+        bytes = Buffer.from(bytes.toString().replaceAll("Word", "Excel"));
+      response.writeHead(200, { "Content-Type": `${file[1]}; charset=utf-8` });
+      response.end(bytes);
+    } catch {
+      response.writeHead(500).end("Preview asset unavailable");
+    }
+  }).listen(port, "127.0.0.1", () => console.info(`${host} preview: https://localhost:${port}`));
+}
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv.includes("--certificates-only")) await getHttpsServerOptions();
+  else await startPreviewServer();
+}
