@@ -25,10 +25,10 @@ recheck those items before restoring their accepted status.
 | Field                          | State                                                                                              |
 | ------------------------------ | -------------------------------------------------------------------------------------------------- |
 | Product decision               | One maintained fork build; official installer is fallback; no maintained overlay build             |
-| Current assignment             | Wave 2 in flight (started on the pnpm-migration commit): five exclusive-path tasks — P-02 eager render cost (Impl P2), P-03 invalidation bounds (Impl P3), T-02 surface attribution (Impl T-bind), T-03/T-04 pane parity code halves (Impl T-pane), W-04 close-predicate seam (Impl W4seam) — plus a read-only unmapped-requirements researcher; root integrates |
+| Current assignment             | Wave 2 integrated 2026-10-13: 5/5 exclusive-path tasks reviewed and committed by root; unmapped-requirements triage created T-07..T-10, O-06, O-07, R-11 (parked N-01); no active implementation assignment |
 | Live runtime gate              | CLOSED: user has active ZCODE sessions (agents running in other projects); no launch/stop/profile changes or paid prompts; code/fixture/docs work only |
-| Toolchain decisions            | `pnpm.overrides`/`patchedDependencies` migrated into `pnpm-workspace.yaml` and verified (frozen-lockfile install, lockfile unchanged, react 19.2.7, typecheck green); agents may run `pnpm install --frozen-lockfile` but never lockfile-refreshing commands; node 24.13.1 shell deviation still recorded per evidence |
-| Immediate implementation order | Wave 2 (P-02/P-03 + T code halves + W-04 seam) → root triages the researcher's unmapped requirements into new checklist IDs → D-02/D-03/D-05 fixture halves → O/C fixture-depth halves; live gates only after an explicit fresh user release |
+| Toolchain decisions            | `pnpm.overrides`/`patchedDependencies` live in `pnpm-workspace.yaml` (frozen-lockfile install verified, react 19.2.7, typecheck green); agents may run `pnpm install --frozen-lockfile` but never lockfile-refreshing commands; node 24.13.1 shell deviation recorded per evidence |
+| Immediate implementation order | Next non-live wave: D-02/D-03/D-05 fixture halves; T-07/T-09/T-10 code halves (T-08 is spec-text-only); O/C fixture-depth halves with owned disposable fixtures; R-11 adapter READMEs; live gates only after an explicit fresh user release |
 | Release status                 | Not accepted: GUI, performance, live agent and installation gates remain open                      |
 
 ## Exclusive write assignments
@@ -43,26 +43,15 @@ rows were cleared per the policy above and the evidence lives in the entry below
 wave-report artifact. All reassigned files, including `DOCUMENT-HOSTS.md` and
 `IMPLEMENTATION-PLAN.md`, returned to root ownership at integration.
 
-Wave 2 reassignments (exclusive to the named agent for this wave): `packages/ui/src/root/**`
-and `packages/ui/src/spec-document/SpecDetachedPanelRoot.tsx` go to Impl P2;
-`packages/ui/src/v4/SessionPane.tsx`, `ConversationTimeline.tsx`,
-`conversationTurnRenderUnits.ts`, `timelineRowHeightCache.ts` and
-`packages/ui/src/highspeed/highspeedFooterExpiryClock.ts` go to Impl P3 (+ new sibling
-tests under `packages/ui/src/v4/`); `documentGatewayAgent.ts` + `documentGateway.test.ts`
-return to Impl T-bind; `prototypes/document-host/pane.js`, its non-MCP tests and
-`packages/ui/src/document-host/client.ts` go to Impl T-pane (prototypes re-assigned from
-root for this task); `packages/desktop/src/main/index.ts` +
-`specProjectWindows.test.mjs` go to Impl W4seam. Everything else — shared schemas,
-`packages/shared/**`, manifests/lockfile, this checklist, `AGENTS.md` — stays with root.
+Wave 2 (2026-10-13) is complete: all five exclusive-path assignments were implemented,
+independently reviewed (5/5 passed) and integrated by root; one mid-wave lint gate failure
+was repaired within the W-04 owner's paths before the final green re-run. All reassigned
+paths returned to root ownership at integration. The active checklist now has 56 unique
+items plus parked N-01.
 
 | Item IDs   | Agent / role         | Exclusive paths                       | Depends on         | Reviewer / result                                |
 | ---------- | -------------------- | ------------------------------------- | ------------------ | ------------------------------------------------ |
-| P-02 (code half) | Impl P2 / eager render cost | `packages/ui/src/root/**`, `packages/ui/src/lib/diffsHighlighterEngine.ts` (+ sibling test), `packages/ui/src/spec-document/SpecDetachedPanelRoot.tsx` | Frozen tree; RENDERING-BASELINE.md | Independent reviewer; root accepts |
-| P-03 (code half) | Impl P3 / invalidation bounds | `packages/ui/src/v4/SessionPane.tsx`, `ConversationTimeline.tsx`, `conversationTurnRenderUnits.ts`, `timelineRowHeightCache.ts`, new tests under `packages/ui/src/v4/`, `packages/ui/src/highspeed/highspeedFooterExpiryClock.ts` | Frozen tree; RENDERING-BASELINE.md | Independent reviewer; root accepts |
-| T-02 (code half) | Impl T-bind / surface attribution | `packages/desktop/src/host/documentGatewayAgent.ts`, `packages/desktop/test/documentGateway.test.ts` | Frozen boundary spec (DOCUMENT-HOSTS.md) | Independent reviewer; root accepts |
-| T-03, T-04 (code halves) | Impl T-pane / pane parity | `prototypes/document-host/pane.js`, new/existing non-MCP tests in `prototypes/document-host/`, `packages/ui/src/document-host/client.ts` | Frozen boundary spec; Impl T-bind marker decision | Independent reviewer; root accepts |
-| W-04 (seam half) | Impl W4seam / close predicate | `packages/desktop/src/main/index.ts`, `packages/desktop/test/specProjectWindows.test.mjs` | Impl E fixtures (merged) | Independent reviewer; root accepts |
-| Requirements triage | Researcher (read-only) | none | Wave 2 start | Root integrates new checklist IDs |
+| (next wave) | To be assigned by root before Wave 3 starts | — | Frozen Wave 2 tree | — |
 
 ## A — Canonical fork and architecture
 
@@ -110,6 +99,10 @@ root for this task); `packages/desktop/src/main/index.ts` +
 - [ ] **T-04** Reopen/reconnect restores durable session bindings/history and presentation as specified. Distinguish ephemeral native anchors/proposals; unknown command ID is queried without resending prompt/write. Failures remain visible.
 - [ ] **T-05** Real allowed-origin/pairing/canonical-workspace/capability boundaries and disconnect/cancel/backpressure/session deletion work end to end. Preserve complete preexisting MCP configuration; provider credentials never enter the pane.
 - [ ] **T-06** Trace real pane → native transport → Host/services → CLI `app-server --stdio` → provider/tool → native projection. Verify create-without-input, stream, permission/question, stop, busy admission and recovery with authorized model usage only.
+- [ ] **T-07** Native panes never mount the desktop Root/SessionPane and never spawn eager diff/highlight workers; pane conversations render through the frozen compact surface only. Evidence: ADR 001 pre-live-use expectation; DOCUMENT-HOSTS.md:70 (Wave 2 requirements triage).
+- [ ] **T-08** Bounded-tool policy is stated explicitly in the specs: bounded document tools do not constrain other agent filesystem/MCP tools, and no global single-writer claim is made without a separate policy for them. Evidence: DOCUMENT-HOSTS.md:74; ADR 001:30.
+- [ ] **T-09** Gateway shutdown runs as a bounded phase of Host shutdown: in-flight pane operations drain or fail visibly; no orphaned helper process or listener. Evidence: DOCUMENT-HOSTS.md:68.
+- [ ] **T-10** The pane preserves drafts and focus during streaming, including AskUserQuestion rendered through the shared clean ZCODE answer builder. Evidence: DOCUMENT-HOSTS.md:70.
 
 ## O — Word and Excel
 
@@ -119,6 +112,8 @@ root for this task); `packages/desktop/src/main/index.ts` +
 - [ ] **O-03** Excel GUI menu/selection/thread UX and apply pass for values and invariant formulas; native target identity, dimensions, limits and protection/merged/array/spill refusals hold through real user changes.
 - [ ] **O-04** Both hosts share familiar ZCODE controls/themes while preserving host UX, keyboard/IME/focus/accessibility and narrow layout. Every required screen control has an ID, state/action/capability/error description and verification.
 - [ ] **O-05** Real Word and Excel agent loop reads live unsaved content, proposes a bounded edit, applies once on user action, verifies receipt, refuses stale/switched/closed targets and recovers after pane reconnect.
+- [ ] **O-06** Adapters operate on open documents only through the application API; no adapter path edits an open DOCX/XLSX/DWG by filesystem means (negative constraint across hosts; the AutoCAD analog of C-03's no-LISP rule). Evidence: IMPLEMENTATION-PLAN.md:56; DOCUMENT-HOSTS.md:20.
+- [ ] **O-07** Persisting document identity via Office settings keeps pane-side metadata inside the document consistent with gateway bindings across reopen, verified for both hosts. Evidence: DOCUMENT-HOSTS.md:22.
 
 ## C — AutoCAD
 
@@ -139,6 +134,11 @@ root for this task); `packages/desktop/src/main/index.ts` +
 - [ ] **R-08** Implement one root `Build-Installer.cmd` over upstream Windows x64 electron-builder/NSIS bundling. Full and verified-cache rebuild paths prepare/build/package without launching/installing/publishing; fail clearly and print artifact path, upstream/fork version, source revision and SHA-256. Pin CLI/native assets; distinguish desktop package from Office/CAD setup.
 - [ ] **R-09** Packaged EXE enables accepted fork functionality without source-launcher environment variables. Verify installer/runtime closure, original icons, install/upgrade/uninstall and normal-profile reuse using owned isolated environments. No shipped credentials/dev cache/certificates, and no profile deletion.
 - [ ] **R-10** Define and verify fork-safe update behavior: automatic official update cannot silently replace our changes; reviewed upstream source update/rebuild is documented. Official installer is an explicit fallback; profile-schema/data restoration is separate from application reinstall.
+- [ ] **R-11** Each adapter README (Word/Excel/AutoCAD) lists per-capability status and actual acceptance evidence, kept current with each accepted wave. Evidence: DOCUMENT-HOSTS.md:76.
+
+## N — Parked outside this release
+
+- [ ] **N-01** Compact agent capability/reference map for Word/Excel/AutoCAD (object → operation → limits → minimal example; versioned startup index plus lazy resources). Intentionally outside this checklist's release scope as a separate user request. Evidence: IMPLEMENTATION-PLAN.md:277-282.
 
 ## Evidence updates and handoff
 
@@ -240,3 +240,45 @@ Verification: `pnpm install --frozen-lockfile` completed in 21.7 s with `pnpm-lo
 unchanged (`git diff` empty); installed react/react-dom resolve 19.2.7; root
 `pnpm typecheck` passed. Implementation agents may run frozen installs but never
 lockfile-refreshing commands.
+
+2026-10-13 Wave 2 integration (workflow `dwfrun-137a77af-0e56-45b0-974d-d065549313d6`,
+base `d5ad7ea2`; implementation agents never committed):
+
+```text
+ID(s): P-02, P-03 (code halves), T-02 (code half), T-03, T-04 (code halves), W-04 (seam)
+Revision / affected files: 16 files within Wave 2 exclusive paths (root diff check);
+       stray `nul` artifact removed
+Check command or manual scenario: pnpm exec vitest run over 6 new/changed suites;
+       node --test prototypes/document-host/pane.test.mjs; pnpm typecheck; pnpm lint;
+       pnpm architecture:check --changed
+Result: 32 vitest tests passed (11.5 s, node 24.13.1); pane tests 6/6; final gates
+       typecheck/lint/architecture all exit 0 (one mid-wave lint failure was repaired
+       within the W-04 owner's paths before the final green re-run)
+Independent review: fresh read-only reviewer per task, 5/5 passed
+Remaining limits / runtime gate: P-02/P-03 acceptance needs P-01-agreed thresholds plus
+       live worker-count/memory evidence; T-02/T-03/T-04 and W-04 GUI/model halves stay
+       behind the closed runtime gate — no item claims live acceptance
+```
+
+Per-item: P-02 — diff/highlight is now lazy: no worker spawned and no main-thread shiki
+initialization before the first diff request (`lazyDiffsWorkerPool.ts` new,
+`DiffsWorkerPoolProvider.tsx`, `diffsWorkerBudget.test.ts` extended); baseline harness
+re-run without regression vs RENDERING-BASELINE.md. P-03 — share-surface rebuilds gated
+on an active share surface with the cached navigator builder; idle focus/visibility
+toggles no longer bump `liveNowMs` into an O(rows) render-unit rebuild
+(`SessionPane.tsx`, `highspeedFooterExpiryClock.ts`; tests
+`sessionShareProjectionGate.test.ts`, `highspeedFooterExpiryClockGate.test.ts`); the
+resize remeasurement path is intentionally unchanged (trace-gated). T-02 —
+gateway-binding session marker set/persisted/restored, not forgeable through command
+payloads, document MCP still injected only into gateway-created sessions
+(`documentGateway.test.ts`, 15/15). T-03/T-04 — pane reconnect clears stale
+quotes/selection/contextPending, old-history pagination via the `conversationRowsRangeV4`
+range target, absent-with-reason affordances, visible retraction state (`pane.js`,
+`client.ts`; `pane.test.mjs` 6/6, `client.test.ts`). W-04 — close-view predicate extracted
+as a minimal Main-owned seam with close-view vs explicit-Quit fixture cases
+(`main/index.ts`, `specProjectWindows.test.mjs`); `specDetachedPanels.test.mjs` untouched
+and green.
+
+Requirements triage (root, from the read-only researcher's 8 findings): created T-07,
+T-08, T-09, T-10, O-06, O-07, R-11 and parked N-01 above; the earlier "7 unmapped"
+count is superseded by this verified list.
