@@ -12,11 +12,16 @@ review and acceptance, and keep progress in the repository documents rather than
 
 ## 1. Repository and canonical documents
 
-Work only in `D:\Development\ZCode-Harness`, branch `research/spec-harness`, origin
+Work only in `D:\Development\ZCode-Harness`, branch `dev`, origin
 `https://github.com/PortnovAlex80/ZCode`, upstream `zai-org/ZCode`.
 The inspected baseline is `bfede821`; inspect the actual HEAD and working tree first.
 Never modify `D:\Development\CONSS-ODN-Solver` for this task. Do not reset unrelated
 local changes or infer that old chat claims prove current acceptance.
+
+The fork has exactly two branches: `master` for accepted versions (currently the
+original v3.15.1 base) and `dev` for all active work. Root merges reviewed upstream
+changes into `dev` and fast-forwards `master` only after acceptance. Do not create
+permanent worker branches, rebase published history or force-push.
 
 Read the applicable `AGENTS.md`, nested instructions, and these canonical documents:
 

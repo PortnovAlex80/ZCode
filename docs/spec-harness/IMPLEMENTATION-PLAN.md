@@ -1,7 +1,7 @@
 # One ZCODE fork: implementation and acceptance plan
 
 Updated: 2026-10-12. Inspected implementation baseline: `bfede821` on
-`research/spec-harness`. Repository: `D:\Development\ZCode-Harness`, origin
+`dev`. Repository: `D:\Development\ZCode-Harness`, origin
 `PortnovAlex80/ZCode`, upstream `zai-org/ZCode`.
 
 Release-base verification on 2026-10-12: upstream annotated tag `v3.15.1` resolves to
@@ -29,6 +29,13 @@ upstream components. Do not patch an installed ASAR, inject the old overlay at b
 start time, maintain a second product, or introduce an alternative agent backend.
 `D:\Development\spec-harness` is a read-only reference for requirements and migration
 comparison; its standalone/OpenCode implementation is outside this delivery.
+
+Branch policy: exactly `master` and `dev` in the fork, locally and on origin.
+`master` is GitHub's default branch and holds the original v3.15.1 base until a fork
+version is accepted; `dev` contains all current changes and is the working branch.
+Integrate upstream into `dev` by reviewed merge. Promote accepted `dev` to `master`
+with a fast-forward; do not rewrite published history or create permanent task branches.
+The old `main` / `research/spec-harness` refs were renamed without losing commits.
 
 The official installer is the user's fallback if the fork is unsatisfactory. We do not
 need to maintain a second installed build for that fallback. Protect user data across

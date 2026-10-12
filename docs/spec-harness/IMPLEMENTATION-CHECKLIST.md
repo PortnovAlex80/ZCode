@@ -41,6 +41,9 @@ platform contracts and cross-package wiring stay with root unless explicitly rea
 
 ## A — Canonical fork and architecture
 
+- Branch policy: `master` is the default/accepted-version branch; `dev` contains all current work. Local/origin `main` and `research/spec-harness` were renamed preserving their commits. No extra permanent branches; merge upstream into `dev`, then fast-forward `master` after acceptance.
+- Branch acceptance 2026-10-12: GitHub API rename preserved base `aac47556` and development tip `bec597d5`; `git branch -vv` and `git ls-remote --heads origin` show exactly `master`/`dev`, GitHub default and `origin/HEAD` are `master`. Freshness now resolves the remote default instead of skipping a removed `origin/main`; real `--no-fetch`, syntax, typecheck, lint (67 warnings / 0 errors) and changed architecture checks passed. Active runtime/profile unchanged.
+
 - [x] **A-01** One product, three context lanes, native-host scope and runtime gate are documented. Evidence: implementation plan and team prompt; user clarification 2026-10-12.
 - [x] **A-02** Fork has origin/upstream and migrated source modules. Evidence: baseline `bfede821`; [refactoring record](REFRACTORING.md).
 - [x] **A-03** Build and start are separate; start rejects changed sources/output and does not start Vite. Evidence: `scripts/spec-harness-production.mjs`, `scripts/test/spec-harness-production.test.mjs`.
