@@ -5,6 +5,7 @@ import {
   activeMessages,
   sendPreview,
 } from "./model.js";
+import { selectionCommand } from "./commands.js";
 
 const state = createPreviewState();
 const $ = (id) => document.getElementById(id);
@@ -29,7 +30,13 @@ function render() {
     row.className = `thread${item.id === state.activeId ? " active" : ""}`;
     const button = document.createElement("button");
     button.className = "text-ui-caption";
-    button.textContent = item.quote.replace(/\s+/g, " ");
+    const excerpt = document.createElement("span");
+    excerpt.className = "thread-quote";
+    excerpt.textContent = item.quote.replace(/\s+/g, " ");
+    const details = document.createElement("span");
+    details.className = "thread-details text-ui-sm";
+    details.textContent = `${item.messages.length} реплик · отдельная дискуссия`;
+    button.append(excerpt, details);
     button.addEventListener("click", () => {
       state.activeId = item.id;
       render();
@@ -71,26 +78,34 @@ function render() {
     $("messages").append(welcome);
   }
 }
-async function readSelection() {
+async function readSelection(intent = "add") {
   if (!officeReady) {
     $("status").textContent = "Ожидаем готовность Word…";
     return;
   }
   $("read").disabled = true;
-  Office.context.document.getSelectedDataAsync(Office.CoercionType.Text, (result) => {
-    $("read").disabled = false;
-    if (result.status !== Office.AsyncResultStatus.Succeeded) {
-      $("status").textContent =
-        "Word не разрешил чтение выделения. Попробуйте выделить текст ещё раз.";
-      return;
-    }
-    state.selected = String(result.value ?? "").slice(0, 20000);
-    state.activeId = "document";
-    $("status").textContent = state.selected.trim()
-      ? "Фрагмент находится только в памяти панели."
-      : "Выделите текст в документе и повторите.";
-    render();
-  });
+  return new Promise((resolve) =>
+    Office.context.document.getSelectedDataAsync(Office.CoercionType.Text, (result) => {
+      $("read").disabled = false;
+      if (result.status !== Office.AsyncResultStatus.Succeeded) {
+        $("status").textContent =
+          "Word не разрешил чтение выделения. Попробуйте выделить текст ещё раз.";
+        resolve(false);
+        return;
+      }
+      state.selected = String(result.value ?? "").slice(0, 20000);
+      state.activeId = "document";
+      if (intent === "discuss" && state.selected.trim()) {
+        addDiscussion(state, crypto.randomUUID());
+        $("threads").hidden = false;
+      }
+      $("status").textContent = state.selected.trim()
+        ? "Фрагмент находится только в памяти панели."
+        : "Выделите текст в документе и повторите.";
+      render();
+      resolve(Boolean(state.selected.trim()));
+    }),
+  );
 }
 $("read").addEventListener("click", readSelection);
 $("add-context").addEventListener("click", readSelection);
@@ -136,6 +151,20 @@ document.querySelectorAll("[data-prompt]").forEach((button) =>
 if (typeof Office !== "undefined") {
   Office.onReady((info) => {
     officeReady = info.host === Office.HostType.Word;
+    if (officeReady) {
+      const showPane = () => Office.addin.showAsTaskpane();
+      const reportError = (message) => {
+        $("status").textContent = message;
+      };
+      Office.actions.associate(
+        "addSelection",
+        selectionCommand(readSelection, showPane, reportError, "add"),
+      );
+      Office.actions.associate(
+        "discussSelection",
+        selectionCommand(readSelection, showPane, reportError, "discuss"),
+      );
+    }
     const officeBackground = Office.context.officeTheme?.bodyBackgroundColor;
     if (/^#[0-9a-f]{6}$/i.test(officeBackground ?? "")) {
       const channels = [1, 3, 5].map((offset) =>
@@ -149,5 +178,7 @@ if (typeof Office !== "undefined") {
       ? "Word подключён. Можно взять выделенный текст."
       : "Откройте этот макет как надстройку Word.";
     if (officeReady) void fetch("/ready", { method: "POST" }).catch(() => {});
+    const intent = new URLSearchParams(location.search).get("action");
+    if (officeReady && (intent === "add" || intent === "discuss")) void readSelection(intent);
   });
 }

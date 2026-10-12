@@ -201,6 +201,18 @@ blockquote {
   border-radius: 4px;
   color: var(--subtle);
 }
+.thread-quote {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+}
+.thread-details {
+  display: block;
+  color: var(--subtle);
+  margin: 5px 0 0 10px;
+}
 .messages {
   flex: 1;
   min-height: 60px;

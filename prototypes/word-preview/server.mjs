@@ -16,6 +16,7 @@ const files = new Map([
   ["/panel.css", ["panel.css", "text/css"]],
   ["/panel.js", ["panel.js", "text/javascript"]],
   ["/model.js", ["model.js", "text/javascript"]],
+  ["/commands.js", ["commands.js", "text/javascript"]],
   ["/icon.png", ["../../packages/desktop/build/icon.png", "image/png"]],
 ]);
 createServer(tls, async (request, response) => {
