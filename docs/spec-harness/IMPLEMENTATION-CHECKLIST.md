@@ -25,10 +25,10 @@ recheck those items before restoring their accepted status.
 | Field                          | State                                                                                              |
 | ------------------------------ | -------------------------------------------------------------------------------------------------- |
 | Product decision               | One maintained fork build; official installer is fallback; no maintained overlay build             |
-| Current assignment             | Wave 1 integrated 2026-10-13 on top of `aa8236cf`: 8/8 exclusive-path tasks implemented, independently reviewed and committed by root (see evidence below); no active implementation assignment |
-| Live runtime gate              | CLOSED: user has active ZCODE sessions; no launch/stop/profile changes or paid prompts; fixture/unit/docs work only |
-| Toolchain decisions            | Wave 1 agents used shell node 24.13.1 (`mise.toml` pins 24.14.0, mise not on PATH; patch-level deviation accepted and recorded per evidence); no agent ran lockfile-refreshing installs; root migration of `pnpm.overrides`/`patchedDependencies` into `pnpm-workspace.yaml` is the next root task |
-| Immediate implementation order | Root migrates `pnpm.overrides`/`patchedDependencies` into `pnpm-workspace.yaml` and verifies a frozen-lockfile install → P-02/P-03 code halves (eager worker cost, streaming/hidden-view invalidation; thresholds from RENDERING-BASELINE.md) → T code halves against the frozen boundary (surface attribution, reconnect anchor-clearing, pagination) → W-04 remainder (main/index.ts close-predicate seam; visible-label GUI live-gated) → root triages the 7 unmapped requirements into new checklist IDs; live gates only after an explicit fresh user release |
+| Current assignment             | Wave 2 in flight (started on the pnpm-migration commit): five exclusive-path tasks — P-02 eager render cost (Impl P2), P-03 invalidation bounds (Impl P3), T-02 surface attribution (Impl T-bind), T-03/T-04 pane parity code halves (Impl T-pane), W-04 close-predicate seam (Impl W4seam) — plus a read-only unmapped-requirements researcher; root integrates |
+| Live runtime gate              | CLOSED: user has active ZCODE sessions (agents running in other projects); no launch/stop/profile changes or paid prompts; code/fixture/docs work only |
+| Toolchain decisions            | `pnpm.overrides`/`patchedDependencies` migrated into `pnpm-workspace.yaml` and verified (frozen-lockfile install, lockfile unchanged, react 19.2.7, typecheck green); agents may run `pnpm install --frozen-lockfile` but never lockfile-refreshing commands; node 24.13.1 shell deviation still recorded per evidence |
+| Immediate implementation order | Wave 2 (P-02/P-03 + T code halves + W-04 seam) → root triages the researcher's unmapped requirements into new checklist IDs → D-02/D-03/D-05 fixture halves → O/C fixture-depth halves; live gates only after an explicit fresh user release |
 | Release status                 | Not accepted: GUI, performance, live agent and installation gates remain open                      |
 
 ## Exclusive write assignments
@@ -43,9 +43,26 @@ rows were cleared per the policy above and the evidence lives in the entry below
 wave-report artifact. All reassigned files, including `DOCUMENT-HOSTS.md` and
 `IMPLEMENTATION-PLAN.md`, returned to root ownership at integration.
 
+Wave 2 reassignments (exclusive to the named agent for this wave): `packages/ui/src/root/**`
+and `packages/ui/src/spec-document/SpecDetachedPanelRoot.tsx` go to Impl P2;
+`packages/ui/src/v4/SessionPane.tsx`, `ConversationTimeline.tsx`,
+`conversationTurnRenderUnits.ts`, `timelineRowHeightCache.ts` and
+`packages/ui/src/highspeed/highspeedFooterExpiryClock.ts` go to Impl P3 (+ new sibling
+tests under `packages/ui/src/v4/`); `documentGatewayAgent.ts` + `documentGateway.test.ts`
+return to Impl T-bind; `prototypes/document-host/pane.js`, its non-MCP tests and
+`packages/ui/src/document-host/client.ts` go to Impl T-pane (prototypes re-assigned from
+root for this task); `packages/desktop/src/main/index.ts` +
+`specProjectWindows.test.mjs` go to Impl W4seam. Everything else — shared schemas,
+`packages/shared/**`, manifests/lockfile, this checklist, `AGENTS.md` — stays with root.
+
 | Item IDs   | Agent / role         | Exclusive paths                       | Depends on         | Reviewer / result                                |
 | ---------- | -------------------- | ------------------------------------- | ------------------ | ------------------------------------------------ |
-| pnpm migration | Root / toolchain | `pnpm-workspace.yaml`, `package.json`, `pnpm-lock.yaml` | Frozen Wave 1 tree | Root verifies frozen-lockfile install parity, then typecheck/lint |
+| P-02 (code half) | Impl P2 / eager render cost | `packages/ui/src/root/**`, `packages/ui/src/lib/diffsHighlighterEngine.ts` (+ sibling test), `packages/ui/src/spec-document/SpecDetachedPanelRoot.tsx` | Frozen tree; RENDERING-BASELINE.md | Independent reviewer; root accepts |
+| P-03 (code half) | Impl P3 / invalidation bounds | `packages/ui/src/v4/SessionPane.tsx`, `ConversationTimeline.tsx`, `conversationTurnRenderUnits.ts`, `timelineRowHeightCache.ts`, new tests under `packages/ui/src/v4/`, `packages/ui/src/highspeed/highspeedFooterExpiryClock.ts` | Frozen tree; RENDERING-BASELINE.md | Independent reviewer; root accepts |
+| T-02 (code half) | Impl T-bind / surface attribution | `packages/desktop/src/host/documentGatewayAgent.ts`, `packages/desktop/test/documentGateway.test.ts` | Frozen boundary spec (DOCUMENT-HOSTS.md) | Independent reviewer; root accepts |
+| T-03, T-04 (code halves) | Impl T-pane / pane parity | `prototypes/document-host/pane.js`, new/existing non-MCP tests in `prototypes/document-host/`, `packages/ui/src/document-host/client.ts` | Frozen boundary spec; Impl T-bind marker decision | Independent reviewer; root accepts |
+| W-04 (seam half) | Impl W4seam / close predicate | `packages/desktop/src/main/index.ts`, `packages/desktop/test/specProjectWindows.test.mjs` | Impl E fixtures (merged) | Independent reviewer; root accepts |
+| Requirements triage | Researcher (read-only) | none | Wave 2 start | Root integrates new checklist IDs |
 
 ## A — Canonical fork and architecture
 
@@ -215,3 +232,11 @@ are derived from this freeze. A-04/A-05 accepted `[x]` above. Root additions at
 integration: `vitest.config.ts` unit include lists `specProjectWindows.test.mjs` (the
 W-04-flagged root follow-up); stray `nul` artifact removed. The requirements mapper found
 7 unmapped requirements pending root triage into new checklist IDs.
+
+2026-10-13 pnpm settings migration (root): `pnpm.overrides` (react/react-dom 19.2.7) and
+`patchedDependencies` (5 patches) moved from `package.json` into `pnpm-workspace.yaml`
+with a rationale comment — pnpm 10.33.2 reads them only from the workspace file.
+Verification: `pnpm install --frozen-lockfile` completed in 21.7 s with `pnpm-lock.yaml`
+unchanged (`git diff` empty); installed react/react-dom resolve 19.2.7; root
+`pnpm typecheck` passed. Implementation agents may run frozen installs but never
+lockfile-refreshing commands.
