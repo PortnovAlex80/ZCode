@@ -361,6 +361,8 @@ export type MessageResponseProps = {
   streaming?: boolean;
   streamingAnimationKey?: string;
   workspacePath?: string;
+  /** Optional document directory for relative content URLs; workspace authority is unchanged. */
+  contentBasePath?: string;
   workspaceHomePath?: string;
   workspaceIdentity?: string;
   workspaceRemoteSessionId?: string;
@@ -1299,6 +1301,7 @@ export const messageResponsePropsAreEqual = (
   nextProps.streaming === prevProps.streaming &&
   nextProps.streamingAnimationKey === prevProps.streamingAnimationKey &&
   nextProps.workspacePath === prevProps.workspacePath &&
+  nextProps.contentBasePath === prevProps.contentBasePath &&
   nextProps.workspaceHomePath === prevProps.workspaceHomePath &&
   nextProps.workspaceIdentity === prevProps.workspaceIdentity &&
   nextProps.workspaceRemoteSessionId === prevProps.workspaceRemoteSessionId &&
@@ -1321,6 +1324,7 @@ export const MessageResponse = memo(
     onOpenExternalUrl,
     renderZCodeFileCitations = false,
     workspacePath,
+    contentBasePath,
     workspaceHomePath,
     workspaceIdentity,
     workspaceRemoteSessionId,
@@ -1435,6 +1439,7 @@ export const MessageResponse = memo(
           const resolvedHref =
             typeof href === "string" ? stripBalancedAssistantPathQuotes(href) : "";
           const fileLink = resolveMarkdownFileLink(workspacePath, resolvedHref, {
+            contentBasePath,
             homePath: workspaceHomePath,
           });
 
@@ -1502,6 +1507,7 @@ export const MessageResponse = memo(
           <MarkdownImage
             {...imageProps}
             workspacePath={workspacePath}
+            contentBasePath={contentBasePath}
             workspaceHomePath={workspaceHomePath}
             sessionId={sessionId}
             readAttachment={readAttachment}
@@ -1598,6 +1604,7 @@ export const MessageResponse = memo(
         forceCodeWrap,
         onOpenFileLink,
         onOpenCodeViewer,
+        contentBasePath,
         onOpenExternalUrl,
         readAttachment,
         renderStreaming,

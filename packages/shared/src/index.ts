@@ -359,3 +359,5 @@ export {
   isRequestSecurityFailure,
 } from "./request-security-edition/policy.js";
 export * from "./request-security-edition/verification-policy.js";
+
+export type { DetachedPanelTarget, PanelTransfer, SpecWindowBridge } from "./specWindows.js";

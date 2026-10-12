@@ -4,6 +4,7 @@ import {
   setRequestSecurityReporter,
 } from "@/request-security-edition/index.js";
 /* eslint-disable max-lines -- Root 当前集中编排启动和 workspace shell wiring，先保持入口收口避免跨层状态拆散。 */
+import { useSpecProjectCatalog } from "@/spec-document/useSpecProjectCatalog.js";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LucideProvider, RefreshCw } from "lucide-react";
 import {
@@ -288,6 +289,7 @@ function RootInner({
   isMacDesktop,
   isWindowsDesktop,
   restoreSession = true,
+  persistSession = restoreSession,
   supportsSettings = true,
   allowOpenWorkspace = true,
   preferDirectoryBrowser,
@@ -794,11 +796,15 @@ function RootInner({
     // 首次安装未连接账号时，provider 登录入口判定会晚于 workspace 恢复。
     // 如果这里先恢复 workspace，ChatView mount 会触发草稿 session 预热并在登录页背后报错。
     restoreSession: restoreSession && canRestoreWorkspaceSession,
-    persistSession: restoreSession && canRestoreWorkspaceSession,
+    persistSession: persistSession && canRestoreWorkspaceSession,
     restorePersistedSession,
     buildPersistPatch: buildPersistedTabPatch,
   });
 
+  useSpecProjectCatalog(
+    tabStoreApi,
+    Boolean(isDesktop && hasCompletedFullRestore && platform.openProjectWindow),
+  );
   useEffect(() => {
     if (!isDesktop || !hasCompletedFullRestore) return;
     // Bug 原因：active-first 的单 workspace 只是 Renderer 首屏投影，若立刻对外同步，

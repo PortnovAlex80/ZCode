@@ -3,6 +3,7 @@ import type { MarkdownSelectionTarget } from "@/lib/conversationSelectionReferen
 import {
   Fragment,
   type CSSProperties,
+  type ReactNode,
   type SyntheticEvent,
   useCallback,
   useEffect,
@@ -29,10 +30,7 @@ import { TID_PREVIEW_PANE } from "@zcode/shared";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { usePptxFileWatch } from "@/hooks/usePptxFileWatch.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import {
-  usePdfViewerLabels,
-  usePptxViewerLabels,
-} from "@/hooks/usePreviewViewerLabels.js";
+import { usePdfViewerLabels, usePptxViewerLabels } from "@/hooks/usePreviewViewerLabels.js";
 import {
   FILE_VIEWER_MAX_TEXT_BYTES,
   createDiffSourceFilePreviewSource,
@@ -485,16 +483,32 @@ export function PreviewPane({
   workspacePath,
   onOpenBrowserUrl,
   onOpenCodeViewer,
+  documentContentBasePath,
   renderHeavyContent = true,
   markdownSelectionTarget,
+  sourceEditor,
+  documentActions,
+  onDocumentComment,
+  onDiscussFragment,
+  preserveDocumentViewState = false,
 }: {
   source: CodeViewerSource | null;
   onClose: () => void;
   workspacePath?: string;
   onOpenBrowserUrl?: (url: string) => void;
   onOpenCodeViewer?: (source: CodeViewerSource) => void;
+  documentContentBasePath?: string;
   renderHeavyContent?: boolean;
   markdownSelectionTarget?: MarkdownSelectionTarget;
+  sourceEditor?: ReactNode;
+  documentActions?: ReactNode;
+  onDocumentComment?: (params: {
+    range: CodeCommentRange;
+    selectedText: string;
+    comment: string;
+  }) => void;
+  onDiscussFragment?: (quote: string) => void;
+  preserveDocumentViewState?: boolean;
 }) {
   const platform = usePlatform();
   const { intl } = useZCodeIntl();
@@ -563,6 +577,7 @@ export function PreviewPane({
     scrollTop: 0,
   });
   const previousRenderHeavyContentRef = useRef(renderHeavyContent);
+  const preservedViewSourceRef = useRef<string | null>(null);
   const resolvedTheme = resolveTheme(theme);
   const codeTheme =
     resolvedTheme === "dark" ? codePreviewSettings.darkTheme : codePreviewSettings.lightTheme;
@@ -695,6 +710,14 @@ export function PreviewPane({
       return;
     }
 
+    const viewIdentity = JSON.stringify([
+      source.type,
+      source.path,
+      source.title,
+      source.workspaceIdentity,
+    ]);
+    if (preserveDocumentViewState && preservedViewSourceRef.current === viewIdentity) return;
+    preservedViewSourceRef.current = viewIdentity;
     setMarkdownViewMode(
       source.type !== "code-review" && (isMarkdownSource(source) || isMarkdownFilePath(source.path))
         ? "preview"
@@ -706,7 +729,11 @@ export function PreviewPane({
         : "code",
     );
     setWrapLongLinesOverride(null);
-  }, [source]);
+  }, [source, preserveDocumentViewState]);
+
+  useEffect(() => {
+    if (sourceEditor) setMarkdownViewMode("code");
+  }, [Boolean(sourceEditor)]);
 
   const handleSubmitCodeComment = useCallback(
     (params: { range: CodeCommentRange; selectedText: string; comment: string }) => {
@@ -1569,6 +1596,7 @@ export function PreviewPane({
         </div>
 
         <div className="flex shrink-0 pr-1.5 items-center gap-2">
+          {documentActions}
           {canOpenDiffFilePreview ? (
             <Button
               type="button"
@@ -1732,6 +1760,9 @@ export function PreviewPane({
       <div className="min-h-0 flex-1">
         {renderHeavyContent ? (
           <PreviewPaneContent
+            sourceEditor={sourceEditor}
+            onDiscussCodeComment={onDocumentComment}
+            onDiscussFragment={onDiscussFragment}
             source={pptxSource ?? imageSource ?? pdfSource ?? mediaSource ?? source}
             filePreview={filePreview}
             fileTooLarge={fileTooLarge}
@@ -1779,6 +1810,8 @@ export function PreviewPane({
             theme={theme}
             workspacePath={sourceWorkspacePath}
             onOpenBrowserUrl={onOpenBrowserUrl}
+            onOpenCodeViewer={onOpenCodeViewer}
+            documentContentBasePath={documentContentBasePath}
             markdownSelectionTarget={
               markdownSelectionTarget &&
               (source.workspaceIdentity?.trim() || sourceWorkspacePath) ===

@@ -1,9 +1,6 @@
 import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
 
-export type ConversationTurnNavigatorAssistantPreviewKind =
-  | "empty"
-  | "running"
-  | "text";
+export type ConversationTurnNavigatorAssistantPreviewKind = "empty" | "running" | "text";
 
 export interface ConversationTurnNavigatorItem {
   key: string;
@@ -176,26 +173,20 @@ export function buildConversationTurnNavigatorItems(
   const resolvedOptions: Required<BuildConversationTurnNavigatorItemsOptions> = {
     ...options,
     maxPreviewChars: options.maxPreviewChars ?? DEFAULT_MAX_PREVIEW_CHARS,
-    maxPreviewParagraphs:
-      options.maxPreviewParagraphs ?? DEFAULT_MAX_PREVIEW_PARAGRAPHS,
+    maxPreviewParagraphs: options.maxPreviewParagraphs ?? DEFAULT_MAX_PREVIEW_PARAGRAPHS,
   };
 
   return units.flatMap((unit, unitIndex) => {
     // provider/store 的物理 role=user 还包含 background/goal/mailbox
     // 等系统上下文；目录代表用户主动 query，只能使用投影明确裁决的 realUser。
-    const realUserInputs = unit.visibleUserInputs.filter(
-      (row) => row.origin === "realUser",
-    );
+    const realUserInputs = unit.visibleUserInputs.filter((row) => row.origin === "realUser");
     if (unit.timelineOnly || realUserInputs.length === 0) {
       return [];
     }
 
     // 导航项按 query 拆分，但 hover 的 assistant 摘要保持旧产品语义：
     // 取所属 product turn 的文本结果，不在 renderer 猜测 guide 回复分段。
-    const { assistantPreview, assistantPreviewKind } = buildAssistantPreview(
-      unit,
-      resolvedOptions,
-    );
+    const { assistantPreview, assistantPreviewKind } = buildAssistantPreview(unit, resolvedOptions);
     return realUserInputs.map((row, queryIndex) => ({
       // 不能以 product turn 为目录粒度，并把同一 turn 的 steer query
       // 全部拼进一个 preview。目录真正导航的是用户可见 query，必须用稳定 row
@@ -219,6 +210,66 @@ export function buildConversationTurnNavigatorItems(
   });
 }
 
+/** 缓存只属于当前挂载的导航；移除的轮次必须释放正文与查询。 */
+export function createCachedConversationTurnNavigatorItemsBuilder() {
+  interface CachedUnit {
+    turnId: string;
+    isRunning: boolean;
+    timelineOnly: boolean;
+    userRows: ConversationTurnRenderUnit["visibleUserInputs"];
+    assistantRows: ConversationTurnRenderUnit["assistantTextRows"];
+    items: ConversationTurnNavigatorItem[];
+  }
+  let cache = new Map<string, CachedUnit>();
+  let previousOptions: BuildConversationTurnNavigatorItemsOptions | undefined;
+  return (
+    units: readonly ConversationTurnRenderUnit[],
+    options: BuildConversationTurnNavigatorItemsOptions,
+  ): ConversationTurnNavigatorItem[] => {
+    if (
+      !previousOptions ||
+      previousOptions.assistantEmptyPreview !== options.assistantEmptyPreview ||
+      previousOptions.assistantRunningPreview !== options.assistantRunningPreview ||
+      previousOptions.userFallbackPreview !== options.userFallbackPreview ||
+      previousOptions.maxPreviewChars !== options.maxPreviewChars ||
+      previousOptions.maxPreviewParagraphs !== options.maxPreviewParagraphs
+    ) {
+      cache.clear();
+      previousOptions = { ...options };
+    }
+    const nextCache = new Map<string, CachedUnit>();
+    const items: ConversationTurnNavigatorItem[] = [];
+    units.forEach((unit, unitIndex) => {
+      const candidate = cache.get(unit.key);
+      const unchanged =
+        candidate &&
+        candidate.turnId === unit.turnId &&
+        candidate.isRunning === unit.isRunning &&
+        candidate.timelineOnly === unit.timelineOnly &&
+        candidate.userRows.length === unit.visibleUserInputs.length &&
+        candidate.assistantRows.length === unit.assistantTextRows.length &&
+        unit.visibleUserInputs.every((row, index) => row === candidate.userRows[index]) &&
+        unit.assistantTextRows.every((row, index) => row === candidate.assistantRows[index]);
+      const entry = unchanged
+        ? candidate
+        : {
+            turnId: unit.turnId,
+            isRunning: unit.isRunning,
+            timelineOnly: unit.timelineOnly,
+            userRows: unit.visibleUserInputs.slice(),
+            assistantRows: unit.assistantTextRows.slice(),
+            items: buildConversationTurnNavigatorItems([unit], options),
+          };
+      nextCache.set(unit.key, entry);
+      for (const item of entry.items) {
+        items.push(item.unitIndex === unitIndex ? item : { ...item, unitIndex });
+      }
+    });
+    cache = nextCache;
+    return items;
+  };
+}
+
 function resolveFiniteNonNegative(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
@@ -235,8 +286,7 @@ export function resolveConversationTurnNavigatorActiveUnitIndex({
 
   const itemByUnitIndex = new Map(items.map((item) => [item.unitIndex, item]));
   const viewportStart = resolveFiniteNonNegative(scrollOffsetPx);
-  const viewportEnd =
-    viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
+  const viewportEnd = viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
 
   let activeUnitIndex: number | undefined;
   let activeDistance = Number.POSITIVE_INFINITY;
@@ -250,8 +300,7 @@ export function resolveConversationTurnNavigatorActiveUnitIndex({
     if (rowEnd < viewportStart || rowStart > viewportEnd) {
       continue;
     }
-    const distanceToViewportStart =
-      rowStart <= viewportStart ? 0 : rowStart - viewportStart;
+    const distanceToViewportStart = rowStart <= viewportStart ? 0 : rowStart - viewportStart;
     if (distanceToViewportStart < activeDistance) {
       activeUnitIndex = item.unitIndex;
       activeDistance = distanceToViewportStart;
@@ -286,8 +335,7 @@ export function resolveConversationTurnNavigatorActiveQueryRowId({
   if (positions.length === 0) return undefined;
 
   const viewportStart = resolveFiniteNonNegative(scrollOffsetPx);
-  const viewportEnd =
-    viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
+  const viewportEnd = viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
   const normalized = positions
     .map((position) => {
       const start = resolveFiniteNonNegative(position.start);
@@ -304,8 +352,7 @@ export function resolveConversationTurnNavigatorActiveQueryRowId({
   );
   if (visible.length > 0) {
     return visible.reduce((nearest, candidate) =>
-      Math.abs(candidate.start - viewportStart) <
-      Math.abs(nearest.start - viewportStart)
+      Math.abs(candidate.start - viewportStart) < Math.abs(nearest.start - viewportStart)
         ? candidate
         : nearest,
     ).rowId;

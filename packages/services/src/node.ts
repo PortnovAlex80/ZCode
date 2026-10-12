@@ -356,6 +356,8 @@ import { ISettingsSyncService } from "./settings-sync/settingsSync.js";
 import { IFeedbackService } from "./feedback/feedback.js";
 import { IPromptAttachmentTransferService } from "./prompt-attachment-transfer/promptAttachmentTransfer.js";
 import { createFileService } from "./file/fileService.js";
+import { ISpecDocumentService } from "./spec-document/specDocument.js";
+import { createSpecDocumentService } from "./spec-document/specDocumentService.js";
 import { createMediaPreviewService } from "./media-preview/mediaPreview.js";
 import type { WorkspaceFileSearchFilter } from "./file/workspaceFileMentionFilter.js";
 import { createGitService } from "./git/gitService.js";
@@ -2376,6 +2378,12 @@ export function createLocalServices(options: {
       }),
     )
     .register(IFileService, fileService)
+    .register(
+      ISpecDocumentService,
+      createSpecDocumentService({
+        desktopLocal: options?.serviceAuthorityMode === "desktop-local",
+      }),
+    )
     .register(IMediaPreviewService, mediaPreviewService)
     .register(
       ICloudContentService,

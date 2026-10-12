@@ -32,6 +32,7 @@ interface CodeContentProps {
     selectedText: string;
     comment: string;
   }) => void;
+  onDiscussCodeComment?: CodeContentProps["onSubmitCodeComment"];
   onDeleteCodeComment?: (commentId: string) => void;
   onScroll?: UIEventHandler<HTMLDivElement>;
   scrollContainerRef?: Ref<HTMLDivElement>;
@@ -56,6 +57,7 @@ export function CodeContent({
   enableGutterUtility = false,
   labels,
   onSubmitCodeComment,
+  onDiscussCodeComment,
   onDeleteCodeComment,
   onScroll,
   scrollContainerRef,
@@ -96,6 +98,7 @@ export function CodeContent({
       enableGutterUtility={enableGutterUtility}
       labels={labels}
       onSubmitCodeComment={onSubmitCodeComment}
+      onDiscussCodeComment={onDiscussCodeComment}
       onDeleteCodeComment={onDeleteCodeComment}
       onScroll={onScroll}
       scrollContainerRef={scrollContainerRef}

@@ -32,6 +32,35 @@ export const TASK_SIDE_PANE_MEMORY_MAX_ENTRIES = 50;
 const DRAFT_SIDE_PANE_OWNER_KEY = "__draft__";
 
 const taskSidePaneMemory = new Map<string, TaskSidePaneMemoryState>();
+const durableKey = (key: string) => "spec-harness:side-pane:v1:" + key;
+function readDurableMemory(key: string): TaskSidePaneMemoryState | undefined {
+  try {
+    const value = JSON.parse(localStorage.getItem(durableKey(key)) || "null");
+    if (value?.version !== 1 || !Array.isArray(value.state?.sidePaneState?.tabs)) return;
+    const tabs = value.state.sidePaneState.tabs
+      .filter(
+        (tab: any) =>
+          tab?.type === "code-viewer" &&
+          typeof tab.id === "string" &&
+          tab.source?.specDocument === true &&
+          typeof tab.source.path === "string",
+      )
+      .slice(0, 12);
+    if (!tabs.length) return;
+    return {
+      ...DEFAULT_TASK_SIDE_PANE_MEMORY_STATE,
+      isSidePaneCollapsed: false,
+      sidePaneState: {
+        tabs,
+        activeTabId: tabs.some((tab: any) => tab.id === value.state.sidePaneState.activeTabId)
+          ? value.state.sidePaneState.activeTabId
+          : tabs[0].id,
+      },
+    };
+  } catch {
+    return;
+  }
+}
 
 function touchTaskSidePaneMemoryEntry(
   key: string,
@@ -77,7 +106,7 @@ export function readTaskSidePaneMemoryState(key: string | null): TaskSidePaneMem
     return DEFAULT_TASK_SIDE_PANE_MEMORY_STATE;
   }
 
-  const state = taskSidePaneMemory.get(key);
+  const state = taskSidePaneMemory.get(key) ?? readDurableMemory(key);
   if (!state) {
     return DEFAULT_TASK_SIDE_PANE_MEMORY_STATE;
   }
@@ -117,6 +146,27 @@ export function saveTaskSidePaneMemoryState(
   };
   nextState.sidePaneState = normalizeWorkspaceSidePaneState(nextState.sidePaneState);
   touchTaskSidePaneMemoryEntry(key, nextState);
+  try {
+    // Persist document tab descriptors only; Git owns diffs and runtime owns conversations.
+    const tabs =
+      nextState.sidePaneState?.tabs.filter(
+        (tab) =>
+          tab.type === "code-viewer" && tab.source.type === "file" && tab.source.specDocument,
+      ) || [];
+    if (tabs.length)
+      localStorage.setItem(
+        durableKey(key),
+        JSON.stringify({
+          version: 1,
+          state: {
+            sidePaneState: { tabs, activeTabId: nextState.sidePaneState?.activeTabId },
+          },
+        }),
+      );
+    else localStorage.removeItem(durableKey(key));
+  } catch {
+    /* Browser storage denial must not break native navigation. */
+  }
   pruneTaskSidePaneMemory();
 }
 

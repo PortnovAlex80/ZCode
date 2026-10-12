@@ -8,6 +8,8 @@ interface ParsedMarkdownFileLink {
 }
 
 export interface MarkdownFileLinkResolveOptions {
+  /** Document-only URL base. Resolve within the actual workspace authority. */
+  contentBasePath?: string;
   /** 当前 workspace Host 报告的用户 Home；Renderer 不自行读取本机 Home。 */
   homePath?: string;
 }
@@ -233,6 +235,30 @@ export function resolveMarkdownFileLink(
   // 只看到前导 `/` 就当成 workspace 子路径会让绝对路径被再拼一次 workspace 前缀，
   // 同时 `:30` 也会混进文件名里。这里先拆掉可选行号，再把“相对路径”和“绝对路径”分开解析。
   const parsedTarget = parseMarkdownFileLinkTarget(href);
+
+  if (
+    workspacePath &&
+    options.contentBasePath &&
+    parsedTarget.path &&
+    !parsedTarget.path.startsWith("#") &&
+    !isAbsoluteFilePath(parsedTarget.path) &&
+    !/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(parsedTarget.path) &&
+    !parsedTarget.path.startsWith("~")
+  ) {
+    const root = workspacePath.replaceAll("\\", "/").replace(/\/$/, "");
+    const base = options.contentBasePath.replaceAll("\\", "/").replace(/\/$/, "");
+    if (
+      base.toLowerCase() !== root.toLowerCase() &&
+      !base.toLowerCase().startsWith(root.toLowerCase() + "/")
+    )
+      return null;
+    const relativeBase = base.slice(root.length).replace(/^\//, "");
+    const containedPath = resolveContainedWorkspaceRelativePath(
+      workspacePath,
+      [relativeBase, parsedTarget.path].filter(Boolean).join("/"),
+    );
+    return containedPath ? { ...parsedTarget, path: containedPath } : null;
+  }
 
   if (isUnsupportedNamedHomePath(parsedTarget.path)) {
     return null;

@@ -4,6 +4,7 @@ import type { MarkdownSelectionTarget } from "@/lib/conversationSelectionReferen
 import { MessageResponse } from "@/components/ai-elements/message.js";
 import type { CodePreviewSettings } from "@/lib/codePreviewSettings.js";
 import type { Theme } from "@/useTheme.js";
+import type { CodeViewerSource } from "@/lib/codeViewer.js";
 
 interface MarkdownPreviewContentProps {
   content: string;
@@ -11,7 +12,12 @@ interface MarkdownPreviewContentProps {
   sourceTitle?: string;
   sourcePath?: string;
   selectionTarget?: MarkdownSelectionTarget;
+  onDiscussFragment?: (quote: string) => void;
   workspacePath?: string;
+  contentBasePath?: string;
+  workspaceIdentity?: string;
+  workspaceRemoteSessionId?: string;
+  onOpenCodeViewer?: (source: CodeViewerSource) => void;
   /** 应用主题（store 耦合剥离）：透传给 markdown 渲染，缺省按 "system" 兜底。 */
   theme?: Theme;
   /** 代码预览设置（store 耦合剥离）：透传给 markdown 渲染，需保持引用稳定。 */
@@ -25,7 +31,12 @@ export function MarkdownPreviewContent({
   sourceTitle,
   sourcePath,
   selectionTarget,
+  onDiscussFragment,
   workspacePath,
+  contentBasePath,
+  workspaceIdentity,
+  workspaceRemoteSessionId,
+  onOpenCodeViewer,
   theme,
   codePreviewSettings,
   onOpenBrowserUrl,
@@ -49,12 +60,17 @@ export function MarkdownPreviewContent({
           sourceTitle={sourceTitle ?? sourceKey}
           sourcePath={sourcePath}
           target={selectionTarget}
+          onDiscussFragment={onDiscussFragment}
         />
       ) : null}
       <div className="min-h-full bg-background p-4">
         <MessageResponse
           className="min-w-0 break-words"
           workspacePath={workspacePath}
+          contentBasePath={contentBasePath}
+          workspaceIdentity={workspaceIdentity}
+          workspaceRemoteSessionId={workspaceRemoteSessionId}
+          onOpenCodeViewer={onOpenCodeViewer}
           theme={theme}
           codePreviewSettings={codePreviewSettings}
           onOpenExternalUrl={onOpenBrowserUrl}

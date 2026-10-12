@@ -56,6 +56,7 @@ export {
 
 // File service — IFileService is both a type (interface) and value (descriptor)
 export { IFileService } from "./file/file.js";
+export { ISpecDocumentService, type SpecDocumentSnapshot } from "./spec-document/specDocument.js";
 export { IMediaPreviewService } from "./media-preview/mediaPreview.js";
 export { ICloudContentService } from "#src/cloud-content/cloudContent.js";
 export { IMarketingTouchService } from "#src/marketing-touch/marketingTouch.js";

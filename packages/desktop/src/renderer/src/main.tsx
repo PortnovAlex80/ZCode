@@ -1,12 +1,10 @@
 import { DatabaseStartupAdmission } from "./databaseStartupAdmission.js";
 import { initializeDesktopLocalTtft } from "./localTtftBootstrap.js";
 import { createRoot } from "react-dom/client";
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import {
   AppErrorBoundary,
-  Root,
   GlobalDatabaseStartupLoading,
-  UpdateStatusWindowRoot,
   ZCodeIntlProvider,
   registerBaseWorkspaceServices,
   registerRemoteWorkspaceSession,
@@ -15,7 +13,7 @@ import {
   playTaskNotificationSound,
   setStreamClientId,
   setReactErrorArmsReporter,
-} from "@zcode/ui";
+} from "@zcode/ui/desktop-bootstrap";
 import "@zcode/ui/styles.css";
 import { connectViaMessagePort, createMessagePortServiceConnection } from "@zcode/client";
 import {
@@ -43,6 +41,14 @@ import {
   parseRemoteWorkspaceServicePortMessage,
   type RemoteWorkspaceServicePortRegistration,
 } from "./remoteWorkspaceServicePortBridge.js";
+
+const Root = lazy(() => import("@zcode/ui/root").then((module) => ({ default: module.Root })));
+const SpecDetachedPanelRoot = lazy(() =>
+  import("@zcode/ui/detached-panel").then((module) => ({ default: module.SpecDetachedPanelRoot })),
+);
+const UpdateStatusWindowRoot = lazy(() =>
+  import("@zcode/ui/update-status").then((module) => ({ default: module.UpdateStatusWindowRoot })),
+);
 
 type DesktopRendererImportMetaEnv = {
   VITE_ZCODE_E2E_STORE_BRIDGE?: string;
@@ -131,6 +137,7 @@ function readStringFlag(name: string): string | undefined {
 }
 
 const restoreSession = readBooleanFlag("restoreSession", true);
+const persistSession = readBooleanFlag("persistSession", true);
 const supportsSettings = readBooleanFlag("supportsSettings", true);
 const initialWorkspaceAbsPath = readStringFlag("initialWorkspacePath");
 const initialWorkspacePurpose = readStringFlag("initialWorkspacePurpose");
@@ -302,6 +309,11 @@ function handleServicePortMessage(event: MessageEvent): void {
     return;
   const port = event.ports[0];
   if (!port) return;
+  if (windowKind === "spec-detached") {
+    if (firstStartupStateTimer) clearTimeout(firstStartupStateTimer);
+    initializeBusinessRoot(port);
+    return;
+  }
   databaseStartupAdmission.acceptPort({ databaseStartupId: event.data.databaseStartupId }, port);
   enterAppIfPrepared();
 }
@@ -337,21 +349,28 @@ function initializeBusinessRoot(port: MessagePort): void {
         resolveSystemLocale={desktopPlatform.getSystemLocale}
       >
         <StartupReadyNotifier />
-        <Root
-          services={services}
-          platform={desktopPlatform}
-          isDesktop
-          assistantCodeCommentCardsEnabled
-          isMacDesktop={isMacDesktop}
-          isWindowsDesktop={isWindowsDesktop}
-          restoreSession={restoreSession}
-          supportsSettings={supportsSettings}
-          initialWorkspaceAbsPath={initialWorkspaceAbsPath}
-          initialWorkspacePurpose={
-            initialWorkspacePurpose === "conversation" ? "conversation" : "project"
-          }
-          unavailableWorkspacePath={unavailableWorkspacePath}
-        />
+        <Suspense fallback={<div role="status">Loading workspace?</div>}>
+          {windowKind === "spec-detached" ? (
+            <SpecDetachedPanelRoot services={services} platform={desktopPlatform} />
+          ) : (
+            <Root
+              services={services}
+              platform={desktopPlatform}
+              isDesktop
+              assistantCodeCommentCardsEnabled
+              isMacDesktop={isMacDesktop}
+              isWindowsDesktop={isWindowsDesktop}
+              restoreSession={restoreSession}
+              persistSession={persistSession}
+              supportsSettings={supportsSettings}
+              initialWorkspaceAbsPath={initialWorkspaceAbsPath}
+              initialWorkspacePurpose={
+                initialWorkspacePurpose === "conversation" ? "conversation" : "project"
+              }
+              unavailableWorkspacePath={unavailableWorkspacePath}
+            />
+          )}
+        </Suspense>
       </ZCodeIntlProvider>
     </AppErrorBoundary>,
   );
@@ -367,11 +386,13 @@ if (windowKind === "update-status") {
   createRoot(document.getElementById("root")!).render(
     <AppErrorBoundary isDesktop isMacDesktop={isMacDesktop} isWindowsDesktop={isWindowsDesktop}>
       <StartupReadyNotifier />
-      <UpdateStatusWindowRoot
-        platform={desktopPlatform}
-        initialLocale={initialLocale}
-        onRequestClose={() => window.close()}
-      />
+      <Suspense fallback={<div role="status">Loading update status?</div>}>
+        <UpdateStatusWindowRoot
+          platform={desktopPlatform}
+          initialLocale={initialLocale}
+          onRequestClose={() => window.close()}
+        />
+      </Suspense>
     </AppErrorBoundary>,
   );
 }

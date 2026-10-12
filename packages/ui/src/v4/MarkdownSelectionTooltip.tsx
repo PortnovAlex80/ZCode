@@ -23,6 +23,7 @@ export function MarkdownSelectionTooltip({
   sourcePath,
   target,
   scopeKey,
+  onDiscussFragment,
 }: {
   scopeKey: object;
   rootRef: RefObject<HTMLDivElement | null>;
@@ -30,6 +31,7 @@ export function MarkdownSelectionTooltip({
   sourceTitle: string;
   sourcePath?: string;
   target: MarkdownSelectionTarget;
+  onDiscussFragment?: (quote: string) => void;
 }) {
   const { intl } = useZCodeIntl();
   const inspect = useCallback(() => {
@@ -92,6 +94,14 @@ export function MarkdownSelectionTooltip({
                   ? "chat.selections.previewSideBlocked"
                   : "chat.selections.previewSideUnavailable",
             })
+      }
+      onDiscussFragment={
+        onDiscussFragment
+          ? () => {
+              onDiscussFragment(state.text);
+              close();
+            }
+          : undefined
       }
       onAddToCurrentTask={() => {
         dispatchConversationSelectionAdd({

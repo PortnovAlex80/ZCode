@@ -6,7 +6,7 @@ import {
   type IPlatformService,
   type RendererActionTraceConfigV1,
 } from "@zcode/shared";
-import { RendererUserActionTelemetry, setUserActionTelemetry } from "@zcode/ui";
+import { RendererUserActionTelemetry, setUserActionTelemetry } from "@zcode/ui/desktop-bootstrap";
 
 export function initializeDesktopUserActionTrace(options: {
   platform: IPlatformService;

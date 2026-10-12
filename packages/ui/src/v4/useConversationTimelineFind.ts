@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  ConversationRow,
-  SessionPhase,
-} from "@zcode/shared/zcode-protocol-v4";
+import type { ConversationRow, SessionPhase } from "@zcode/shared/zcode-protocol-v4";
 import {
   applyConversationFindHighlights,
   applySearchResultHighlight,
@@ -48,7 +45,11 @@ export interface UseConversationTimelineFindOptions {
 }
 
 function normalizeSearchResultSnippet(text: string): string {
-  return text.replace(/^\.{3}/, "").replace(/\.{3}$/, "").replace(/\s+/g, " ").trim();
+  return text
+    .replace(/^\.{3}/, "")
+    .replace(/\.{3}$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function sourceTextContainsSnippet(sourceText: string, snippet: string): boolean {
@@ -56,9 +57,7 @@ function sourceTextContainsSnippet(sourceText: string, snippet: string): boolean
   if (!normalizedSnippet) {
     return false;
   }
-  return normalizeSearchResultSnippet(sourceText)
-    .toLocaleLowerCase()
-    .includes(normalizedSnippet);
+  return normalizeSearchResultSnippet(sourceText).toLocaleLowerCase().includes(normalizedSnippet);
 }
 
 export function useConversationTimelineFind({
@@ -81,44 +80,69 @@ export function useConversationTimelineFind({
   const codeCommentCardsEnabled = useAssistantCodeCommentFeatureEnabled();
   const findStable = sessionPhase !== "running" && sessionPhase !== "prewarming";
   const unitFindCacheRef = useRef(
-    new Map<string, { source: ConversationFindMatch[]; loadedRowCount: number }>(),
+    new Map<
+      string,
+      { source: ConversationFindMatch[]; loadedRowCount: number; rows: ConversationRow[] }
+    >(),
   );
   const unitFindCacheQueryRef = useRef("");
-  const conversationFindIndex = useMemo(
-    () => {
-      const query = conversationFindQuery;
-      const normalizedQuery = query.trim().toLocaleLowerCase();
-      if (unitFindCacheQueryRef.current !== normalizedQuery) {
-        unitFindCacheRef.current.clear();
-        unitFindCacheQueryRef.current = normalizedQuery;
-      }
-      const matches: ConversationFindMatch[] = [];
-      let loadedRowCount = 0;
-      // 修复原因：streaming delta 只会改变当前 running turn；稳定 turn 的全文索引可复用，
-      // 避免每个 token 都扫描整段历史，导致长会话 renderer 主线程被持续占满。
-      renderUnits.forEach((unit, unitIndex) => {
-        const cacheKey = `${normalizedQuery}:${codeCommentCardsEnabled}:${unit.key}`;
-        const cached = !unit.isRunning ? unitFindCacheRef.current.get(cacheKey) : undefined;
-        const unitIndexResult = cached
-          ? { matches: cached.source, loadedRowCount: cached.loadedRowCount }
-          : buildConversationFindIndex([unit], query, {
-              projectAssistantCodeComments: codeCommentCardsEnabled,
-            });
-        if (!unit.isRunning && !cached) {
-          unitFindCacheRef.current.set(cacheKey, {
-            source: unitIndexResult.matches,
-            loadedRowCount: unitIndexResult.loadedRowCount,
+  const conversationFindIndex = useMemo(() => {
+    const query = conversationFindQuery;
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    if (unitFindCacheQueryRef.current !== normalizedQuery) {
+      unitFindCacheRef.current.clear();
+      unitFindCacheQueryRef.current = normalizedQuery;
+    }
+    if (!normalizedQuery) {
+      unitFindCacheRef.current.clear();
+      return {
+        query: "",
+        matches: [],
+        matchCount: 0,
+        loadedRowCount: renderUnits.reduce(
+          (count, unit) => count + unit.visibleUserInputs.length + unit.assistantTextRows.length,
+          0,
+        ),
+      };
+    }
+    const matches: ConversationFindMatch[] = [];
+    let loadedRowCount = 0;
+    // streaming delta 只会改变当前 running turn；稳定 turn 的全文索引可复用，
+    // 避免每个 token 都扫描整段历史，导致长会话 renderer 主线程被持续占满。
+    const retainedKeys = new Set<string>();
+    renderUnits.forEach((unit, unitIndex) => {
+      const cacheKey = `${normalizedQuery}:${codeCommentCardsEnabled}:${unit.key}`;
+      retainedKeys.add(cacheKey);
+      const sourceRows = [...unit.visibleUserInputs, ...unit.assistantTextRows];
+      const candidate = !unit.isRunning ? unitFindCacheRef.current.get(cacheKey) : undefined;
+      const cached =
+        candidate &&
+        candidate.rows.length === sourceRows.length &&
+        sourceRows.every((row, index) => row === candidate.rows[index])
+          ? candidate
+          : undefined;
+      const unitIndexResult = cached
+        ? { matches: cached.source, loadedRowCount: cached.loadedRowCount }
+        : buildConversationFindIndex([unit], query, {
+            projectAssistantCodeComments: codeCommentCardsEnabled,
           });
-        }
-        loadedRowCount += unitIndexResult.loadedRowCount;
-        for (const match of unitIndexResult.matches) {
-          matches.push({ ...match, globalIndex: matches.length, unitIndex });
-        }
-      });
-      return { query: normalizedQuery, matches, matchCount: matches.length, loadedRowCount };
-    },
-    [codeCommentCardsEnabled, conversationFindQuery, renderUnits],
-  );
+      if (!unit.isRunning && !cached) {
+        unitFindCacheRef.current.set(cacheKey, {
+          rows: sourceRows,
+          source: unitIndexResult.matches,
+          loadedRowCount: unitIndexResult.loadedRowCount,
+        });
+      }
+      loadedRowCount += unitIndexResult.loadedRowCount;
+      for (const match of unitIndexResult.matches) {
+        matches.push({ ...match, globalIndex: matches.length, unitIndex });
+      }
+    });
+    for (const key of unitFindCacheRef.current.keys())
+      if (!retainedKeys.has(key)) unitFindCacheRef.current.delete(key);
+    return { query: normalizedQuery, matches, matchCount: matches.length, loadedRowCount };
+  }, [codeCommentCardsEnabled, conversationFindQuery, renderUnits]);
+
   const searchResultFindIndex = useMemo(
     () =>
       findStable && searchResultHighlightRequest
@@ -184,11 +208,7 @@ export function useConversationTimelineFind({
       matchCount: conversationFindIndex.matchCount,
       activeIndex: nextActiveIndex,
     });
-  }, [
-    conversationFindActiveIndex,
-    conversationFindIndex,
-    onConversationFindMatchStateChange,
-  ]);
+  }, [conversationFindActiveIndex, conversationFindIndex, onConversationFindMatchStateChange]);
 
   useEffect(() => {
     if (
@@ -206,14 +226,7 @@ export function useConversationTimelineFind({
     }
     lastFindAutoLoadAttemptRef.current = attemptKey;
     void onLoadOlder?.();
-  }, [
-    canLoadOlder,
-    conversationFindIndex.query,
-    findStable,
-    loadingOlder,
-    onLoadOlder,
-    rows,
-  ]);
+  }, [canLoadOlder, conversationFindIndex.query, findStable, loadingOlder, onLoadOlder, rows]);
 
   useEffect(() => {
     if (!conversationFindIndex.query || !activeFindMatch) {
@@ -313,8 +326,7 @@ export function useConversationTimelineFind({
           sourceTextContainsSnippet(candidate.sourceText, snippet),
         )
       : true;
-    const canStillLoad =
-      canLoadOlder && rows.length < FIND_AUTO_LOAD_ROW_LIMIT && !loadingOlder;
+    const canStillLoad = canLoadOlder && rows.length < FIND_AUTO_LOAD_ROW_LIMIT && !loadingOlder;
     if (snippet && !snippetFound && (canStillLoad || loadingOlder)) {
       return;
     }

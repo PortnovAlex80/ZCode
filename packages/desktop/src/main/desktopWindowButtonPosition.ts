@@ -12,6 +12,12 @@ export const WINDOWS_WINDOW_CONTROLS_BASE_RIGHT_PADDING_PX = 136;
 export const WINDOWS_TITLE_BAR_HEIGHT_PX = 48;
 const MACOS_TRAFFIC_LIGHT_MIN_POSITION_PX = 4;
 const customWindowsControls = new WeakSet<BrowserWindow>();
+const nativeWindowFrames = new WeakSet<BrowserWindow>();
+
+/** Auxiliary windows retain their OS frame; they do not own a titleBarOverlay. */
+export function registerNativeWindowFrame(window: BrowserWindow) {
+  nativeWindowFrames.add(window);
+}
 
 export function registerCustomWindowsControls(window: BrowserWindow) {
   customWindowsControls.add(window);
@@ -75,6 +81,14 @@ export function syncWindowControlsOverlayForZoomLevel(
   zoomLevel: number,
 ) {
   if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+
+  if (nativeWindowFrames.has(targetWindow)) {
+    targetWindow.webContents.send(PlatformChannels.WindowControlsOverlayChanged, {
+      leftPaddingPx: 0,
+      rightPaddingPx: 0,
+    });
     return;
   }
 

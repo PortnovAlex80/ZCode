@@ -2336,6 +2336,7 @@ function ConversationComposerImpl({
     <div
       data-testid={TID_V4_COMPOSER}
       data-input-routing={mode}
+      data-spec-upload-pending={composerAttachments.length > 0 ? "true" : undefined}
       aria-hidden={isBlockedByInteraction ? true : undefined}
       style={isBlockedByInteraction ? { display: "none" } : undefined}
       className={cn(

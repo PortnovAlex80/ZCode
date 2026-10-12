@@ -63,11 +63,12 @@ import type { TaskRealtimeBus } from "./taskRealtimeBus.js";
 
 export interface WindowBootstrapOptions {
   restoreSession?: boolean;
+  persistSession?: boolean;
   supportsSettings?: boolean;
   initialWorkspacePath?: string;
   initialWorkspacePurpose?: WorkspacePurpose;
   unavailableWorkspacePath?: string;
-  windowKind?: "main" | "update-status";
+  windowKind?: "main" | "update-status" | "spec-detached";
   locale?: string;
 }
 
@@ -121,6 +122,8 @@ export function loadWindow(
     Object.entries({
       restoreSession:
         bootstrap?.restoreSession == null ? undefined : String(bootstrap.restoreSession),
+      persistSession:
+        bootstrap?.persistSession == null ? undefined : String(bootstrap.persistSession),
       supportsSettings:
         bootstrap?.supportsSettings == null ? undefined : String(bootstrap.supportsSettings),
       initialWorkspacePath: bootstrap?.initialWorkspacePath,

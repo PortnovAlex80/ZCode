@@ -63,6 +63,7 @@ export interface CodeViewerProps extends HTMLAttributes<HTMLDivElement> {
     selectedText: string;
     comment: string;
   }) => void;
+  onDiscussCodeComment?: CodeViewerProps["onSubmitCodeComment"];
   onDeleteCodeComment?: (commentId: string) => void;
   scrollContainerRef?: Ref<HTMLDivElement>;
 }
@@ -326,6 +327,7 @@ function CommentDraft({
   value,
   onValueChange,
   onSubmit,
+  onDiscuss,
   onCancel,
 }: {
   range: CodeCommentRange;
@@ -333,6 +335,7 @@ function CommentDraft({
   value: string;
   onValueChange: (value: string) => void;
   onSubmit: () => void;
+  onDiscuss?: () => void;
   onCancel: () => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -389,6 +392,11 @@ function CommentDraft({
         >
           {cancelLabel}
         </Button>
+        {onDiscuss ? (
+          <Button type="button" variant="outline" onClick={onDiscuss}>
+            Discuss fragment
+          </Button>
+        ) : null}
         <Button type="button" title={submitLabel} aria-label={submitLabel} onClick={onSubmit}>
           {submitLabel}
         </Button>
@@ -462,6 +470,7 @@ export function CodeViewer({
   enableGutterUtility = false,
   labels: labelOverrides,
   onSubmitCodeComment,
+  onDiscussCodeComment,
   onDeleteCodeComment,
   scrollContainerRef,
   className,
@@ -566,6 +575,18 @@ export function CodeViewer({
     setActiveDraftRange(null);
     setDraftText("");
   }, [activeDraftRange, code, draftText, firstLineNumber, onSubmitCodeComment]);
+  const handleDiscussDraft = useCallback(() => {
+    if (!activeDraftRange || !onDiscussCodeComment) return;
+    const selectedText = getTextForLineRange(code, firstLineNumber, activeDraftRange);
+    if (!selectedText.trim()) return;
+    onDiscussCodeComment({
+      range: normalizeRange(activeDraftRange),
+      selectedText,
+      comment: draftText.trim(),
+    });
+    setActiveDraftRange(null);
+    setDraftText("");
+  }, [activeDraftRange, code, draftText, firstLineNumber, onDiscussCodeComment]);
   useEffect(() => {
     if (!canUseCommentGutterUtility || !viewerRef.current) {
       return;
@@ -771,6 +792,7 @@ export function CodeViewer({
               value={draftText}
               onValueChange={setDraftText}
               onSubmit={handleSubmitDraft}
+              onDiscuss={onDiscussCodeComment ? handleDiscussDraft : undefined}
               onCancel={() => {
                 setActiveDraftRange(null);
                 setDraftText("");

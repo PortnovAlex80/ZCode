@@ -1,3 +1,4 @@
+import { resolveDiffsWorkerBudget } from "./diffsWorkerBudget.js";
 import { type ReactNode, useEffect, useMemo } from "react";
 import {
   WorkerPoolContextProvider,
@@ -16,17 +17,11 @@ function createDiffsWorker(): Worker {
   });
 }
 
-function resolveWorkerPoolSize(): number {
-  if (typeof navigator === "undefined") {
-    return 2;
-  }
-
-  const hardwareConcurrency = navigator.hardwareConcurrency;
-  if (!Number.isFinite(hardwareConcurrency) || hardwareConcurrency <= 0) {
-    return 2;
-  }
-
-  return Math.max(1, Math.min(4, Math.floor(hardwareConcurrency / 2)));
+function resolveWorkerPoolSize(maximum: number): number {
+  return resolveDiffsWorkerBudget(
+    typeof navigator === "undefined" ? NaN : navigator.hardwareConcurrency,
+    maximum,
+  );
 }
 
 function WorkerRenderOptionsSync({
@@ -59,7 +54,13 @@ function WorkerRenderOptionsSync({
   return null;
 }
 
-export function DiffsWorkerPoolProvider({ children }: { children: ReactNode }) {
+export function DiffsWorkerPoolProvider({
+  children,
+  maxWorkers = 4,
+}: {
+  children: ReactNode;
+  maxWorkers?: number;
+}) {
   const codePreviewSettings = useZCodeStore(
     (state) => state.codePreviewSettings ?? DEFAULT_CODE_PREVIEW_SETTINGS,
   );
@@ -73,7 +74,8 @@ export function DiffsWorkerPoolProvider({ children }: { children: ReactNode }) {
     [codePreviewSettings.darkTheme, codePreviewSettings.lightTheme],
   );
 
-  const poolSize = useMemo(() => resolveWorkerPoolSize(), []);
+  const poolSize = useMemo(() => resolveWorkerPoolSize(maxWorkers), [maxWorkers]);
+  const poolOptions = useMemo(() => ({ workerFactory: createDiffsWorker, poolSize }), [poolSize]);
   const canUseWorkerPool = typeof window !== "undefined" && typeof Worker !== "undefined";
 
   if (!canUseWorkerPool) {
@@ -81,13 +83,7 @@ export function DiffsWorkerPoolProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <WorkerPoolContextProvider
-      poolOptions={{
-        workerFactory: createDiffsWorker,
-        poolSize,
-      }}
-      highlighterOptions={highlighterOptions}
-    >
+    <WorkerPoolContextProvider poolOptions={poolOptions} highlighterOptions={highlighterOptions}>
       <WorkerRenderOptionsSync highlighterOptions={highlighterOptions} />
       {children}
     </WorkerPoolContextProvider>

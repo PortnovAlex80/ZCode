@@ -1,5 +1,6 @@
 import { PluginUiWorkspaceProvider } from "@/plugin-ui/index.js";
 /* eslint-disable max-lines -- App 当前集中编排 workspace 级状态、导航、Git 派生数据和 shell wiring；已将新增 side pane memory 桥接抽出，剩余拆分需要按 shell 边界单独重构。 */
+import { flushSync } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { resolveWorkspaceKey, type GitChangeSourceId, type WorkspacePurpose } from "@zcode/shared";
@@ -390,6 +391,7 @@ export function App({
   const tabs = useTabStore((s) => s.tabs);
   const addTab = useTabStore((s) => s.addTab);
   const activateTabByPath = useTabStore((s) => s.activateTabByPath);
+  const ensureWorkspaceTab = useTabStore((s) => s.ensureWorkspaceTab);
 
   const {
     resolvedActiveTaskMeta,
@@ -942,6 +944,28 @@ export function App({
     },
     [handleOpenAutomations],
   );
+  useEffect(
+    () =>
+      platform.onProjectWindowTarget?.((target) => {
+        // Reopening also restores project membership after a tab was closed.
+        flushSync(() => {
+          ensureWorkspaceTab(target.workspacePath);
+          if (target.taskId) handleSelectTask(target.workspacePath, target.taskId);
+          else activateTabByPath(target.workspacePath);
+        });
+        const transactionId = (target as { transactionId?: string }).transactionId;
+        if (transactionId)
+          platform.specWindows?.acknowledgeProjectWindowTarget({
+            transactionId,
+            ok:
+              !target.taskId ||
+              useZCodeSessionStore.getState().getWorkspaceState(target.workspacePath)
+                .activeTaskId === target.taskId,
+          });
+      }),
+    [platform, handleSelectTask, activateTabByPath, ensureWorkspaceTab],
+  );
+
   const handleOpenPluginStoreForScope = useCallback(
     (_target: PluginStoreOpenTarget = {}) => {
       // Workspace Marketplace 已收敛为全局入口。兼容旧事件中的 Workspace key，但返回

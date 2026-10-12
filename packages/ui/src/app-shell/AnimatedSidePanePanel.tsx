@@ -1,6 +1,14 @@
 /* eslint-disable max-lines -- Side pane 当前集中承载 tabs、browser/git/code-viewer 内容；完整拆分需按 pane 功能边界继续推进。 */
 import { ServiceProvider } from "@/hooks/useServices.js";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import type { IServiceAccessor } from "@zcode/services";
 import {
@@ -15,6 +23,11 @@ import {
 } from "@dnd-kit/core";
 import { horizontalListSortingStrategy, SortableContext } from "@dnd-kit/sortable";
 import type { BrowserViewScreenshotSurfacePreparePayload, GitChangeSourceId } from "@zcode/shared";
+import {
+  MANAGED_NATIVE_DISCUSSION_OPEN_EVENT,
+  type ManagedNativeDiscussionOpenRequest,
+} from "@/spec-document/nativeDiscussionHandoff.js";
+import { SpecDocumentPane } from "@/spec-document/SpecDocumentPane.js";
 import { PreviewPane } from "@/PreviewPane.js";
 import { SidePaneTerminalPane } from "@/SidePaneTerminalPane.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -95,8 +108,10 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import {
   BugIcon,
   FileDiffIcon,
+  FileTextIcon,
   GlobeIcon,
   MessageSquareTextIcon,
+  PanelLeftOpen,
   PlusIcon,
   SquareTerminalIcon,
   type LucideIcon,
@@ -112,10 +127,11 @@ const OPEN_TAB_LAUNCHER_BUTTON_CLASS =
   "side-pane-open-tab-button flex h-12 min-w-0 items-center gap-3 rounded-xl bg-surface px-3 text-ui-base font-medium text-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 type OpenTabLauncherItem = {
-  id: OpenTabLauncherItemId;
+  id: OpenTabLauncherItemId | "documents";
   label: string;
   icon: LucideIcon;
   onOpen: () => void;
+  disabled?: boolean;
 };
 const EMPTY_SIDE_PANE_TABS: WorkspaceSidePaneState["tabs"] = [];
 const EMPTY_TABS_SCROLL_MASK_EDGES: TabsScrollMaskEdges = {
@@ -287,6 +303,9 @@ export function AnimatedSidePanePanel({
   isDesktop,
   isWindowsDesktop,
   isVisible,
+  generalChatCollapsed = false,
+  onToggleGeneralChat,
+  onSpecDocumentActiveChange,
   sidePaneState,
   recentClosedSidePaneTabs,
   isBrowserOpen,
@@ -355,6 +374,9 @@ export function AnimatedSidePanePanel({
   isDesktop?: boolean;
   isWindowsDesktop?: boolean;
   isVisible: boolean;
+  generalChatCollapsed?: boolean;
+  onToggleGeneralChat?: () => void;
+  onSpecDocumentActiveChange?: (active: boolean) => void;
   sidePaneState: WorkspaceSidePaneState | null;
   recentClosedSidePaneTabs: RecentClosedSidePaneTab[];
   isBrowserOpen: boolean;
@@ -443,6 +465,90 @@ export function AnimatedSidePanePanel({
     ? activeTabId
     : (visibleTabs.at(-1)?.id ?? "");
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const [specDocumentRoot, setSpecDocumentRoot] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setSpecDocumentRoot(null);
+    if (isDesktop && !workspaceRemoteSessionId && services.specDocumentService) {
+      void services.specDocumentService
+        .getWorkspace({ workspacePath: workspaceAbsPath })
+        .then((grant) => {
+          if (live) setSpecDocumentRoot(grant.root);
+        })
+        .catch(() => {
+          /* Unconfigured source builds retain the original native reader. */
+        });
+    }
+    return () => {
+      live = false;
+    };
+  }, [isDesktop, workspaceRemoteSessionId, services, workspaceAbsPath]);
+  const normalizeDocumentPath = (path: string) =>
+    path.replaceAll("\\", "/").replace(/\/$/, "").toLowerCase();
+  const hasSpecDocumentGrant = Boolean(specDocumentRoot);
+  const openSpecDocument = () => {
+    if (!hasSpecDocumentGrant) return;
+    onOpenCodeViewer({
+      type: "file",
+      title: "Open doc",
+      path: workspaceAbsPath,
+      specDocument: true,
+      workspacePath: workspaceAbsPath,
+      ...(workspaceIdentity ? { workspaceIdentity } : {}),
+    });
+  };
+  useEffect(() => {
+    const reopen = (event: Event) => {
+      const target = (event as CustomEvent<ManagedNativeDiscussionOpenRequest>).detail;
+      if (
+        !target ||
+        !hasSpecDocumentGrant ||
+        normalizeDocumentPath(target.workspacePath) !== normalizeDocumentPath(workspaceAbsPath) ||
+        target.workspaceIdentity !== workspaceIdentity
+      )
+        return;
+      onOpenCodeViewer({
+        type: "file",
+        title: "Open doc",
+        path: workspaceAbsPath,
+        specDocument: true,
+        workspacePath: workspaceAbsPath,
+        ...(workspaceIdentity ? { workspaceIdentity } : {}),
+      });
+    };
+    window.addEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, reopen);
+    return () => window.removeEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, reopen);
+  }, [hasSpecDocumentGrant, workspaceAbsPath, workspaceIdentity, onOpenCodeViewer]);
+  const canOpenSpecDocument = (source: CodeViewerSource) => {
+    if (
+      !hasSpecDocumentGrant ||
+      source.type !== "file" ||
+      source.workspaceRemoteSessionId ||
+      !source.workspacePath ||
+      normalizeDocumentPath(source.workspacePath) !== normalizeDocumentPath(workspaceAbsPath) ||
+      (source.workspaceIdentity && source.workspaceIdentity !== workspaceIdentity)
+    )
+      return false;
+    if (source.specDocument) return true;
+    const path = source.path.replaceAll("\\", "/");
+    const root = normalizeDocumentPath(workspaceAbsPath);
+    const relativePath = normalizeDocumentPath(path).startsWith(root + "/")
+      ? path.slice(root.length + 1)
+      : path;
+    return (
+      /\.(md|markdown|txt)$/i.test(path) &&
+      !/^(?:\/|[a-z]:)/i.test(relativePath) &&
+      !relativePath.split("/").some((part) => part === ".." || part === "")
+    );
+  };
+  const activeSpecTab = visibleTabs.find((tab) => tab.id === visibleActiveTabId);
+  const specDocumentActive = Boolean(
+    isVisible && activeSpecTab?.type === "code-viewer" && canOpenSpecDocument(activeSpecTab.source),
+  );
+  useLayoutEffect(() => {
+    onSpecDocumentActiveChange?.(specDocumentActive);
+    return () => onSpecDocumentActiveChange?.(false);
+  }, [onSpecDocumentActiveChange, specDocumentActive]);
   const tabsScrollViewportRef = useRef<HTMLDivElement | null>(null);
   const tabsScrollContentRef = useRef<HTMLDivElement | null>(null);
   const [lockedContentWidthPx, setLockedContentWidthPx] = useState<number | null>(null);
@@ -713,6 +819,16 @@ export function AnimatedSidePanePanel({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
+        {isDesktop && !workspaceRemoteSessionId ? (
+          <DropdownMenuItem
+            disabled={!hasSpecDocumentGrant}
+            data-side-pane-add-item="documents"
+            onSelect={openSpecDocument}
+          >
+            <FileTextIcon className="size-4" />
+            <span>Open doc</span>
+          </DropdownMenuItem>
+        ) : null}
         {canOpenSelectionSideConversation ? (
           <DropdownMenuItem
             data-side-pane-add-item="selection-side-conversation"
@@ -820,7 +936,7 @@ export function AnimatedSidePanePanel({
       onOpen: onOpenDeveloperTools,
     },
   };
-  const openTabLauncherItems: OpenTabLauncherItem[] = resolveOpenTabLauncherItemIds({
+  const nativeOpenTabLauncherItems: OpenTabLauncherItem[] = resolveOpenTabLauncherItemIds({
     canOpenSelectionSideConversation,
     developerToolsEnabled,
     hasReviewTab,
@@ -828,14 +944,43 @@ export function AnimatedSidePanePanel({
   })
     .filter((itemId) => !isOfficeMode || (itemId !== "terminal" && itemId !== "review"))
     .map((itemId) => openTabLauncherItemById[itemId]);
+  const openTabLauncherItems: OpenTabLauncherItem[] = [
+    ...(isDesktop && !workspaceRemoteSessionId
+      ? [
+          {
+            id: "documents" as const,
+            label: "Open doc",
+            icon: FileTextIcon,
+            onOpen: openSpecDocument,
+            disabled: !hasSpecDocumentGrant,
+          },
+        ]
+      : []),
+    ...nativeOpenTabLauncherItems,
+  ];
   const closeSidePaneButton =
-    isVisible && !mobileOverlay && onCloseSidePane ? (
+    isVisible &&
+    !mobileOverlay &&
+    (onCloseSidePane || (generalChatCollapsed && onToggleGeneralChat)) ? (
       <div className="flex shrink-0 items-center gap-0.5 [app-region:no-drag]">
-        <WorkspaceSidePaneToggleButton
-          isSidePaneOpen
-          onToggleSidePane={onCloseSidePane}
-          shortcutLabel={toggleSidePaneShortcutLabel}
-        />
+        {generalChatCollapsed && onToggleGeneralChat ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Show main chat"
+            title="Show main chat"
+            onClick={onToggleGeneralChat}
+          >
+            <PanelLeftOpen className="size-4" />
+          </Button>
+        ) : null}
+        {onCloseSidePane ? (
+          <WorkspaceSidePaneToggleButton
+            isSidePaneOpen
+            onToggleSidePane={onCloseSidePane}
+            shortcutLabel={toggleSidePaneShortcutLabel}
+          />
+        ) : null}
         {showWindowControls ? <DesktopWindowControls /> : null}
       </div>
     ) : null;
@@ -870,6 +1015,7 @@ export function AnimatedSidePanePanel({
                   key={item.id}
                   type="button"
                   data-side-pane-open-tab-item={item.id}
+                  disabled={item.disabled}
                   className={OPEN_TAB_LAUNCHER_BUTTON_CLASS}
                   onClick={item.onOpen}
                 >
@@ -1239,6 +1385,24 @@ export function AnimatedSidePanePanel({
                               ? {}
                               : { onRevealFileInTree: onRevealGitFileInTree })}
                           />
+                        ) : tab.type === "code-viewer" &&
+                          tab.source.type === "file" &&
+                          isDesktop &&
+                          !workspaceRemoteSessionId &&
+                          canOpenSpecDocument(tab.source) ? (
+                          <SpecDocumentPane
+                            workspacePath={workspaceAbsPath}
+                            workspaceIdentity={workspaceIdentity}
+                            visible={isVisible && tab.id === visibleActiveTabId}
+                            parentSessionId={activeTaskId || sidePaneOwnerId}
+                            initialPath={tab.source.specDocument ? undefined : tab.source.path}
+                            onClose={onCloseCodeViewer}
+                            onOpenBrowserUrl={onOpenBrowserUrl}
+                            onOpenCodeViewer={onOpenCodeViewer}
+                            onActivate={() => onOpenCodeViewer(tab.source)}
+                            generalChatCollapsed={generalChatCollapsed}
+                            onToggleGeneralChat={onToggleGeneralChat}
+                          />
                         ) : tab.type === "code-viewer" ? (
                           <PreviewPane
                             markdownSelectionTarget={{ sessionId: activeTaskId, workspaceKey }}
@@ -1401,7 +1565,7 @@ export function AnimatedSidePanePanel({
 
   return (
     <>
-      {isVisible ? (
+      {isVisible && !generalChatCollapsed ? (
         <ResizableHandle
           data-workspace-side-pane-resize-handle="true"
           className={cn(
@@ -1421,7 +1585,7 @@ export function AnimatedSidePanePanel({
         elementRef={panelElementRef}
         defaultSize={panelLayout.defaultSize}
         minSize={panelLayout.minSize}
-        maxSize={panelLayout.maxSize}
+        maxSize={generalChatCollapsed ? "100%" : panelLayout.maxSize}
         collapsedSize={panelLayout.collapsedSize}
         // 右侧面板常驻声明成 collapsible 时，拖到最小宽度会被库判定为 collapse。
         // 这里改成只在显式关闭时允许折叠，避免用户只是想拖到最小宽度时面板自动收起。

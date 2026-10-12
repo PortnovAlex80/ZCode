@@ -4,6 +4,8 @@ import type { IHighspeedCardService } from "./highspeed/highspeedCard.js";
 import type { IPluginUiBridgeService } from "./plugin-ui-bridge/contract.js";
 import type { IPluginUiSamplingService } from "./plugin-ui-bridge/samplingContract.js";
 import type { IPluginUiAppToolsService } from "./plugin-ui-bridge/appToolsContract.js";
+import type { ISpecDocumentService } from "./spec-document/specDocument.js";
+
 import type { IFileService } from "./file/file.js";
 import type { IMediaPreviewService } from "./media-preview/mediaPreview.js";
 import type { ICloudContentService } from "#src/cloud-content/cloudContent.js";
@@ -51,6 +53,7 @@ import type { IConversationShareService } from "./conversation-share/conversatio
 /** UI 层消费的统一服务接口 */
 export interface IServiceAccessor {
   readonly fileService: IFileService;
+  readonly specDocumentService?: ISpecDocumentService;
   readonly mediaPreviewService?: IMediaPreviewService;
   readonly cloudContentService?: ICloudContentService;
   readonly marketingTouchService?: IMarketingTouchService;

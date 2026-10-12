@@ -1,3 +1,4 @@
+import type { SpecWindowBridge } from "./specWindows.js";
 /* eslint-disable max-lines -- 跨端 platform contract 集中声明 renderer 能力；OAuth 与 browser lifecycle 必须保持 desktop/web 类型合同，本 MR 不拆分平台边界。 */
 import type {
   DockerConnectOptions,
@@ -652,6 +653,8 @@ export type CuaOsSupport =
  * 业务服务（文件、终端、凭据等）走 IServiceAccessor 的 RPC 通道。
  */
 export interface IPlatformService {
+  /** Optional native panel capability; Web and remote hosts retain their existing surface. */
+  specWindows?: SpecWindowBridge;
   /** 当前平台的文件选择框是否能返回 agent 可访问的本地绝对路径 */
   canSelectFilePath?: boolean;
 
@@ -1004,6 +1007,10 @@ export interface IPlatformService {
 
   /** 注册 main 进程通过 deep link 直接打开本地工作区目录的回调，返回 disposer */
   onOpenWorkspacePath?(handler: (path: string) => void): () => void;
+  openProjectWindow?(target: { workspacePath: string; taskId?: string }): Promise<void>;
+  onProjectWindowTarget?(
+    handler: (target: { workspacePath: string; taskId?: string }) => void,
+  ): () => void;
 
   /** 注册窗口全屏状态变化回调，返回 disposer */
   onWindowFullscreenChanged(handler: (isFullscreen: boolean) => void): () => void;

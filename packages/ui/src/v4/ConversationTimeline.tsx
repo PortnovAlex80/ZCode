@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -116,6 +117,81 @@ const USER_SCROLL_INTENT_TTL_MS = 1200;
 const LAYOUT_SCROLL_GUARD_MS = 250;
 const CONTENT_WIDTH_RESIZE_SETTLE_MS = 120;
 const SCROLL_MEMORY_RESTORE_TOLERANCE_PX = 1;
+
+/** Keep the duration clock inside a mounted turn, away from history/find/navigation work. */
+function refreshConversationTurnClock(
+  unit: ConversationTurnRenderUnit,
+  clockRows: readonly ConversationRow[],
+  nowMs: number,
+  sessionPhase: SessionPhase | undefined,
+): ConversationTurnRenderUnit {
+  if (!unit.isRunning) return unit;
+  const refreshed = buildConversationTurnRenderUnits(clockRows, { nowMs, sessionPhase })[0];
+  if (!refreshed || refreshed.turnId !== unit.turnId) return unit;
+  const statusUnchanged = (
+    before: ConversationTurnRenderUnit["workStatus"],
+    after: ConversationTurnRenderUnit["workStatus"],
+  ) => before?.state === after?.state && before?.durationMs === after?.durationMs;
+  if (
+    statusUnchanged(unit.workStatus, refreshed.workStatus) &&
+    unit.workSegments?.every((segment, index) =>
+      statusUnchanged(segment.workStatus, refreshed.workSegments?.[index]?.workStatus),
+    ) !== false
+  )
+    return unit;
+  // Only clock-derived statuses change. Preserve full-turn ordering, collapse policy,
+  // action targets and flow array identities, including older running virtual turns.
+  return {
+    ...unit,
+    workStatus: refreshed.workStatus,
+    workSegments: unit.workSegments?.map((segment, index) => ({
+      ...segment,
+      workStatus: refreshed.workSegments?.[index]?.workStatus,
+    })),
+  };
+}
+
+const ConversationClockedTurnGroup = memo(function ConversationClockedTurnGroup({
+  clockRows,
+  snapshotNowMs,
+  sessionPhase,
+  ...props
+}: ComponentProps<typeof ConversationTurnGroup> & {
+  clockRows?: readonly ConversationRow[];
+  snapshotNowMs: number;
+  sessionPhase?: SessionPhase;
+}) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const running = props.unit.isRunning;
+  useEffect(() => {
+    if (!running) return;
+    let timer: number | null = null;
+    const clearTimer = () => {
+      if (timer !== null) window.clearInterval(timer);
+      timer = null;
+    };
+    const syncVisibility = () => {
+      clearTimer();
+      if (document.hidden) return;
+      setNowMs(Date.now());
+      timer = window.setInterval(() => setNowMs(Date.now()), RUNNING_WORK_DURATION_TICK_MS);
+    };
+    syncVisibility();
+    document.addEventListener("visibilitychange", syncVisibility);
+    return () => {
+      clearTimer();
+      document.removeEventListener("visibilitychange", syncVisibility);
+    };
+  }, [running]);
+  const unit = useMemo(
+    () =>
+      clockRows && nowMs > snapshotNowMs
+        ? refreshConversationTurnClock(props.unit, clockRows, nowMs, sessionPhase)
+        : props.unit,
+    [props.unit, clockRows, snapshotNowMs, nowMs, sessionPhase],
+  );
+  return <ConversationTurnGroup {...props} unit={unit} />;
+});
 
 function scheduleMicrotask(callback: () => void): void {
   // 部分 WebView/最小 DOM 运行时没有 window.queueMicrotask；调度能力应从
@@ -450,28 +526,41 @@ function ConversationTimelineImpl({
     });
   }, [pluginUiDerivation, sessionKey, pluginUiDisclosureVersion]);
   const topicPreparations = useBotTopicPreparations();
-  const renderUnits = useMemo(
-    () =>
-      withTopicPreparationMessages(
+  const { renderUnits, snapshotNowMs } = useMemo(() => {
+    const nowMs = Math.max(liveNowMs, Date.now());
+    return {
+      snapshotNowMs: nowMs,
+      renderUnits: withTopicPreparationMessages(
         buildConversationTurnRenderUnits(rows, {
-          nowMs: liveNowMs,
+          nowMs,
           sessionPhase,
           pluginUiPinResolver,
         }),
         rows,
         topicPreparations,
       ),
-    [liveNowMs, pluginUiPinResolver, rows, sessionPhase, topicPreparations],
-  );
+    };
+  }, [liveNowMs, pluginUiPinResolver, rows, sessionPhase, topicPreparations]);
+
   const { virtualizedUnits, liveUnit, liveUnitIndex } = useMemo(
     () => splitConversationTimelineLiveTail(renderUnits),
     [renderUnits],
   );
-  const hasRunningUnit = useMemo(() => renderUnits.some((unit) => unit.isRunning), [renderUnits]);
   const nextHighspeedExpiryMs = useMemo(
     () => resolveNextHighspeedExpiryMs(rows, liveNowMs),
     [liveNowMs, rows],
   );
+  const clockRowsByTurnId = useMemo(() => {
+    const byTurnId = new Map<string, ConversationRow[]>();
+    for (const unit of renderUnits) {
+      if (unit.isRunning) byTurnId.set(unit.turnId, []);
+    }
+    if (byTurnId.size > 0) {
+      for (const row of rows) byTurnId.get(row.turnId)?.push(row);
+    }
+    return byTurnId;
+  }, [rows, renderUnits]);
+
   const turnNavigatorQueryRowIds = useMemo(
     () =>
       new Set(
@@ -614,21 +703,6 @@ function ConversationTimelineImpl({
       resizeObserver?.disconnect();
     };
   }, [backgroundScrollLocked, selectionPanelLayoutContainerRef, syncShareSelectionPanelLayout]);
-
-  useEffect(() => {
-    if (!hasRunningUnit) {
-      return;
-    }
-
-    // 运行中的 assistant work 状态文案要显示“工作中 N 秒”并随时间推进；
-    // 完成态耗时由协议事实固定，builder 会拒绝把这个 UI 时钟用于已结束轮次。
-    setLiveNowMs(Date.now());
-    const timer = window.setInterval(() => {
-      setLiveNowMs(Date.now());
-    }, RUNNING_WORK_DURATION_TICK_MS);
-
-    return () => window.clearInterval(timer);
-  }, [hasRunningUnit]);
 
   useEffect(() => {
     if (nextHighspeedExpiryMs === undefined) return;
@@ -1861,7 +1935,9 @@ function ConversationTimelineImpl({
       />
       {/* Bugfix：分享选择流程无论面板展开还是收起，左 rail 都由分享面板或 reopen 按钮独占，
           必须隐藏对话轮导航，避免两个绝对定位控件互相覆盖。退出分享选择后自动恢复。 */}
-      {hideTurnNavigator ? null : (
+      {/* 窄视口的 rail 已被 864px container query 隐藏；不挂载隐藏 rail，
+          避免每个流式更新仍遍历全部历史、拼接正文并生成 hover preview。 */}
+      {hideTurnNavigator || turnNavigatorContainerWidthPx < 864 ? null : (
         <ConversationTurnNavigator
           renderUnits={renderUnits}
           isHydratingDirectory={loadingOlder}
@@ -1995,7 +2071,10 @@ function ConversationTimelineImpl({
                       className="absolute left-0 top-0 w-full"
                       style={{ transform: `translateY(${virtualRow.start - headerSlotHeight}px)` }}
                     >
-                      <ConversationTurnGroup
+                      <ConversationClockedTurnGroup
+                        clockRows={clockRowsByTurnId.get(unit.turnId)}
+                        snapshotNowMs={snapshotNowMs}
+                        sessionPhase={sessionPhase}
                         unit={unit}
                         nowMs={liveNowMs}
                         apiRetry={null}
@@ -2026,7 +2105,10 @@ function ConversationTimelineImpl({
                     summaryPanelInlineOffsetClassName,
                   )}
                 >
-                  <ConversationTurnGroup
+                  <ConversationClockedTurnGroup
+                    clockRows={clockRowsByTurnId.get(liveUnit.turnId)}
+                    snapshotNowMs={snapshotNowMs}
+                    sessionPhase={sessionPhase}
                     unit={liveUnit}
                     nowMs={liveNowMs}
                     apiRetry={apiRetry}

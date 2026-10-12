@@ -1,3 +1,4 @@
+import { documentFirstInputBody } from "./documentFirstInput.js";
 import { resolveSelectionSideInheritedModel } from "@/lib/selectionSideInheritedModel.js";
 import { useStartPlanRecommendation } from "@/hooks/useStartPlanRecommendation.js";
 import type { SessionCreateSource } from "@zcode/shared";
@@ -149,6 +150,10 @@ import { useDraftSessionPrewarm } from "@/v4/composer/useDraftSessionPrewarm.js"
 import { projectSessionConfigToTaskConfigOptions } from "@/v4/composer/sessionConfigTaskCache.js";
 import { useDraftRuntimeRebuildGate } from "@/v4/composer/useDraftRuntimeRebuildGate.js";
 import { useDraftModelReadinessGate } from "@/v4/composer/useDraftModelReadinessGate.js";
+import {
+  nativeExecutionSource,
+  usePublishNativeExecutionSource,
+} from "@/spec-document/nativeExecutionSource.js";
 import { useSettings } from "@/hooks/useSettingService.js";
 import { useZCodeStoreWithDefault } from "@/store/StoreProvider.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
@@ -347,6 +352,8 @@ export interface SessionPaneProps {
   allowWorkspaceFileRewind?: boolean;
   /** 框选副屏：保留普通 composer/tools，但隐藏并禁止 edit/retry/fork/goal。 */
   selectionSideChat?: boolean;
+  /** Transform only the first plain-text input of an explicitly bound empty native session. */
+  prepareFirstText?: (text: string) => string;
   /** 主会话划词动作只投递到 Side Pane 当前激活的辅助 child。 */
   activeSelectionSideChatSessionId?: string | null;
   workspacePath: string;
@@ -371,6 +378,10 @@ export interface SessionPaneProps {
    * 只影响 foreground UI telemetry，不影响 live subscription 或后台 /event/report。
    */
   telemetryVisible?: boolean;
+  /** Hide permission/question portals for a force-mounted host view; subscriptions remain live. */
+  interactionDialogsVisible?: boolean;
+  /** Keep one designated hidden main pane as an execution-config source; no input focus. */
+  keepSpecExecutionSource?: boolean;
   /** 向右拆分新 draft 窗格（叶子数达上限时宿主不下发）。 */
   onSplitRight?: () => void;
   /** 向下拆分新 draft 窗格。 */
@@ -560,6 +571,7 @@ export function SessionPane({
   readOnly = false,
   allowWorkspaceFileRewind = false,
   selectionSideChat = false,
+  prepareFirstText,
   activeSelectionSideChatSessionId = null,
   workspacePath,
   workspaceIdentity,
@@ -571,6 +583,8 @@ export function SessionPane({
   onSelectionSideChatUnavailable,
   focused = true,
   telemetryVisible = true,
+  interactionDialogsVisible = true,
+  keepSpecExecutionSource = false,
   onSplitRight,
   onSplitDown,
   onClosePane,
@@ -626,9 +640,11 @@ export function SessionPane({
     highspeedCardService,
     modelSelectionService,
     usageStatsService,
+    specDocumentService,
     zcodeSessionService,
     zcodeTaskService,
   } = useServices();
+
   const { intl, locale } = useZCodeIntl();
   const slashCommands = useSlashCommands(workspacePath, workspaceIdentity);
   const baseWorkspaceServices = useBaseWorkspaceServices();
@@ -1204,6 +1220,9 @@ export function SessionPane({
   const autoLoadIncompleteTurnCursorRef = useRef<string | null>(null);
   snapshotRef.current = snapshot;
   sessionIdRef.current = sessionId;
+  const projectionStatusRef = useRef(state.status);
+  projectionStatusRef.current = state.status;
+
   const handleAutoOpenAssistantPptx = useCallback(
     (request: AssistantPreviewCardsAutoOpenRequest) => {
       if (!onAutoOpenAssistantPptx || request.sources.length === 0) return;
@@ -1641,9 +1660,6 @@ export function SessionPane({
     snapshot?.pendingInteractions.find(
       (interaction) => interaction.payload.kind !== "workspaceHookReview",
     )?.interactionId ?? null;
-  const selectionSideChatKey = sessionId
-    ? buildSelectionSideChatKey(workspaceKey, sessionId)
-    : null;
   const selectionSideActionBlocked = useSyncExternalStore(
     subscribeSelectionSideChatRuntime,
     () =>
@@ -2388,10 +2404,119 @@ export function SessionPane({
     },
     [sessionId, workspaceKey],
   );
+  const [specDraftPreparationError, setSpecDraftPreparationError] = useState<string | null>(null);
+  const draftPreparationScope = useMemo(() => ({}), [layer, workspaceKey]);
+  const draftPreparationScopeRef = useRef(draftPreparationScope);
+  draftPreparationScopeRef.current = draftPreparationScope;
+  useEffect(() => {
+    setSpecDraftPreparationError(null);
+  }, [draftPreparationScope]);
+  const dispatchObservedDraftPrewarm = useCallback(
+    async (type: CommandType, payload: Record<string, unknown>, targetSessionId: string | null) => {
+      if (type === "createSession" && specDocumentService) setSpecDraftPreparationError(null);
+      try {
+        const ack = await dispatchCommand(type, payload, targetSessionId);
+        if (
+          type === "createSession" &&
+          specDocumentService &&
+          draftPreparationScopeRef.current === draftPreparationScope
+        ) {
+          setSpecDraftPreparationError(
+            ack.status === "accepted" && ack.result?.type === "createSession"
+              ? null
+              : `Native ZCODE draft could not be prepared (${ack.reasonCode ?? ack.status}).`,
+          );
+        }
+        return ack;
+      } catch (cause) {
+        if (
+          type === "createSession" &&
+          specDocumentService &&
+          draftPreparationScopeRef.current === draftPreparationScope
+        ) {
+          setSpecDraftPreparationError(
+            "Native ZCODE draft could not be prepared. Try New task again.",
+          );
+        }
+        throw cause;
+      }
+    },
+    [dispatchCommand, draftPreparationScope, specDocumentService],
+  );
+  const { binding: prewarmBinding } = useDraftSessionPrewarm({
+    enabled: sessionId === null && draftAgentStartupAllowed,
+    workspaceKey,
+    paneId,
+    invalidationVersion: draftRuntimeInvalidationVersion,
+    // SessionDataLayer 来自 workspace connection registry：同 transport generation 的 pane/remount
+    // 共享 identity；provider wrapper 重建产生的新 sendCommand 函数不能误判为 transport 换代。
+    transportIdentity: layer,
+    dispatchCommand: specDocumentService ? dispatchObservedDraftPrewarm : dispatchCommand,
+    // 预热会话只消费当前 Root Composer Draft 的一次性初始化结果。
+    resolveInitialConfig: resolveInitialDraftConfig,
+  });
+  const prewarmBindingRef = useRef(prewarmBinding);
+  prewarmBindingRef.current = prewarmBinding;
+  const prewarmSessionId = prewarmBinding?.sessionId ?? null;
+
+  // runtime 换代（CUA Helper 就绪、liveness 恢复等触发 workspace-dispose）会冲掉草稿态尚未
+  // 持久化的预热会话。重建期间禁止发送，否则附件会挂在已消失的会话上（sessionNotFound）。
+  const { rebuilding: draftRuntimeRebuilding } = useDraftRuntimeRebuildGate({
+    enabled: sessionId === null,
+    onRuntimeRestart,
+    onRuntimeLifecycle,
+    prewarmSessionId,
+    workspaceIdentity,
+    workspacePath,
+  });
+  const ensureDraftPrewarmConfigBeforeSendRef = useRef<(targetSessionId: string) => Promise<void>>(
+    async () => undefined,
+  );
+  const effectiveSessionId = sessionId ?? prewarmSessionId;
+  usePublishNativeExecutionSource(
+    workspaceKey,
+    Boolean(
+      specDocumentService &&
+      isDesktop &&
+      !remoteSessionId &&
+      !selectionSideChat &&
+      !readOnly &&
+      ((focused && telemetryVisible) || keepSpecExecutionSource),
+    ),
+    nativeExecutionSource({
+      paneId,
+      sessionId: effectiveSessionId,
+      snapshotSessionId: snapshot?.sessionId ?? null,
+      projectionStatus: state.status,
+      provider: snapshot?.config.provider,
+      model: snapshot?.config.model,
+      error:
+        state.status === "error"
+          ? state.lastError || "Native ZCODE conversation is unavailable."
+          : sessionId === null
+            ? draftModelReadinessError?.message || specDraftPreparationError
+            : null,
+    }),
+  );
+
+  const selectionParentSessionId =
+    sessionId ??
+    (snapshot?.sessionId === prewarmSessionId &&
+    state.status === "live" &&
+    snapshot?.config.provider?.trim() &&
+    snapshot.config.model?.trim()
+      ? prewarmSessionId
+      : null);
+  const selectionSideChatKey = selectionParentSessionId
+    ? buildSelectionSideChatKey(workspaceKey, selectionParentSessionId)
+    : null;
   const handleOpenSelectionSideConversation = useCallback(
     async (reference?: ConversationSelectionReference, forceNew = false) => {
-      if (!sessionId || !selectionSideChatKey || !onOpenSelectionSideChat) return;
+      if (!selectionParentSessionId || !selectionSideChatKey || !onOpenSelectionSideChat) return;
       try {
+        if (sessionId === null) {
+          await ensureDraftPrewarmConfigBeforeSendRef.current(selectionParentSessionId);
+        }
         let targetChildSessionId = reference && !forceNew ? activeSelectionSideChatSessionId : null;
         let replacesChildSessionId: string | undefined;
         if (targetChildSessionId) {
@@ -2418,7 +2543,7 @@ export function SessionPane({
             workspacePath,
             ...(workspaceIdentity ? { workspaceIdentity } : {}),
             ...(remoteSessionId ? { remoteSessionId } : {}),
-            parentSessionId: sessionId,
+            parentSessionId: selectionParentSessionId,
             childSessionId: targetChildSessionId,
           });
           if (reference) {
@@ -2432,7 +2557,11 @@ export function SessionPane({
         }
 
         const childSessionId = await createSelectionSideChat(selectionSideChatKey, async () => {
-          const ack = await dispatchCommand("createSelectionSideSession", {}, sessionId);
+          const ack = await dispatchCommand(
+            "createSelectionSideSession",
+            {},
+            selectionParentSessionId,
+          );
           if (
             (ack.status !== "accepted" && ack.status !== "duplicate") ||
             ack.result?.type !== "createSelectionSideSession"
@@ -2445,7 +2574,7 @@ export function SessionPane({
           workspacePath,
           ...(workspaceIdentity ? { workspaceIdentity } : {}),
           ...(remoteSessionId ? { remoteSessionId } : {}),
-          parentSessionId: sessionId,
+          parentSessionId: selectionParentSessionId,
           childSessionId,
           ...(replacesChildSessionId ? { replacesChildSessionId } : {}),
         });
@@ -2459,7 +2588,7 @@ export function SessionPane({
       } catch (error) {
         logger.warn("[v4-pane] 创建框选副屏会话失败", {
           error: error instanceof Error ? error.message : String(error),
-          parentSessionId: sessionId,
+          parentSessionId: selectionParentSessionId,
           workspaceKey,
         });
       }
@@ -2470,6 +2599,7 @@ export function SessionPane({
       onOpenSelectionSideChat,
       remoteSessionId,
       selectionSideChatKey,
+      selectionParentSessionId,
       sessionId,
       workspaceIdentity,
       workspaceKey,
@@ -2535,7 +2665,7 @@ export function SessionPane({
   useEffect(() => {
     if (
       !selectionSideChatKey ||
-      !sessionId ||
+      !selectionParentSessionId ||
       readOnly ||
       selectionSideChat ||
       isMobileTextInputViewport ||
@@ -2563,7 +2693,7 @@ export function SessionPane({
     readOnly,
     selectionSideChat,
     selectionSideChatKey,
-    sessionId,
+    selectionParentSessionId,
   ]);
 
   const cliSlashCommandNames = useMemo(
@@ -2826,35 +2956,6 @@ export function SessionPane({
   // ── 草稿态 v4 draft session 预热（m5）──
   // pane 未绑定会话时后台建 phase=draft 会话作预热载体：配置写 CAS 直达、首发复用。
   // 对外绑定语义不变（shell activeTaskId 仍 null），预热会话只是 pane 内部 effective 订阅目标。
-  const { binding: prewarmBinding } = useDraftSessionPrewarm({
-    enabled: sessionId === null && draftAgentStartupAllowed,
-    workspaceKey,
-    paneId,
-    invalidationVersion: draftRuntimeInvalidationVersion,
-    // SessionDataLayer 来自 workspace connection registry：同 transport generation 的 pane/remount
-    // 共享 identity；provider wrapper 重建产生的新 sendCommand 函数不能误判为 transport 换代。
-    transportIdentity: layer,
-    dispatchCommand,
-    // 预热会话只消费当前 Root Composer Draft 的一次性初始化结果。
-    resolveInitialConfig: resolveInitialDraftConfig,
-  });
-  const prewarmBindingRef = useRef(prewarmBinding);
-  prewarmBindingRef.current = prewarmBinding;
-  const prewarmSessionId = prewarmBinding?.sessionId ?? null;
-  // runtime 换代（CUA Helper 就绪、liveness 恢复等触发 workspace-dispose）会冲掉草稿态尚未
-  // 持久化的预热会话。重建期间禁止发送，否则附件会挂在已消失的会话上（sessionNotFound）。
-  const { rebuilding: draftRuntimeRebuilding } = useDraftRuntimeRebuildGate({
-    enabled: sessionId === null,
-    onRuntimeRestart,
-    onRuntimeLifecycle,
-    prewarmSessionId,
-    workspaceIdentity,
-    workspacePath,
-  });
-  const ensureDraftPrewarmConfigBeforeSendRef = useRef<(targetSessionId: string) => Promise<void>>(
-    async () => undefined,
-  );
-  const effectiveSessionId = sessionId ?? prewarmSessionId;
   const showModelChangeNotice = useCallback(
     (sourceModel: ModelSelectionSource | null, targetModel: ModelSelectionSource) => {
       // Bug 原因：草稿尚未形成实际会话，模型选择本身已经在 composer 中可见；
@@ -3207,12 +3308,21 @@ export function SessionPane({
     ],
   );
 
+  // A pending or transport-uncertain admission must not receive document context twice.
+  const firstTextAdmissionSessionIds = useRef(new Set<string>());
+
   const dispatchSendTextAfterConfig = useCallback(
     async (
       text: string,
       options: ConversationComposerSendOptions | undefined,
       createSourceAtSend: SessionCreateSource,
       highspeedOriginAtSend: HighspeedPaneOrigin,
+      preparedFirstText?: {
+        sessionId: string;
+        original: string;
+        effective: string;
+        prepared: string;
+      },
     ) => {
       let onAcceptedSelection: (() => void) | undefined;
       const prepareHighspeedTurn = prepareHighspeedTurnFrom(highspeedOriginAtSend);
@@ -3581,10 +3691,27 @@ export function SessionPane({
         prepareHighspeedTurn,
         submission.modelSelection,
       );
+      // Recheck the complete empty-history boundary after asynchronous configuration work.
+      const currentFirstInput = snapshotRef.current;
+      const applyFirstText =
+        preparedFirstText?.sessionId === sessionId &&
+        preparedFirstText.original === text &&
+        preparedFirstText.effective === effectiveText &&
+        slashCommand === null &&
+        currentFirstInput?.sessionId === sessionId &&
+        projectionStatusRef.current === "live" &&
+        currentFirstInput.rows.totalCount === 0 &&
+        currentFirstInput.rows.window.length === 0 &&
+        currentFirstInput.rows.firstRowId === null &&
+        currentFirstInput.queue.items.length === 0 &&
+        !firstTextAdmissionSessionIds.current.has(sessionId) &&
+        pendingCommandRegistry.list(sessionId).length === 0;
+      if (applyFirstText) firstTextAdmissionSessionIds.current.add(sessionId);
+
       const ack = await dispatchSubmissionCommand(
         "sendText",
         {
-          text: effectiveText,
+          text: applyFirstText ? preparedFirstText.prepared : effectiveText,
           ...submission,
           ...(options?.requestedDelivery ? { requestedDelivery: options.requestedDelivery } : {}),
           conversationQuotes: options?.conversationQuotes,
@@ -3605,6 +3732,12 @@ export function SessionPane({
         // Recent 记录加速前的 Composer 原始选择，不用被覆盖的 payload Selection。
         submission,
       );
+      if (
+        applyFirstText &&
+        (ack.status === "rejected" || ack.status === "stale" || ack.status === "noop")
+      ) {
+        firstTextAdmissionSessionIds.current.delete(sessionId);
+      }
       if (ack.reasonCode === "guard.heldQueueConfirmationStale") {
         return "confirmationRequired" as const;
       }
@@ -3634,6 +3767,7 @@ export function SessionPane({
       resolveInitialDraftConfig,
       createSubmissionFromComposer,
       sessionId,
+      state.status,
       settleCurrentQueueInputs,
       workspaceIdentity,
       workspaceKey,
@@ -3655,6 +3789,31 @@ export function SessionPane({
       const highspeedOrigin = captureHighspeedPaneOrigin();
       // followupMode 仍通过 Session CAS 同步；模型和模式已封装进 Submission，不再
       // 依赖“配置命令先到、sendText 后到”的跨命令时序。
+      const current = snapshotRef.current;
+      // /plan 的正文和模式继续由原生路径处理，文档上下文只包装已规范化的正文。
+      const firstBody = documentFirstInputBody(text, submissionOptions.attachments ?? [], {
+        contextAttachmentCount: submissionOptions.contextAttachmentCount ?? 0,
+      });
+      // Freeze the host transform at the click; controls, attachments and config stay native.
+      const preparedFirstText =
+        firstBody !== undefined &&
+        prepareFirstText &&
+        sessionId &&
+        current?.sessionId === sessionId &&
+        state.status === "live" &&
+        current.rows.totalCount === 0 &&
+        current.rows.window.length === 0 &&
+        current.rows.firstRowId === null &&
+        current.queue.items.length === 0 &&
+        !firstTextAdmissionSessionIds.current.has(sessionId) &&
+        pendingCommandRegistry.list(sessionId).length === 0
+          ? {
+              sessionId,
+              original: text,
+              effective: firstBody,
+              prepared: prepareFirstText(firstBody),
+            }
+          : undefined;
       return configCommandBarrier.enqueue(async () => {
         try {
           return await dispatchSendTextAfterConfig(
@@ -3662,6 +3821,7 @@ export function SessionPane({
             submissionOptions,
             createSource,
             highspeedOrigin,
+            preparedFirstText,
           );
         } catch (error) {
           if (sessionId === null && isProviderNotReadyError(error)) {
@@ -3681,6 +3841,8 @@ export function SessionPane({
       dispatchSendTextAfterConfig,
       markDraftProviderNotReady,
       sessionId,
+      state.status,
+      prepareFirstText,
       workspacePath,
       workspaceIdentity,
     ],
@@ -5356,7 +5518,7 @@ export function SessionPane({
       ) : null}
       {/* Bugfix: v4 权限/问答等待态只是 runtime 的阻塞交互，必须和 composer
           共享 timeline bottom dock；渲染在 SessionPane 外层会脱离主列宽度并挤占下半屏。 */}
-      {sessionId && snapshot ? (
+      {interactionDialogsVisible && sessionId && snapshot ? (
         <V4InteractionDialogs
           key="conversation-interactions"
           sessionId={sessionId}

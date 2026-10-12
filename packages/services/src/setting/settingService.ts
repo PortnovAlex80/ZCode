@@ -1,5 +1,7 @@
+import { acquireFileLock } from "@zcode/shared/node";
 import { access, readFile, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
+import { resolveSettingsHomeDir } from "./settingsHome.js";
 import { homedir } from "node:os";
 import type {
   AppSettings,
@@ -42,15 +44,7 @@ const debugLog = (...args: unknown[]) => {
   console.debug(formatLogPrefix("settingService", process.pid), ...args);
 };
 
-function resolveUserHomeDir() {
-  // 独立桌面 Dev 实例已设置自己的 home，设置服务却仍写真实 HOME，
-  // 导致启动迁移和外观操作污染其他实例。与 Electron 的显式 home 覆盖保持一致。
-  const envHome =
-    process.env.ZCODE_DESKTOP_HOME_DIR?.trim() ||
-    process.env.HOME?.trim() ||
-    process.env.USERPROFILE?.trim();
-  return envHome && envHome.length > 0 ? envHome : homedir();
-}
+const resolveUserHomeDir = resolveSettingsHomeDir;
 
 function getSettingsDir() {
   return join(resolveUserHomeDir(), ".zcode", "v2");
@@ -205,7 +199,12 @@ async function writeSettings(
   maybeThrowInjectedFsFault({ operation: "writeFile", path: settingsFile });
   const raw = await readLegacyAccountConnectionSettingsFile(settingsFile);
   const rollbackFields = retainLegacyAccountConnectionFields(raw);
-  const persisted = { ...rollbackFields, ...settings };
+  // Shared storage must retain preferences introduced by newer installed builds.
+  const persisted = {
+    ...(process.env.ZCODE_SPEC_HARNESS_SHARED_STORAGE === "1" ? raw : {}),
+    ...rollbackFields,
+    ...settings,
+  };
   // 旧 Team 尚待 OAuth 补组织时，schema 的默认 {} 不是用户的新选择。
   // 普通偏好保存必须保留新字段缺席；只有迁移提交或用户显式选连接才结束旧导入。
   if (!commitAccountSelection && readIncompleteLegacyTeamConnections(raw).length > 0) {
@@ -256,7 +255,23 @@ export function createSettingServiceWithMigrations(): {
       const currentGeneration = ++writeQueueGeneration;
       const shouldCommit = () => currentGeneration === writeQueueGeneration;
       return withSettingsWriteQueueTimeout(
-        (enterCommitPhase) => runUpdate(shouldCommit, enterCommitPhase),
+        async (enterCommitPhase) => {
+          if (process.env.ZCODE_SPEC_HARNESS_WINDOWS !== "1")
+            return runUpdate(shouldCommit, enterCommitPhase);
+          // Atomic rename alone cannot serialize read/merge/write across native Hosts.
+          await mkdir(getSettingsDir(), { recursive: true });
+          const release = await acquireFileLock(
+            getSettingsFile() + ".transaction",
+            [25, 50, 100, 200],
+            100,
+            8000,
+          );
+          try {
+            if (shouldCommit()) await runUpdate(shouldCommit, enterCommitPhase);
+          } finally {
+            await release();
+          }
+        },
         () => {
           if (writeQueueGeneration === currentGeneration) {
             writeQueueGeneration += 1;

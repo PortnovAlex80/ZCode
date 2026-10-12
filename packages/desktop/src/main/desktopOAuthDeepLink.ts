@@ -402,6 +402,7 @@ export function registerDeepLinkProtocol(
   },
   options: { iconPath?: string } = {},
 ) {
+  if (process.env.ZCODE_DISABLE_DEEP_LINK_REGISTRATION === "1") return;
   const scheme = "zcode";
 
   // 外部 URL 必须位于 -- 后；否则 Windows 引号拆分可把 URL 内容变成 Electron 启动参数。

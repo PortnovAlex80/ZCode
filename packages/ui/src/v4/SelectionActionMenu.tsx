@@ -14,6 +14,7 @@ export function SelectionActionMenu({
   sideDisabledTitle,
   onAddToCurrentTask,
   onAskInSideChat,
+  onDiscussFragment,
 }: {
   center: number;
   top: number;
@@ -23,6 +24,7 @@ export function SelectionActionMenu({
   sideDisabledTitle?: string;
   onAddToCurrentTask: () => void;
   onAskInSideChat: () => void;
+  onDiscussFragment?: () => void;
 }) {
   const { intl, locale } = useZCodeIntl();
   const ref = useRef<HTMLDivElement>(null);
@@ -84,6 +86,19 @@ export function SelectionActionMenu({
           >
             {intl.formatMessage({ id: "chat.selections.askInSideChat" })}
           </button>
+          {onDiscussFragment ? (
+            <>
+              <div className="w-px shrink-0 bg-border" />
+              <button
+                type="button"
+                data-conversation-selection-action="discuss-fragment"
+                className="min-w-0 px-2.5 py-1.5 hover:bg-menu-hover"
+                onClick={onDiscussFragment}
+              >
+                Discuss fragment
+              </button>
+            </>
+          ) : null}
         </>
       )}
     </div>,

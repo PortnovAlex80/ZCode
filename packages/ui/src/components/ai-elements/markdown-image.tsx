@@ -28,6 +28,7 @@ export { clampImagePreviewOffset as clampMarkdownImagePreviewOffset } from "@/co
 export type MarkdownImageProps = ComponentProps<"img"> & {
   node?: unknown;
   workspacePath?: string;
+  contentBasePath?: string;
   workspaceHomePath?: string;
   sessionId?: string;
   readAttachment?: (params: {
@@ -149,6 +150,7 @@ export function MarkdownImage({
   sessionId,
   src,
   workspacePath,
+  contentBasePath,
   workspaceHomePath,
   ...props
 }: MarkdownImageProps) {
@@ -158,10 +160,11 @@ export function MarkdownImage({
   const artifactRef = useMemo(() => decodeMarkdownArtifactImageSource(resolvedSrc), [resolvedSrc]);
   const localImageLink = useMemo(() => {
     const fileLink = resolveMarkdownFileLink(workspacePath, resolvedSrc, {
+      contentBasePath,
       homePath: workspaceHomePath,
     });
     return fileLink && isImagePreviewPath(fileLink.path) ? fileLink : null;
-  }, [resolvedSrc, workspaceHomePath, workspacePath]);
+  }, [resolvedSrc, workspaceHomePath, workspacePath, contentBasePath]);
   const [localImageDataUrl, setLocalImageDataUrl] = useState<string | null>(null);
   const [localImageFailed, setLocalImageFailed] = useState(false);
   const [artifactImageUrl, setArtifactImageUrl] = useState<string | null>(null);

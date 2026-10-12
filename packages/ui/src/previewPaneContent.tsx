@@ -1,7 +1,7 @@
 import type { MarkdownSelectionTarget } from "@/lib/conversationSelectionReference.js";
 /* eslint-disable max-lines -- PreviewPane 内容路由同时承载文本、图片、媒体、Office、PDF 和 PPTX 渲染。 */
 import type { BundledTheme } from "shiki";
-import { useMemo, type Ref, type SyntheticEvent, type UIEventHandler } from "react";
+import { useMemo, type Ref, type ReactNode, type SyntheticEvent, type UIEventHandler } from "react";
 import type { FileBinaryPreview, FileMediaPreview, FileTextSlice } from "@zcode/shared";
 import { inferCodeLanguage } from "@/lib/codeViewer.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
@@ -28,6 +28,8 @@ import { resolveCodeReviewContentProjection } from "@/previewPaneCodeReview.js";
 
 interface PreviewPaneContentProps {
   source: CodeViewerSource;
+  sourceEditor?: ReactNode;
+  onDiscussFragment?: (quote: string) => void;
   filePreview: FileTextSlice | null;
   fileTooLarge: boolean;
   loadingInitial: boolean;
@@ -58,6 +60,8 @@ interface PreviewPaneContentProps {
   theme?: Theme;
   workspacePath?: string;
   onOpenBrowserUrl?: (url: string) => void;
+  onOpenCodeViewer?: (source: CodeViewerSource) => void;
+  documentContentBasePath?: string;
   markdownSelectionTarget?: MarkdownSelectionTarget;
   markdownViewMode: "preview" | "code";
   svgViewMode: "preview" | "code";
@@ -71,6 +75,7 @@ interface PreviewPaneContentProps {
     selectedText: string;
     comment: string;
   }) => void;
+  onDiscussCodeComment?: PreviewPaneContentProps["onSubmitCodeComment"];
   onDeleteCodeComment?: (commentId: string) => void;
   onScroll?: UIEventHandler<HTMLDivElement>;
   scrollContainerRef?: Ref<HTMLDivElement>;
@@ -89,6 +94,8 @@ export function getPreviewPaneErrorTextClass(
 
 export function PreviewPaneContent({
   source,
+  sourceEditor,
+  onDiscussFragment,
   filePreview,
   fileTooLarge,
   loadingInitial,
@@ -118,6 +125,8 @@ export function PreviewPaneContent({
   theme,
   workspacePath,
   onOpenBrowserUrl,
+  onOpenCodeViewer,
+  documentContentBasePath,
   markdownSelectionTarget,
   markdownViewMode,
   svgViewMode,
@@ -127,6 +136,7 @@ export function PreviewPaneContent({
   enableCodeGutterUtility = false,
   codeCommentLabels,
   onSubmitCodeComment,
+  onDiscussCodeComment,
   onDeleteCodeComment,
   onScroll,
   scrollContainerRef,
@@ -195,10 +205,12 @@ export function PreviewPaneContent({
   if (source.type === "text") {
     const isMarkdownSource = source.language === "markdown";
     const isSvgSource = isSvgPath(source.path);
+    if (sourceEditor && (!isMarkdownSource || markdownViewMode === "code")) return sourceEditor;
     if (isMarkdownSource && markdownViewMode === "preview") {
       return (
         <MarkdownPreviewContent
           selectionTarget={markdownSelectionTarget}
+          onDiscussFragment={onDiscussFragment}
           sourceKey={
             source.path ??
             JSON.stringify([source.title, source.type === "text" ? source.content : ""])
@@ -210,6 +222,10 @@ export function PreviewPaneContent({
           theme={theme}
           codePreviewSettings={codePreviewSettings}
           onOpenBrowserUrl={onOpenBrowserUrl}
+          onOpenCodeViewer={onOpenCodeViewer}
+          contentBasePath={documentContentBasePath}
+          workspaceIdentity={source.workspaceIdentity}
+          workspaceRemoteSessionId={source.workspaceRemoteSessionId}
         />
       );
     }
@@ -231,6 +247,7 @@ export function PreviewPaneContent({
         enableGutterUtility={enableCodeGutterUtility}
         labels={codeCommentLabels}
         onSubmitCodeComment={onSubmitCodeComment}
+        onDiscussCodeComment={onDiscussCodeComment}
         onDeleteCodeComment={onDeleteCodeComment}
         onScroll={onScroll}
         scrollContainerRef={scrollContainerRef}
@@ -414,12 +431,17 @@ export function PreviewPaneContent({
     return (
       <MarkdownPreviewContent
         selectionTarget={markdownSelectionTarget}
+        onDiscussFragment={onDiscussFragment}
         sourceKey={source.path ?? source.title}
         sourceTitle={source.path ?? source.title}
         sourcePath={source.path}
         content={filePreview.content}
         workspacePath={workspacePath}
         onOpenBrowserUrl={onOpenBrowserUrl}
+        onOpenCodeViewer={onOpenCodeViewer}
+        contentBasePath={documentContentBasePath}
+        workspaceIdentity={source.workspaceIdentity}
+        workspaceRemoteSessionId={source.workspaceRemoteSessionId}
       />
     );
   }

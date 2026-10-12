@@ -83,6 +83,7 @@ export async function installWindowsOpenFolderContextMenu(options: {
   locale: Locale;
   logger: Logger;
 }): Promise<void> {
+  if (process.env.ZCODE_DISABLE_OPEN_FOLDER_REGISTRATION === "1") return;
   if (options.platform !== "win32") {
     return;
   }

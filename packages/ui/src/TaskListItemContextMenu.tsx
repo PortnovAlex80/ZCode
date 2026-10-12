@@ -3,10 +3,14 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu.js";
+import { usePlatform } from "@/hooks/usePlatform.js";
+import { toast } from "@/components/ui/toast.js";
 import { TaskActionMenuContent } from "@/TaskActionMenuContent.js";
 
 export function TaskListItemContextMenu({
   intl,
+  workspacePath,
+  localProject = true,
   isPinned,
   fileManagerLabel,
   taskSessionFile,
@@ -30,11 +34,10 @@ export function TaskListItemContextMenu({
   disableTaskActions = false,
   disabledReason,
 }: {
+  workspacePath?: string;
+  localProject?: boolean;
   intl: {
-    formatMessage: (
-      desc: { id: string },
-      values?: Record<string, string>,
-    ) => string;
+    formatMessage: (desc: { id: string }, values?: Record<string, string>) => string;
   };
   isPinned: boolean;
   fileManagerLabel: string;
@@ -65,8 +68,22 @@ export function TaskListItemContextMenu({
   disableTaskActions?: boolean;
   disabledReason?: string;
 }) {
+  const platform = usePlatform();
   return (
     <ContextMenuContent className="w-52">
+      {platform.openProjectWindow && workspacePath && localProject && (
+        <ContextMenuItem
+          disabled={disableTaskActions || !activeSessionId}
+          onSelect={() => {
+            void platform.openProjectWindow!({
+              workspacePath,
+              taskId: activeSessionId || undefined,
+            }).catch((error) => toast(String(error)));
+          }}
+        >
+          Open conversation in window
+        </ContextMenuItem>
+      )}
       <TaskActionMenuContent
         intl={intl}
         isPinned={isPinned}

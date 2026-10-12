@@ -37,6 +37,7 @@ import {
 import { collectWorkbenchLayout, dividerStyle, SPLIT_VAR_PREFIX } from "@/v4/workbenchLayout.js";
 import { WorkbenchLeafPane, type WorkbenchShellBinding } from "@/v4/WorkbenchPane.js";
 import { WorkbenchSplitDivider } from "@/v4/WorkbenchSplitDivider.js";
+import { specGeneralChatLeafPresentation } from "@/spec-document/specGeneralChatCollapse.js";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
 import type {
   ChatSearchResultHighlightRequest,
@@ -74,6 +75,8 @@ export interface V4WorkspaceChatAreaProps {
   readOnly?: boolean;
   /** Settings 等覆盖层打开时为 false，隐藏 Pane 不得消费一次性 Composer 请求。 */
   foregroundEnabled?: boolean;
+  interactionDialogsVisible?: boolean;
+  keepSpecExecutionSource?: boolean;
   remoteSessionId?: string;
   compactForRemoteControl?: boolean;
   /** primary pane 绑定的 CLI session（既有选择态 activeTaskId）；null = draft。 */
@@ -146,6 +149,8 @@ export function V4WorkspaceChatArea({
   isDesktop = false,
   readOnly = false,
   foregroundEnabled = true,
+  interactionDialogsVisible = true,
+  keepSpecExecutionSource = false,
   remoteSessionId,
   compactForRemoteControl = false,
   sessionId,
@@ -566,7 +571,12 @@ export function V4WorkspaceChatArea({
           // Settings 只把 workspace 设为 inert，Pane 之前仍保留 focused=true，
           // 会在隐藏状态提前消费 Plugin 试用的一次性预填。可见性并入 focus 后，
           // 请求只会由返回 workspace 后真正可交互的 Composer 消费。
-          focused={foregroundEnabled && focusedPaneId === leaf.paneId}
+          {...specGeneralChatLeafPresentation({
+            selected: focusedPaneId === leaf.paneId,
+            foregroundEnabled,
+            interactionDialogsVisible,
+            keepSpecExecutionSource,
+          })}
           showFocusIndicator={showFocusIndicator}
           canSplit={canSplit}
           shellWorkspaceKey={shellWorkspaceKey}
