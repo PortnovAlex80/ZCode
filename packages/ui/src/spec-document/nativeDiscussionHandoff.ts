@@ -239,6 +239,7 @@ export function useManagedNativeDiscussionOwner(
         ? () => {}
         : subscribeNativeDiscussionOwner({ workspacePath, workspaceIdentity, sessionId }, listener),
     () => readManagedNativeDiscussionOwner(workspacePath, workspaceIdentity, sessionId),
+    () => null,
   );
 }
 export function activateManagedNativeDiscussionOwner(
