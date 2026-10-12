@@ -1,5 +1,7 @@
 # Spec Harness: fork ZCODE
 
+План расширения на Word/Excel: [OFFICE-INTEGRATION.md](OFFICE-INTEGRATION.md).
+
 Ветка `research/spec-harness`, база ZCODE 3.15.1. План и архитектурные решения: [REFRACTORING.md](REFRACTORING.md). Исходники дополнений теперь живут в форке; старый overlay автоматически применять сюда нельзя.
 
 ## Три режима общения
