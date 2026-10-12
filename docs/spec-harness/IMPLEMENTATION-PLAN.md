@@ -69,16 +69,30 @@ acceptance remain open.
    request. It does not copy parent chat history or silently attach the whole document.
    Normal engine policy/system instructions and explicitly permitted model settings
    remain available; additional document reads must be explicit tool operations.
+   The only durable marker of a document-created session is the persisted gateway
+   binding (`sessions` plus the bounded `creations` ring); no marker is written into
+   CLI session state, and binding membership changes only through the pane — creation,
+   acknowledged deletion, or failure-driven retraction (frozen in
+   [DOCUMENT-HOSTS.md](DOCUMENT-HOSTS.md), "Заморозка границ диалога").
 2. Use native composer, model/mode selection, permissions, tools, questions, streaming,
    stop and workflows wherever supported. An independent draft shows the native form
    before its first Send. Creating an empty session must not call the model.
+   A capability the document pane does not yet carry (old-history pagination, file
+   attachments, model picker) is shown as explicitly absent with the reason it is
+   absent; a fake, dead or silently missing control is a defect, not a degraded mode.
 3. Open doc is accessible whenever a workspace can resolve project documents; no
    unexplained requirement to send a chat message first. Preserve file, draft, conflict,
    scroll, pane geometry and project-collapse state according to workspace/session
    identity. Document expansion changes the layout, not the running agent.
 4. An OS window and an in-renderer floating card are different placements. Roles and
    Return/Close behavior must be clear. Moving or closing a view must not start another
-   agent, cancel a run, duplicate a composer, or strand a draft.
+   agent, cancel a run, duplicate a composer, or strand a draft. The one-composer rule
+   has two frozen regimes: exclusive transfer inside desktop (exactly one renderer
+   mounts the panel; detach/return refuse during composition or pending attachments
+   and acknowledge only after explicit cleanup completes), and observation between
+   desktop and a document pane (no transfer exists or is claimed; the CLI per-session
+   admission is the single serializer, each surface renders the native admission
+   verdict and holds only its own drafts).
 5. Git owns source-file change history. Word owns revisions/comments and native apps
    own their contents. Do not add a persistent diff/proposal database. Small routing,
    presentation and unresolved-command identifiers serve different purposes and must
@@ -91,6 +105,18 @@ acceptance remain open.
    scoped Hosts and legitimate workspace/runtime isolation. An auxiliary view attaches
    to the existing owner; it does not create a competing owner of the same session.
    Shared-profile builds must not be run concurrently as independent writers.
+8. Session retraction from persisted document bindings is failure-driven: a session id
+   leaves the binding only on structured not-found signals (subscribe fault
+   `fault.subscribe.sessionNotFound`, rejected ACK `proto.sessionNotFound`, or deletion
+   acknowledged through the pane); other failures never retract, and the pane must show
+   "this thread no longer exists" when a restored binding session fails on first open.
+   An eager sessions-index subscription stays a deferred option gated on a public
+   services session-lifecycle feed; the gateway keeps no session store of its own.
+9. Reconnect clears ephemeral document anchors: pane-side quotes, the read selection
+   and context-pending state never cross a connection generation or document-instance
+   change; after reconnect a fresh explicit selection read is required before context
+   can be attached again. Decisions, tradeoffs and the derived next-wave code tasks are
+   frozen in [DOCUMENT-HOSTS.md](DOCUMENT-HOSTS.md), "Заморозка границ диалога".
 
 ## State ownership and the CLI path
 
@@ -155,7 +181,11 @@ The common document pane is currently a thin client with native history-window p
 tools, reasoning, permissions and the shared question-answer builder. It does **not**
 yet have every desktop dialog, old-history pagination or workflow configuration. Its
 general document chat is a binding-specific session, not a full project-catalog view.
-Do not claim complete SessionPane parity merely from shared styling or transport.
+Do not claim complete SessionPane parity merely from shared styling or transport. The
+frozen boundary decisions for one-composer policy, binding markers, session retraction,
+pagination/attachments/model-picker parity and reconnect anchor clearing live in
+[DOCUMENT-HOSTS.md](DOCUMENT-HOSTS.md) ("Заморозка границ диалога"); until the code
+tasks derived there land, those capabilities must render as absent with their reason.
 
 ## Delivery phases and dependency order
 

@@ -1,6 +1,7 @@
 # Implementation checklist: one ZCODE fork
 
-Updated: 2026-10-12. Baseline: `bfede821`. Target and order:
+Updated: 2026-10-13. Baseline: `bfede821` (recorded evidence baseline); Wave 1 was
+built on `aa8236cf` and integrated 2026-10-13. Target and order:
 [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md). Execution brief:
 [AGENT-TEAM-PROMPT.md](AGENT-TEAM-PROMPT.md).
 
@@ -24,9 +25,10 @@ recheck those items before restoring their accepted status.
 | Field                          | State                                                                                              |
 | ------------------------------ | -------------------------------------------------------------------------------------------------- |
 | Product decision               | One maintained fork build; official installer is fallback; no maintained overlay build             |
-| Current assignment             | Plan, English team prompt and checklist only                                                       |
-| Live runtime gate              | CLOSED: user has active ZCODE sessions; no launch/stop/profile changes or paid prompts             |
-| Immediate implementation order | D-01..D-05 desktop correctness; P-01 baseline analysis; then public document UI/binding boundaries |
+| Current assignment             | Wave 1 integrated 2026-10-13 on top of `aa8236cf`: 8/8 exclusive-path tasks implemented, independently reviewed and committed by root (see evidence below); no active implementation assignment |
+| Live runtime gate              | CLOSED: user has active ZCODE sessions; no launch/stop/profile changes or paid prompts; fixture/unit/docs work only |
+| Toolchain decisions            | Wave 1 agents used shell node 24.13.1 (`mise.toml` pins 24.14.0, mise not on PATH; patch-level deviation accepted and recorded per evidence); no agent ran lockfile-refreshing installs; root migration of `pnpm.overrides`/`patchedDependencies` into `pnpm-workspace.yaml` is the next root task |
+| Immediate implementation order | Root migrates `pnpm.overrides`/`patchedDependencies` into `pnpm-workspace.yaml` and verifies a frozen-lockfile install → P-02/P-03 code halves (eager worker cost, streaming/hidden-view invalidation; thresholds from RENDERING-BASELINE.md) → T code halves against the frozen boundary (surface attribution, reconnect anchor-clearing, pagination) → W-04 remainder (main/index.ts close-predicate seam; visible-label GUI live-gated) → root triages the 7 unmapped requirements into new checklist IDs; live gates only after an explicit fresh user release |
 | Release status                 | Not accepted: GUI, performance, live agent and installation gates remain open                      |
 
 ## Exclusive write assignments
@@ -35,9 +37,15 @@ Root fills this table before starting implementation agents and clears completed
 assignments. A reviewer is read-only. Shared schemas, exports, package manifests/lockfile,
 platform contracts and cross-package wiring stay with root unless explicitly reassigned.
 
+Wave 1 (2026-10-12/13) is complete: all eight exclusive-path assignments were implemented,
+independently reviewed (8/8 passed, no fix round triggered) and integrated by root; the
+rows were cleared per the policy above and the evidence lives in the entry below and the
+wave-report artifact. All reassigned files, including `DOCUMENT-HOSTS.md` and
+`IMPLEMENTATION-PLAN.md`, returned to root ownership at integration.
+
 | Item IDs   | Agent / role         | Exclusive paths                       | Depends on         | Reviewer / result                                |
 | ---------- | -------------------- | ------------------------------------- | ------------------ | ------------------------------------------------ |
-| A-01, R-01 | Root / documentation | `AGENTS.md`, `docs/spec-harness/*.md` | Inspected baseline | Local link/format/diff checks; runtime untouched |
+| pnpm migration | Root / toolchain | `pnpm-workspace.yaml`, `package.json`, `pnpm-lock.yaml` | Frozen Wave 1 tree | Root verifies frozen-lockfile install parity, then typecheck/lint |
 
 ## A — Canonical fork and architecture
 
@@ -47,8 +55,8 @@ platform contracts and cross-package wiring stay with root unless explicitly rea
 - [x] **A-01** One product, three context lanes, native-host scope and runtime gate are documented. Evidence: implementation plan and team prompt; user clarification 2026-10-12.
 - [x] **A-02** Fork has origin/upstream and migrated source modules. Evidence: baseline `bfede821`; [refactoring record](REFRACTORING.md).
 - [x] **A-03** Build and start are separate; start rejects changed sources/output and does not start Vite. Evidence: `scripts/spec-harness-production.mjs`, `scripts/test/spec-harness-production.test.mjs`.
-- [ ] **A-04** Review current call graph and ownership across Main/Host/services/CLI, including existing window-scoped Hosts, remote identity and document gateway; document any unresolved collision. Do not flatten all legitimate owners into one global Host.
-- [ ] **A-05** Complete requirement-to-source/test mapping and native screen-element inventory for the current fork. Reconcile inherited overlay requirements; no old-only behavior claimed as current.
+- [x] **A-04** Review current call graph and ownership across Main/Host/services/CLI, including existing window-scoped Hosts, remote identity and document gateway; document any unresolved collision. Do not flatten all legitimate owners into one global Host. Evidence: [ARCHITECTURE-REVIEW.md](ARCHITECTURE-REVIEW.md) (Impl F, Wave 1): owners table with path:line citations pinned at `aa8236cf`, collisions C1–C4 and missing boundaries B1–B5 each with status and smallest proposed owner; independent reviewer verified citations resolve; root read and accepted 2026-10-13. Design review only — no live acceptance claimed.
+- [x] **A-05** Complete requirement-to-source/test mapping and native screen-element inventory for the current fork. Reconcile inherited overlay requirements; no old-only behavior claimed as current. Evidence: [SCREEN-INVENTORY.md](SCREEN-INVENTORY.md) (Impl H, Wave 1): 110 element rows across desktop shell, conversation controls, document-host pane and launcher sections, each with location/visibility/action/owner/persistence/error/acceptance columns; Appendix B reconciles inherited `Z-*`/`S-*`/`ZR-*` registry (S-01..S-57 explicitly non-current); live acceptance cells stay open; independent reviewer verified citations; root spot-checked and accepted 2026-10-13.
 
 ## D — Desktop document behavior and state
 
@@ -148,3 +156,62 @@ Reviewed existing `bundle.mjs`, product identity and NSIS config. R-08..R-10 rem
 open: no installer wrapper, installer build/install or auto-update behavior was
 implemented/tested in this planning update. The old 46-ID count above belongs to the
 previous document check; the active checklist now has 49 unique items.
+
+2026-10-12 P0 reconciliation (workflow run `dwfrun-0fee7d67-aaa0-45b0-a995-59973dbae052`,
+read-only investigators; no source, profile or runtime change): workspace freshness check
+exit 0 at `aa8236cf` (clean, in sync with origin/dev); 37 open checklist items mapped to
+source and tests with live-gate classification; preliminary A-04 review recorded 4 ownership
+collisions and 5 missing boundaries (full document is Impl F); D/W/P/T investigations
+recorded 14 suspected defects with path:line evidence (highest: a child renderer crash
+during the Return handshake strands the detached panel,
+`packages/desktop/src/main/specDetachedPanels.ts:130-149/248-260`). Toolchain decisions are
+recorded in the root-state table above. The exclusive-assignment table was filled from the
+reconciliation plan before implementation agents started; A-04/A-05 stay open until the
+Impl F/Impl H documents land and pass independent review.
+
+2026-10-13 Wave 1 integration (workflow `dwfrun-0fee7d67-aaa0-45b0-a995-59973dbae052`,
+built on `aa8236cf`; implementation agents never committed):
+
+```text
+ID(s): W-01, W-02, W-03 (halves), D-01, D-04 (both halves), T-04 (gateway half), P-01
+       (isolated half), W-04 (fixture half), T-02..T-05 (design halves), A-04, A-05
+Revision / affected files: 8 tasks within their exclusive paths — 15 modified + 7 new
+       files (see the commit); no writes outside the assignment table (root diff check)
+Check command or manual scenario: pnpm exec vitest run over the 7 new/changed suites;
+       pnpm typecheck; pnpm lint; pnpm architecture:check --changed (workflow world.run)
+Result and relevant counts: suites 7 files / 52 tests passed (29.3 s, node 24.13.1);
+       typecheck exit 0; lint exit 0; architecture:check --changed exit 0
+Independent review: fresh read-only reviewer per task, 8/8 passed, no fix round;
+       full verdicts in the wave-report artifact
+Remaining limits / runtime gate: all live gates stay closed (GUI, model, renderer
+       profiling, install, Office/CAD); no item below claims live acceptance
+```
+
+Per-item advancement (all remain `[ ]` unless noted): W-02/W-01 — child renderer crash
+during quiescing/reattaching now destroys the child and restores the source pane instead of
+the close→reattach→15 s-timeout loop, source stays closable, stale ACKs after crash are
+inert (`specDetachedPanels.test.mjs` regressions). W-03/W-01 — detach-prepared and
+reattach-quiesced ACKs now wait for the pane's explicit cleanup-completion signal; the
+50 ms `afterPanelCleanup` timer is no longer a correctness bound
+(`specPanelCleanupSignal.test.ts`, 3 tests). D-01 — a missing persisted path renders a
+visible recovery state that clears the stale path while retaining the draft
+(`specDocumentPaneRecovery.test.ts`, 4 tests). D-04 — delete-refusal reasons derived from
+`canRemove` and shown (Impl B); gateway half retracts externally deleted sessions from
+persisted bindings on the runtime not-found signal, `deleteSession`-accepted removes and
+persists, no resurrection on reopen (4 new cases, `documentGateway.test.ts` 11 total).
+T-04 — durable binding restore across gateway restart fixture-covered; failures stay
+visible. P-01 — isolated half delivered: `scripts/perf/v4-replay-fixtures.mjs`,
+`scripts/perf/run-render-baseline.mjs`, `v4ReplayBaseline.test.ts` (13 tests) with p50/p95
+recorded in [RENDERING-BASELINE.md](RENDERING-BASELINE.md); renderer traces and
+native-vs-fork comparison stay live-gated, so P-01 stays open. W-04 — coordinator-level
+fake-Electron coverage (roles/titles, locate/dedupe-show, return-without-spawn, close-view
+vs Quit, duplicate refusal) in `specProjectWindows.test.mjs`; root added the vitest unit
+include for it; `main/index.ts` close-predicate seam and visible-label GUI acceptance
+remain. T-02..T-05 — design halves frozen in [DOCUMENT-HOSTS.md](DOCUMENT-HOSTS.md)
+(three-lane binding model, gateway-binding session marker, no retroactive MCP,
+one-composer transfer/observation policy, `conversationRowsRangeV4` pagination, reconnect
+anchor-clearing contract) with IMPLEMENTATION-PLAN.md product rules updated; code halves
+are derived from this freeze. A-04/A-05 accepted `[x]` above. Root additions at
+integration: `vitest.config.ts` unit include lists `specProjectWindows.test.mjs` (the
+W-04-flagged root follow-up); stray `nul` artifact removed. The requirements mapper found
+7 unmapped requirements pending root triage into new checklist IDs.
