@@ -1,8 +1,10 @@
 # Spec Harness: fork ZCODE
 
+Актуальная цель — одна поддерживаемая сборка из этого форка с обычным локальным профилем ZCODE. Официальный установщик — запасной вариант; отдельную overlay-сборку больше не развиваем. Управление работой: [план реализации](IMPLEMENTATION-PLAN.md), [чеклист с приёмкой](IMPLEMENTATION-CHECKLIST.md), [английский промпт команды](AGENT-TEAM-PROMPT.md). Чеклист отделяет проверенный код от ещё не выполненной живой приёмки.
+
 Интеграция Word/Excel/AutoCAD: [SRS](DOCUMENT-HOSTS.md), [сборка и подключение](../../prototypes/document-host/README.md). Ранний план: [OFFICE-INTEGRATION.md](OFFICE-INTEGRATION.md).
 
-Ветка `research/spec-harness`, база ZCODE 3.15.1. План и архитектурные решения: [REFRACTORING.md](REFRACTORING.md). Исходники дополнений теперь живут в форке; старый overlay автоматически применять сюда нельзя.
+Ветка `research/spec-harness`, база ZCODE 3.15.1. Перенос и исследования desktop: [REFRACTORING.md](REFRACTORING.md). Исходники дополнений теперь живут в форке; старый overlay автоматически применять сюда нельзя. Старый spec-harness служит только источником требований для сверки.
 
 ## Три режима общения
 

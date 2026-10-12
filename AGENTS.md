@@ -80,3 +80,9 @@
 - `info` 用于进程和会话生命周期、权限结果、一次性初始化等生产可用事件。
 - `warn` 用于可恢复异常；`error` 用于崩溃、握手失败、鉴权丢失等不可恢复错误。
 - 不在日志、示例或提交中写入凭据、真实用户数据和内部服务地址。
+
+## Spec Harness delivery
+
+- For Spec Harness work, read [the implementation plan](docs/spec-harness/IMPLEMENTATION-PLAN.md) and [the active checklist](docs/spec-harness/IMPLEMENTATION-CHECKLIST.md) before implementation or review. Use [the team prompt](docs/spec-harness/AGENT-TEAM-PROMPT.md) for bounded delegation. The fork is the one maintained product; the old external overlay is a read-only requirements reference.
+- Root keeps checklist IDs, exclusive file ownership, verified evidence and open acceptance current. Each file has one writer; implementation agents do not commit or push. Independent review follows a stable implementation. Do not mark GUI/model/performance acceptance complete from source or fixture evidence alone.
+- Read and honor the current runtime gate in the checklist. Planning/code/build work does not authorize changing an active ZCODE process/profile or running paid prompts. A fresh explicit user instruction releasing the runtime updates that gate; it takes precedence over an older status entry.

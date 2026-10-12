@@ -1,5 +1,7 @@
 # Spec Harness в форке ZCODE
 
+Этот документ сохраняет исследование и результаты первоначального переноса desktop. Актуальная цель — одна поддерживаемая версия форка; дальнейший порядок и приёмка находятся в [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) и [IMPLEMENTATION-CHECKLIST.md](IMPLEMENTATION-CHECKLIST.md). Результаты ниже относятся к указанным этапам, а не автоматически к будущим изменениям.
+
 Рабочий репозиторий: `D:\Development\ZCode-Harness`, origin — `PortnovAlex80/ZCode`, upstream — `zai-org/ZCode`. Начальная версия форка: 3.15.1, `aac4755666d09fdcd70272fcf063c077a639015f`. Источник наших дополнений: `D:\Development\spec-harness`, overlay на `29628c9acdb81b703bbd4080c207a0e7ce5e276e`. Это миграция исходников, а не обновление работающего приложения.
 
 ## Границы текущей работы
