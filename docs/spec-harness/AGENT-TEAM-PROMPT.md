@@ -187,6 +187,19 @@ installer fallback/data restoration. Verify original icon in taskbar/Alt+Tab/chi
 Retire only agreed obsolete overlay artifacts after acceptance, preserving user data.
 Keep build/start/upstream update and every screen behavior documented accurately.
 
+Include R-08..R-10 explicitly: add a root `Build-Installer.cmd` over the existing
+upstream electron-builder/NSIS Windows x64 pipeline. `Build-Harness.cmd` is only a
+production-output build, not an installer builder. Provide full preparation/build/
+package and a validated-cache fast rebuild; print artifact path, version/revision and
+SHA-256; never launch/install/publish as a build side effect. Include the correct CLI,
+native dependencies and original icons, without private data or development caches.
+Accepted fork features must work in the installed EXE without source-launcher env flags;
+document pairing stays opt-in. Distinguish desktop packaging from Office/CAD setup.
+Define fork-safe updates so official auto-install cannot overwrite our changes. Verify
+install/upgrade/uninstall/profile preservation in an owned isolated environment.
+The fork's original base matches peeled upstream tag `v3.15.1` at `aac47556...`; the
+downloaded official EXE is only the user's fallback, not a binary to patch.
+
 ## 7. Validation, evidence and completion
 
 Use meaningful regression/refusal tests with real contracts. Read the actual package

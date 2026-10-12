@@ -108,6 +108,9 @@ platform contracts and cross-package wiring stay with root unless explicitly rea
 - [ ] **R-05** One supported launcher/shortcut and original upstream Z icon (including its two slits) appear correctly in first/child windows, Alt+Tab, taskbar/pinning. User-provided replacement art is a later optional input.
 - [ ] **R-06** Document every current screen element and workflow with requirement → control → owner → test/evidence links. Build/update/upstream-merge and another-machine setup instructions match actual scripts.
 - [ ] **R-07** Full integration is independently reviewed and live release gates pass or user explicitly narrows scope. Retire obsolete overlay launchers/builds within an agreed list; keep user data and project files. Official installer remains fallback; no parallel supported legacy product.
+- [ ] **R-08** Implement one root `Build-Installer.cmd` over upstream Windows x64 electron-builder/NSIS bundling. Full and verified-cache rebuild paths prepare/build/package without launching/installing/publishing; fail clearly and print artifact path, upstream/fork version, source revision and SHA-256. Pin CLI/native assets; distinguish desktop package from Office/CAD setup.
+- [ ] **R-09** Packaged EXE enables accepted fork functionality without source-launcher environment variables. Verify installer/runtime closure, original icons, install/upgrade/uninstall and normal-profile reuse using owned isolated environments. No shipped credentials/dev cache/certificates, and no profile deletion.
+- [ ] **R-10** Define and verify fork-safe update behavior: automatic official update cannot silently replace our changes; reviewed upstream source update/rebuild is documented. Official installer is an explicit fallback; profile-schema/data restoration is separate from application reinstall.
 
 ## Evidence updates and handoff
 
@@ -133,3 +136,12 @@ No new implementation work has been accepted by this documentation update. The n
 implementation root starts from open IDs, not from a claim that the entire product is
 done. The future compact API reference map is intentionally outside this checklist's
 release scope; see DOCUMENT-HOSTS.md for that separate request.
+
+2026-10-12 installer planning update: `git ls-remote upstream 'refs/tags/*3.15.1*'`
+confirmed that the peeled `v3.15.1` tag equals original base
+`aac4755666d09fdcd70272fcf063c077a639015f`. The downloaded EXE's version resource
+reports ProductVersion 3.15.1 / FileVersion 3.15.1.8093; it was not executed.
+Reviewed existing `bundle.mjs`, product identity and NSIS config. R-08..R-10 remain
+open: no installer wrapper, installer build/install or auto-update behavior was
+implemented/tested in this planning update. The old 46-ID count above belongs to the
+previous document check; the active checklist now has 49 unique items.

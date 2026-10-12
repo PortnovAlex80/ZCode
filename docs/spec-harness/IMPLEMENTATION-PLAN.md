@@ -4,6 +4,13 @@ Updated: 2026-10-12. Inspected implementation baseline: `bfede821` on
 `research/spec-harness`. Repository: `D:\Development\ZCode-Harness`, origin
 `PortnovAlex80/ZCode`, upstream `zai-org/ZCode`.
 
+Release-base verification on 2026-10-12: upstream annotated tag `v3.15.1` resolves to
+`aac4755666d09fdcd70272fcf063c077a639015f`, the fork's original base commit. The local
+official fallback installer `C:\Users\user\Downloads\ZCode-3.15.1-win-x64.exe` reports
+ProductVersion `3.15.1` and FileVersion `3.15.1.8093`. It is a fallback executable,
+not source input to patch or extract for our build. Our fork adds commits to the tagged
+source; this does not imply byte-identical binaries or official signing credentials.
+
 This document defines the target and work order. The [checklist](IMPLEMENTATION-CHECKLIST.md)
 is the active status and evidence record. The [team prompt](AGENT-TEAM-PROMPT.md)
 is the reusable execution brief. Historical investigations remain supporting material,
@@ -180,6 +187,46 @@ checks, root typecheck/lint/changed architecture/affected pre-push checks and pr
 build at the integration boundary. Native acceptance uses disposable owned fixtures;
 it must not close a user's Office/CAD session. GUI/model evidence is a distinct gate.
 Do not repeat unrelated suites when no new change or failure justifies it.
+
+## Windows installer delivery
+
+`Build-Harness.cmd` currently compiles production output for source-checkout launch;
+it does **not** create an installer. Upstream already provides
+`packages/desktop/scripts/bundle.mjs` and `electron-builder.config.js`, including a
+Windows x64 NSIS target, runtime-dependency validation and artifact-size audit.
+The existing command shape is `pnpm bundle:desktop -- --os win --arch x64`.
+It still needs fork-specific integration and acceptance before becoming our release path.
+
+Implement a single root wrapper, proposed `Build-Installer.cmd`, with these semantics:
+
+- From any working directory, resolve this checkout, enforce pinned tools/target,
+  prepare missing dependencies/runtime assets and build the actual fork revision.
+- Reuse upstream bundling/NSIS rather than introducing another packaging stack.
+  Explicitly choose production backend/one installed product identity. Include the
+  correct CLI, native dependencies, preload, lazy chunks and original icon assets.
+- Enable the accepted fork features in the packaged application itself. A user opening
+  the installed EXE must not need `ZCODE_SPEC_HARNESS_WINDOWS=1` supplied by a source
+  launcher. Document gateway pairing remains separately opt-in.
+- Do not launch Electron, install the artifact, publish it, change profiles or replace
+  a live installation during build. Return a failing exit code on preparation/build/
+  packaging errors. Print the absolute installer path, revision/version and SHA-256.
+- Distinguish upstream base version from fork revision in metadata and artifacts.
+  Ship no credentials, source checkout, node_modules development cache, logs or private
+  certificates. Define separate installation/setup for Office/CAD components; do not
+  claim the desktop installer alone sideloads every native host integration.
+- Provide a normal full build and a fast repeated-build path using verified caches.
+  Skip preparation/build only when target, source, assets and output validation allow it.
+  First build may need downloads; do not promise constant build time or byte-identical
+  signed binaries. Signing is optional local configuration, never assumed available.
+- Define a fork-safe update policy: official automatic installation must not silently
+  overwrite the fork's features. Upstream source updates are reviewed, built and
+  accepted; installing the official product is an explicit fallback choice.
+- Verify actual generated installer resources/runtime closure, install/upgrade/uninstall
+  and reuse of a normal profile in an isolated authorized environment before replacing
+  the user's version. Preserve the profile and record schema compatibility/data recovery.
+
+Installer delivery is tracked by R-08..R-10 in the checklist. The wrapper is planned,
+not implemented by this documentation update.
 
 ## Runtime gate and later work
 
