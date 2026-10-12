@@ -24,6 +24,7 @@ export const configSchema = z
     token: z.string().min(32),
     keyPath: boundedString,
     certPath: boundedString,
+    caPath: boundedString,
     helperPath: boundedString,
     nodePath: boundedString,
     statePath: boundedString,

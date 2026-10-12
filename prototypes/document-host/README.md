@@ -32,7 +32,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File prototypes\excel-preview\Sta
 & .\prototypes\document-host\Prepare-Document-Gateway.ps1 -WorkspacePath @('D:\Development\ZCode-Harness', 'D:\Development\MyProject')
 ```
 
-Здесь укажите существующие нужные папки. Config и отдельный pairing token сохраняются в `%LOCALAPPDATA%\SpecHarness\document-host\gateway.json`. Команда не запускает Host и не меняет глобальные переменные среды. Пути helper/Node/CA закрепляются в этом config; сам config не передаётся в Git.
+Здесь укажите существующие нужные папки. Config и отдельный pairing token сохраняются в `%LOCALAPPDATA%\SpecHarness\document-host\gateway.json`. Команда не запускает Host и не меняет глобальные переменные среды. Пути helper/Node/CA закрепляются в этом config; сам config не передаётся в Git. `caPath` указывает на `ca.crt` локального Office CA, `certPath` — на `localhost.crt` сервера. После обновления прежнего config повторите Prepare, сохранив список своих папок; token останется прежним.
 
 Когда текущий ZCODE освобождён, завершите его штатно через Quit и выполните:
 
@@ -75,6 +75,7 @@ pnpm lint
 pnpm architecture:check -- --changed
 pnpm exec vitest run packages/desktop/test/documentGateway.test.ts packages/ui/test/documentHostClient.test.ts packages/ui/test/elicitationDialog.test.ts
 node --test prototypes/document-host/*.test.mjs
+node prototypes/document-host/mcp-tls-acceptance.mjs
 powershell -NoProfile -ExecutionPolicy Bypass -File prototypes/document-host/Test-Office-Adapters.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File prototypes/autocad-preview/Test-AutoCAD-Adapter.ps1
 ```

@@ -170,7 +170,7 @@ export async function dispatchDocumentAgent(
           "--binding",
           binding.id,
           "--ca",
-          config.certPath,
+          config.caPath,
         ],
         env: [
           { name: "ZCODE_DOCUMENT_BINDING_SECRET", value: binding.secret },

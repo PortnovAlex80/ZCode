@@ -6,11 +6,13 @@ $gatewayConfigPath = Join-Path $documentState 'gateway.json'
 $resolvedWorkspaces = @($WorkspacePath | ForEach-Object { (Resolve-Path -LiteralPath $_).Path })
 $devCertificates = Join-Path $env:USERPROFILE '.office-addin-dev-certs'
 if (-not (Test-Path -LiteralPath (Join-Path $devCertificates 'localhost.crt'))) { throw 'Run Start-Word-Preview.ps1 once to prepare the local HTTPS certificate.' }
+if (-not (Test-Path -LiteralPath (Join-Path $devCertificates 'ca.crt'))) { throw 'The local Office developer CA certificate is missing. Run Start-Word-Preview.ps1.' }
 $gatewayConfig = @{
     port = 43485
     token = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
     keyPath = Join-Path $devCertificates 'localhost.key'
     certPath = Join-Path $devCertificates 'localhost.crt'
+    caPath = Join-Path $devCertificates 'ca.crt'
     nodePath = (Get-Command node).Source
     helperPath = Join-Path $PSScriptRoot 'mcp-server.mjs'
     statePath = Join-Path $documentState 'bindings.json'

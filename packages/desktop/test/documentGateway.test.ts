@@ -136,6 +136,7 @@ async function fixture() {
     token: "fixture-token-that-is-longer-than-32",
     keyPath: path.join(root, "tls"),
     certPath: path.join(root, "tls"),
+    caPath: path.join(root, "root-ca.crt"),
     helperPath: "pinned-helper.mjs",
     nodePath: "pinned-node.exe",
     statePath: path.join(root, "state.json"),
@@ -328,6 +329,10 @@ describe("document gateway routing, no live CLI", () => {
       command: "pinned-node.exe",
       isolation: "session",
     });
+    expect(request.envelope.payload.mcpServers[1].args.slice(-2)).toEqual([
+      "--ca",
+      path.join(root, "root-ca.crt"),
+    ]);
     const saved = JSON.parse(await readFile(path.join(root, "state.json"), "utf8"));
     expect(saved[0].sessions).toEqual(["new-session"]);
     expect((await rpc("bind", { workspacePath: root, document: {} })).error).toMatch(/Reconnect/);
