@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
   defaultDocumentPresentation,
+  documentPaneWritesRetired,
   documentPresentationKey,
+  isMissingDocumentError,
+  newDocumentPaneWriteToken,
   readDocumentDraft,
   readDocumentPresentation,
+  recoverMissingDocumentPresentation,
   relativeDocumentPath,
   restoreDocumentDraft,
+  retireDocumentPaneWrites,
   writeDocumentDraft,
   writeDocumentPresentation,
 } from "./specDocumentPresentationState.js";
@@ -135,4 +140,83 @@ test("blocked storage is reported rather than claiming presentation or draft per
     false,
   );
   assert.equal(writeDocumentDraft("key", "doc.md", null, denied), false);
+});
+test("missing-document errors are classified so transient failures keep the persisted path", () => {
+  assert.equal(
+    isMissingDocumentError(Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" })),
+    true,
+  );
+  assert.equal(isMissingDocumentError(new Error("ENOENT: no such file or directory, open x")), true);
+  assert.equal(isMissingDocumentError({ code: "ENOTDIR" }), true);
+  assert.equal(isMissingDocumentError(new Error("Documents must be text files up to 2 MiB.")), false);
+  assert.equal(isMissingDocumentError(new Error("Document is outside the granted workspace.")), false);
+  assert.equal(isMissingDocumentError(undefined), false);
+});
+test("missing persisted document recovery clears the stale path but retains layout and draft", () => {
+  const storage = memoryStorage();
+  const key = documentPresentationKey("D:/gone", "gone-identity");
+  const state = {
+    ...defaultDocumentPresentation(),
+    path: "docs/gone.md",
+    editing: true,
+    scrollTop: 200,
+    activeThreadId: "thread",
+    discussionsVisible: true,
+    discussionMode: "floating" as const,
+  };
+  writeDocumentPresentation(key, state, storage);
+  writeDocumentDraft(key, "docs/gone.md", { content: "kept draft", baseSha256: "hash" }, storage);
+  const recovered = recoverMissingDocumentPresentation(key, storage);
+  assert.ok(recovered);
+  assert.equal(recovered.path, null);
+  assert.equal(recovered.activeThreadId, null);
+  assert.equal(recovered.discussionsVisible, false);
+  assert.equal(recovered.scrollTop, 0);
+  assert.equal(recovered.editing, true, "layout decisions survive recovery");
+  assert.equal(recovered.discussionMode, "floating");
+  assert.deepEqual(readDocumentPresentation(key, storage), recovered);
+  assert.deepEqual(readDocumentDraft(key, "docs/gone.md", storage), {
+    content: "kept draft",
+    baseSha256: "hash",
+  });
+  // 幂等：无 path 时按当前状态原样返回，不再改写存储。
+  assert.deepEqual(recoverMissingDocumentPresentation(key, storage), recovered);
+  // 没有过期 path 时也安全。
+  assert.deepEqual(
+    recoverMissingDocumentPresentation(documentPresentationKey("D:/clean"), storage),
+    defaultDocumentPresentation(),
+  );
+});
+test("retired pane write tokens keep the successor draft authoritative across windows", () => {
+  const storage = memoryStorage();
+  const key = documentPresentationKey("D:/handoff");
+  const source = newDocumentPaneWriteToken();
+  const child = newDocumentPaneWriteToken();
+  assert.equal(writeDocumentDraft(key, "a.md", { content: "child", baseSha256: "h2" }, storage, child), true);
+  retireDocumentPaneWrites(key, source, storage);
+  // 已退役令牌的写入（含删除）被跳过且不报存储错误。
+  assert.equal(writeDocumentDraft(key, "a.md", { content: "stale", baseSha256: "h1" }, storage, source), true);
+  assert.equal(writeDocumentDraft(key, "a.md", null, storage, source), true);
+  assert.deepEqual(readDocumentDraft(key, "a.md", storage), { content: "child", baseSha256: "h2" });
+  assert.equal(documentPaneWritesRetired(key, child, storage), false);
+  // 退役列表有界：最早的令牌被挤出后回归最后写入者语义。
+  const oldest = newDocumentPaneWriteToken();
+  retireDocumentPaneWrites(key, oldest, storage);
+  for (let index = 0; index < 10; index += 1)
+    retireDocumentPaneWrites(key, newDocumentPaneWriteToken(), storage);
+  assert.equal(documentPaneWritesRetired(key, oldest, storage), false);
+  // 存储不可用时退役与查询都不抛错。
+  const denied = {
+    getItem() {
+      throw new Error("denied");
+    },
+    setItem() {
+      throw new Error("quota");
+    },
+    removeItem() {
+      throw new Error("denied");
+    },
+  };
+  assert.doesNotThrow(() => retireDocumentPaneWrites("k2", "token", denied));
+  assert.equal(documentPaneWritesRetired("k2", "token", denied), false);
 });

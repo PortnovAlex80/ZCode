@@ -141,7 +141,9 @@ export function SpecDiscussionPane({
             variant="ghost"
             size="icon-sm"
             aria-label="Delete discussion"
-            title="Delete discussion"
+            title={
+              native.removeBlockedReason ? `Delete discussion: ${native.removeBlockedReason}` : "Delete discussion"
+            }
             disabled={ownedElsewhere || !native.canRemove}
             onClick={() => setConfirmDelete(true)}
           >
@@ -151,6 +153,12 @@ export function SpecDiscussionPane({
         <blockquote className="max-h-24 overflow-auto border-l-2 border-border pl-2 text-ui-sm">
           {thread.anchor.quote}
         </blockquote>
+        {!native.canRemove && !ownedElsewhere ? (
+          /* D-04：拒绝原因与 canRemove 同源推导，删除被拒时可见，而不是只有禁用态。 */
+          <p role="status" className="mt-1 text-ui-xs text-foreground-subtle">
+            {native.removeBlockedReason}
+          </p>
+        ) : null}
         {confirmDelete ? (
           <div className="mt-2 space-y-2 text-ui-sm" role="alert">
             <p>Delete this discussion and close its native session?</p>

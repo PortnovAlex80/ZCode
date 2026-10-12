@@ -37,6 +37,18 @@ export async function dispatchDocumentAgent(
     if (typeof sessionId !== "string" || !requireBinding(connection).sessions.includes(sessionId))
       throw new Error("Session does not belong to this document binding");
   };
+  const retractSession = async (sessionId: string) => {
+    if (!binding.sessions.includes(sessionId)) return;
+    binding.sessions = binding.sessions.filter((id) => id !== sessionId);
+    await persist();
+  };
+  // 原因：会话可能在外部被删除（任务列表删除、存储清理），但 gateway 持久化的
+  // binding.sessions 仍保留该 id，重开文档时会复活已删除的线程。修复依据：CLI 冷恢复
+  // 对「内存注册表与 store 都没有」的会话抛结构化 fault.subscribe.sessionNotFound
+  // （cold-session-resume.ts，reasonCode 内嵌在 message 中跨 RPC 透传），订阅失败时
+  // 按该信号撤销绑定并持久化；错误仍原样抛出，失败对 pane 保持可见。
+  const runtimeReportsSessionDeleted = (error: unknown) =>
+    error instanceof Error && error.message.includes("fault.subscribe.sessionNotFound");
   const binding = requireBinding(current);
   const method = String(params.name);
   const input = z.record(z.string(), z.unknown()).parse(params.args ?? {});
@@ -60,13 +72,18 @@ export async function dispatchDocumentAgent(
           send(current, { event: "frame", frame }),
         ),
       );
-    const result = await agent.subscribeConversationV4({
-      ...workspace,
-      sessionId: String(input.sessionId),
-      visibility: "foreground",
-    });
-    current.subscriptions.add(result.ack.subscriptionId);
-    return result;
+    try {
+      const result = await agent.subscribeConversationV4({
+        ...workspace,
+        sessionId: String(input.sessionId),
+        visibility: "foreground",
+      });
+      current.subscriptions.add(result.ack.subscriptionId);
+      return result;
+    } catch (error) {
+      if (runtimeReportsSessionDeleted(error)) await retractSession(String(input.sessionId));
+      throw error;
+    }
   }
   if (method === "resyncConversationV4" || method === "unsubscribeConversationV4") {
     const subscriptionId = boundedString.parse(input.subscriptionId);
@@ -198,9 +215,18 @@ export async function dispatchDocumentAgent(
     if (!binding.sessions.includes(sessionId)) binding.sessions.push(sessionId);
     await persist();
   }
-  if (envelope.type === "deleteSession" && ack.status === "accepted") {
-    binding.sessions = binding.sessions.filter((id) => id !== envelope.sessionId);
-    await persist();
-  }
+  if (envelope.type === "deleteSession" && ack.status === "accepted" && envelope.sessionId !== null)
+    await retractSession(envelope.sessionId);
+  // 原因：会话被外部删除后，session 命令在 CLI inbox 裁决阶段即被拒
+  // （status=rejected + reasonCode=proto.sessionNotFound，command-inbox.ts decide），
+  // 旧逻辑会让持久化绑定残留死 id。修复依据：仅在该结构化信号下撤销并持久化；
+  // 其它拒绝/失败（如 staleRevision、执行失败）不撤销，避免把仍持久存在的会话
+  // 误判为已删除而搁浅（stranded）；rejected ACK 原样返回 pane，失败保持可见。
+  if (
+    envelope.sessionId !== null &&
+    ack.status === "rejected" &&
+    ack.reasonCode === "proto.sessionNotFound"
+  )
+    await retractSession(envelope.sessionId);
   return ack;
 }

@@ -92,6 +92,9 @@ export default defineConfig({
           include: [
             "packages/*/test/**/*.test.ts",
             "packages/desktop/test/specDetachedPanels.test.mjs",
+            // specProjectWindows.test.mjs 与 specDetachedPanels 同为 fake-Electron 的 .mjs 套件，
+            // 不匹配上面的 *.test.ts 模式；W-04 波次补齐后必须加入默认入口，避免只在定向运行时生效。
+            "packages/desktop/test/specProjectWindows.test.mjs",
             // 架构治理要求 managed 模块自带 contract.test.ts（见 architecture-policy.yaml），放在模块目录内。
             "packages/*/src/**/contract.test.ts",
             "packages/ui/src/spec-document/**/*.test.ts",

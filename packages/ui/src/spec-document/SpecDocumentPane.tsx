@@ -65,13 +65,30 @@ import {
 
 import {
   documentPresentationKey,
+  isMissingDocumentError,
+  newDocumentPaneWriteToken,
   readDocumentPresentation,
+  recoverMissingDocumentPresentation,
   writeDocumentPresentation,
   readDocumentDraft,
   writeDocumentDraft,
   restoreDocumentDraft,
+  retireDocumentPaneWrites,
   type DocumentPresentationState,
 } from "./specDocumentPresentationState.js";
+import { specDocumentCleanupKey, usePanelCleanupSignal } from "./specWindowBridge.js";
+
+/**
+ * 文档面板清理哨兵：作为面板根节点的最后一个 child 渲染。React 对被删除子树
+ * 的被动清理按父先子后的深度优先顺序执行，最后才会访问到该哨兵；哨兵完成
+ * 清理完成信号即代表整个文档面板子树（讨论面板、预览等）的被动清理已执行。
+ * detach/return 的 ACK 等待该信号；源窗口面板不知道自己的 panelKey，
+ * 因此按 workspace+path 作为信号键（useSpecDetachedPanels 用同一函数计算等待键）。
+ */
+function DocumentCleanupSentinel({ scopeKey }: { scopeKey: string }) {
+  usePanelCleanupSignal(scopeKey);
+  return null;
+}
 
 export interface SpecDocumentPaneProps {
   workspacePath: string;
@@ -120,6 +137,13 @@ function Documents({
   const presentationKey = documentPresentationKey(workspacePath, workspaceIdentity);
   const [restoredPresentation] = useState(() => readDocumentPresentation(presentationKey));
   const presentationRef = useRef<DocumentPresentationState>(restoredPresentation);
+  // 本面板的草稿写入令牌：卸载清理时退役，之后任何迟到写入都不得覆盖
+  // 接管面板（子窗口/重新挂载的源面板）已经持久化的草稿。
+  const [paneWriteToken] = useState(() => newDocumentPaneWriteToken());
+  useEffect(
+    () => () => retireDocumentPaneWrites(presentationKey, paneWriteToken),
+    [presentationKey, paneWriteToken],
+  );
   const onActivateRef = useRef(onActivate);
   onActivateRef.current = onActivate;
   const restoringScrollRef = useRef(true);
@@ -262,13 +286,15 @@ function Documents({
         presentationKey,
         document.path,
         dirty ? { content: draft, baseSha256 } : null,
+        undefined,
+        paneWriteToken,
       )
     ) {
       setError(
         "The unsaved document draft could not be retained for reopening. Keep this pane open until saved.",
       );
     }
-  }, [presentationKey, document, draft, baseSha256, dirty]);
+  }, [presentationKey, document, draft, baseSha256, dirty, paneWriteToken]);
   useEffect(() => {
     if (!document) return;
     presentationRef.current = {
@@ -404,7 +430,9 @@ function Documents({
       setError(String(cause));
     }
     if (!documents) setError("Documents are unavailable in this build.");
-    else
+    else {
+      // 恢复目标在链外计算，失败分类时需要原始请求路径（而不是序列化后的异常文本）。
+      const requestedPath = initialPath || restoredPresentation.path;
       void documents
         .getWorkspace()
         .then(async (grant) => {
@@ -414,7 +442,6 @@ function Documents({
             setFiles(next);
             setStatus(`${next.length} documents · local UTF-8 files`);
           }
-          const requestedPath = initialPath || restoredPresentation.path;
           if (requestedPath) {
             const normalizedRoot = grant.root.replaceAll("\\", "/").replace(/\/$/, "");
             const normalizedPath = requestedPath.replaceAll("\\", "/");
@@ -456,8 +483,31 @@ function Documents({
           }
         })
         .catch((cause) => {
-          if (live) setError(String(cause));
+          if (!live) return;
+          // 原因：持久化恢复的文档已被删除/移动时，原先只显示原始报错，过期 path
+          // 留在持久化视图里导致每次重开都再失败；草稿仍在存储中却不可见、不可恢复。
+          // 修复：文件缺失时清掉过期的 path/线程选择/滚动（草稿条目保留），
+          // 显示可恢复状态：文件回来或再次选择该文件时草稿会自动恢复。
+          if (requestedPath && isMissingDocumentError(cause)) {
+            const recovered = recoverMissingDocumentPresentation(presentationKey);
+            presentationRef.current = recovered ?? {
+              ...presentationRef.current,
+              path: null,
+              activeThreadId: null,
+              discussionsVisible: false,
+              scrollTop: 0,
+            };
+            setActiveThreadId(null);
+            setDiscussionsVisible(false);
+            setStatus("Document missing · choose another document");
+            setError(
+              `${requestedPath.replaceAll("\\", "/")} is no longer in this workspace. Choose another document to continue; the unsaved draft for that file is retained and restored if it returns.`,
+            );
+            return;
+          }
+          setError(String(cause));
         });
+    }
     return () => {
       live = false;
       releaseThreads?.();
@@ -612,10 +662,16 @@ function Documents({
       if (
         previous &&
         draftRef.current !== previous.content &&
-        !writeDocumentDraft(presentationKey, previous.path, {
-          content: draftRef.current,
-          baseSha256: baseSha256Ref.current,
-        })
+        !writeDocumentDraft(
+          presentationKey,
+          previous.path,
+          {
+            content: draftRef.current,
+            baseSha256: baseSha256Ref.current,
+          },
+          undefined,
+          paneWriteToken,
+        )
       ) {
         setError(
           "The unsaved document draft could not be retained. Save it before opening another discussion.",
@@ -877,6 +933,8 @@ function Documents({
                           content !== document!.content
                             ? { content, baseSha256: baseSha256Ref.current }
                             : null,
+                          undefined,
+                          paneWriteToken,
                         )
                       ) {
                         setError(
@@ -1102,6 +1160,14 @@ function Documents({
         ) : null}
         {writable && writers ? <p>Save waits for active conversations to finish.</p> : null}
       </div>
+      {document ? (
+        <DocumentCleanupSentinel
+          scopeKey={specDocumentCleanupKey(
+            workspaceIdentity?.trim() || workspacePath,
+            document.path,
+          )}
+        />
+      ) : null}
     </div>
   );
 }

@@ -108,6 +108,7 @@ export function registerSpecDetachedPanels(options: {
     child?: BrowserWindow;
     phase: "preparing" | "booting" | "detached" | "quiescing" | "reattaching";
     closing: boolean;
+    childBroken?: boolean;
     returnRequested?: boolean;
     timer?: ReturnType<typeof setTimeout>;
   };
@@ -131,6 +132,11 @@ export function registerSpecDetachedPanels(options: {
     if (!transfers.has(transfer.id)) return;
     cancelTimer(transfer);
     if (
+      // 子渲染进程已崩溃时不能再走“退回 detached 并重新 show 子窗口”的分支：
+      // 崩溃的渲染进程永远无法应答 panel-reattach-prepare/quiesced，Return 只能靠
+      // 15s 超时回滚，用户点 X 又会再次触发 reattach，形成 close→reattach→timeout
+      // 死循环，且残留的 transfer 会让源窗口的 close 守卫永远拦截关闭。
+      !transfer.childBroken &&
       (transfer.phase === "reattaching" || transfer.phase === "quiescing") &&
       !transfer.source.isDestroyed() &&
       transfer.child &&
@@ -255,9 +261,15 @@ export function registerSpecDetachedPanels(options: {
       child.on("closed", () => {
         if (!transfer.closing) rollback(transfer, "Detached panel closed unexpectedly");
       });
-      child.webContents.on("render-process-gone", () =>
-        rollback(transfer, "Detached panel renderer stopped"),
-      );
+      child.webContents.on("render-process-gone", () => {
+        // 原因：Return 握手（quiescing/reattaching）期间子渲染进程崩溃时，BrowserWindow
+        // 仍存活但渲染端已死；旧逻辑把它当作“可回退的 detached 子窗口”重新 show，
+        // 导致死窗口无人应答、只能靠 15s 超时回滚并陷入 close→reattach→timeout 循环。
+        // 修复：先标记子面板已损坏，强制 rollback 走“销毁子窗口并向源窗口回滚”的分支，
+        // 立即释放 transfer 让源窗口恢复面板且可正常关闭；不放宽 TIMEOUT。
+        transfer.childBroken = true;
+        rollback(transfer, "Detached panel renderer stopped");
+      });
       child.webContents.on("did-fail-load", (_event, code, _description, _url, isMainFrame) => {
         if (isMainFrame && code !== -3) rollback(transfer, "Detached panel failed to load");
       });

@@ -15,9 +15,11 @@ import { SessionPane } from "@/v4/SessionPane.js";
 import { V4PaneConversationProvider } from "@/v4/V4ConversationContext.js";
 import { SpecDocumentPane } from "./SpecDocumentPane.js";
 import {
-  afterPanelCleanup,
+  acknowledgePanelAfterCleanup,
   observePanelComposition,
+  panelCleanupKeys,
   specWindowBridge,
+  usePanelCleanupSignal,
   type PanelTransfer,
   type SpecWindowBridge,
 } from "./specWindowBridge.js";
@@ -40,6 +42,27 @@ class PanelFailureBoundary extends Component<
       this.props.children
     );
   }
+}
+
+/**
+ * 面板清理边界：React 对被删除子树的被动清理按父先子后的深度优先顺序执行
+ * （react-dom 19 `commitPassiveUnmountEffectsInsideOfDeletedTree_begin`：先本fiber
+ * 的 passive destroy，再下钻 child）。因此边界自身的清理先于面板内容完成，不能
+ * 作为“子树已清理”的信号。哨兵作为最后一个 child 渲染，遍历最后才执行，
+ * 其清理完成即代表整个面板子树（含未插桩的 SessionPane）的被动清理已经执行；
+ * reattach-quiesced ACK 由该显式信号放行，不再使用 50ms 定时器。
+ */
+function PanelCleanupSentinel({ panelKey }: { panelKey: string }) {
+  usePanelCleanupSignal(panelKey);
+  return null;
+}
+function PanelCleanupBoundary({ panelKey, children }: { panelKey: string; children: ReactNode }) {
+  return (
+    <>
+      {children}
+      <PanelCleanupSentinel panelKey={panelKey} />
+    </>
+  );
 }
 
 export function SpecDetachedPanelRoot({
@@ -69,10 +92,15 @@ export function SpecDetachedPanelRoot({
           bridge.specPanelAck("failed", { transferId: value.transferId });
           return;
         }
-        flushSync(() => setQuiescing(true));
-        void afterPanelCleanup().then(() =>
-          bridge.specPanelAck("reattach-quiesced", { transferId: value.transferId }),
+        // 先快照面板（含清理边界）当前登记的清理作用域，再同步静默卸载；
+        // reattach-quiesced ACK 只在该显式信号完成后发出。
+        void acknowledgePanelAfterCleanup(
+          bridge,
+          "reattach-quiesced",
+          { transferId: value.transferId },
+          panelCleanupKeys(value.target),
         );
+        flushSync(() => setQuiescing(true));
       }),
       bridge.onSpecPanelEvent("reattach-rollback", (value) => {
         setQuiescing(false);
@@ -146,13 +174,19 @@ export function SpecDetachedPanelRoot({
                           {error}
                         </p>
                       ) : null}
+                      {quiescing ? (
+                        <p role="status" className="p-3 text-ui-sm text-foreground-subtle">
+                          Returning this panel to the original window…
+                        </p>
+                      ) : null}
                       {target && transfer && committed && !quiescing ? (
                         <PanelFailureBoundary
                           transferId={transfer.transferId}
                           bridge={platform.specWindows}
                         >
                           <div className="flex min-h-0 flex-1 flex-col">
-                            {target.kind === "document" ? (
+                            <PanelCleanupBoundary panelKey={target.panelKey}>
+                              {target.kind === "document" ? (
                               <SpecDocumentPane
                                 workspacePath={target.workspacePath}
                                 workspaceIdentity={target.workspaceIdentity}
@@ -188,6 +222,7 @@ export function SpecDetachedPanelRoot({
                             ) : (
                               <p role="alert">Choose an existing conversation before detaching.</p>
                             )}
+                            </PanelCleanupBoundary>
                           </div>
                         </PanelFailureBoundary>
                       ) : null}

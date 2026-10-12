@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- 原因：D-04 修复补上与 canRemove 同源的删除拒绝原因推导
+   （specDiscussionRemoveRefusal），文件略超 400 行；与 SpecDocumentPane.tsx 同属
+   文档会话控制模块，按既有先例保留在同一文件以避免第二真相来源。 */
 import { useEffect, useState } from "react";
 import type {
   CommandAck,
@@ -28,6 +31,32 @@ export function nativeSessionHasWriters(snapshot: ConversationSnapshot): boolean
     snapshot.queue.items.length > 0 ||
     snapshot.backgroundWorks.some((work) => work.status === "running")
   );
+}
+
+/**
+ * D-04：删除讨论的拒绝原因与 canRemove 使用完全相同的输入推导（单一真相来源），
+ * 禁止再出现“按钮禁用但无解释”的第二套判断。返回 null 表示允许删除。
+ */
+export function specDiscussionRemoveRefusal(input: {
+  pending: boolean;
+  dispatching: boolean;
+  sessionId?: string;
+  projectionStatus: string;
+  snapshot: ConversationSnapshot | null;
+  optimisticCommandCount: number;
+}): string | null {
+  if (input.pending)
+    return "Deletion waits while native command admission is still being checked.";
+  if (input.dispatching) return "Deletion waits for the in-flight native command to settle.";
+  if (input.sessionId) {
+    if (input.projectionStatus !== "live" || !input.snapshot)
+      return "The native session is not reachable yet; deletion resumes when it reconnects.";
+    if (nativeSessionHasWriters(input.snapshot))
+      return "The native session is running or has queued work; stop it before deleting.";
+    if (input.optimisticCommandCount > 0)
+      return "The native session still has unacknowledged local commands; check their status before deleting.";
+  }
+  return null;
 }
 
 /** Observes known sessions; this is a UI guard, not a runtime-wide writer lock. */
@@ -353,14 +382,16 @@ export function useSpecDiscussion(
     (!thread.executionConfig ||
       specExecutionConfigMatches(thread.executionConfig, snapshot.config)),
   );
-  const canRemove =
-    !thread.pending &&
-    !dispatching &&
-    (!thread.sessionId ||
-      (projection.status === "live" &&
-        snapshot &&
-        !nativeSessionHasWriters(snapshot) &&
-        projection.optimisticCommands.length === 0));
+  // 拒绝原因与 canRemove 同源；null 即允许删除。
+  const removeBlockedReason = specDiscussionRemoveRefusal({
+    pending: Boolean(thread.pending),
+    dispatching,
+    sessionId: thread.sessionId,
+    projectionStatus: projection.status,
+    snapshot,
+    optimisticCommandCount: projection.optimisticCommands.length,
+  });
+  const canRemove = removeBlockedReason === null;
   async function remove() {
     if (!canRemove) return;
     if (thread.sessionId)
@@ -384,6 +415,7 @@ export function useSpecDiscussion(
     prepare,
     remove,
     canRemove,
+    removeBlockedReason,
     configurationReady,
     error,
     dispatching,

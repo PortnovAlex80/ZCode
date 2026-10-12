@@ -419,4 +419,124 @@ describe("document gateway routing, no live CLI", () => {
     });
     expect((await flight).result.text).toBe("Selection");
   });
+  it("retracts a binding session on the runtime not-found signal, persists and does not resurrect on reopen", async () => {
+    const { command, rpc, config } = await fixture();
+    await command("retract-create", { workspaceId: root });
+    state.agent.subscribeConversationV4.mockRejectedValueOnce(
+      new Error(
+        "Session is not active and not persisted: new-session (fault.subscribe.sessionNotFound)",
+      ),
+    );
+    const subscribe = await rpc("agent", {
+      name: "subscribeConversationV4",
+      args: { sessionId: "new-session" },
+    });
+    expect(subscribe.error).toMatch(/fault\.subscribe\.sessionNotFound/);
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0].sessions).toEqual(
+      [],
+    );
+    await gateway!.dispose();
+    gateway = undefined;
+    gateway = await startDocumentGateway(
+      { get: (key: string) => (key === "agent" ? state.agent : state.mcp) } as any,
+      path.join(root, "config.json"),
+    );
+    const reopened = new Socket();
+    state.wss.emit("connection", reopened);
+    const rpc2 = async (method: string, params: any = {}) => {
+      const id = crypto.randomUUID();
+      reopened.emit("message", Buffer.from(JSON.stringify({ id, method, params })));
+      await vi.waitFor(() => expect(reopened.replies.some((item) => item.id === id)).toBe(true));
+      return reopened.replies.find((item) => item.id === id);
+    };
+    await rpc2("pair", { token: config.token });
+    const bind = await rpc2("bind", {
+      workspacePath: root,
+      document: {
+        host: "word",
+        documentId: "document-1",
+        documentInstanceId: "instance-2",
+        name: "Sample.docx",
+      },
+    });
+    expect(bind.result.sessions).toEqual([]);
+  });
+  it("retracts a binding session when a session-scoped command is rejected with the runtime not-found signal", async () => {
+    const { command, rpc } = await fixture();
+    await command("gone-create", { workspaceId: root });
+    state.agent.sendConversationCommandV4.mockResolvedValueOnce({
+      commandId: "stop-gone",
+      status: "rejected",
+      reasonCode: "proto.sessionNotFound",
+      revisionAtDecision: 0,
+    });
+    const reply = await rpc("agent", {
+      name: "sendConversationCommandV4",
+      args: {
+        envelope: {
+          type: "stop",
+          commandId: "stop-gone",
+          clientId: "test-client",
+          sessionId: "new-session",
+          payload: {},
+          issuedAt: Date.now(),
+        },
+      },
+    });
+    expect(reply.result).toMatchObject({
+      status: "rejected",
+      reasonCode: "proto.sessionNotFound",
+    });
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0].sessions).toEqual(
+      [],
+    );
+  });
+  it("removes the binding session when deleteSession is accepted and persists", async () => {
+    const { command, rpc } = await fixture();
+    await command("delete-create", { workspaceId: root });
+    const reply = await rpc("agent", {
+      name: "sendConversationCommandV4",
+      args: {
+        envelope: {
+          type: "deleteSession",
+          commandId: "delete-1",
+          clientId: "test-client",
+          sessionId: "new-session",
+          payload: {},
+          issuedAt: Date.now(),
+        },
+      },
+    });
+    expect(reply.result).toMatchObject({ status: "accepted" });
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0].sessions).toEqual(
+      [],
+    );
+  });
+  it("keeps the binding session when deleteSession is not accepted", async () => {
+    const { command, rpc } = await fixture();
+    await command("keep-create", { workspaceId: root });
+    state.agent.sendConversationCommandV4.mockResolvedValueOnce({
+      commandId: "delete-2",
+      status: "rejected",
+      reasonCode: "proto.staleRevision",
+      revisionAtDecision: 3,
+    });
+    const reply = await rpc("agent", {
+      name: "sendConversationCommandV4",
+      args: {
+        envelope: {
+          type: "deleteSession",
+          commandId: "delete-2",
+          clientId: "test-client",
+          sessionId: "new-session",
+          payload: {},
+          issuedAt: Date.now(),
+        },
+      },
+    });
+    expect(reply.result).toMatchObject({ status: "rejected", reasonCode: "proto.staleRevision" });
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0].sessions).toEqual([
+      "new-session",
+    ]);
+  });
 });

@@ -254,6 +254,69 @@ test("timeouts and attachment failures restore owner; failed reattachment retain
   }
 });
 
+test("renderer crash during Return quiescing destroys the child, restores the owner pane and frees the source window", () => {
+  const f = fixture();
+  try {
+    const transfer = f.start(),
+      child = f.prepare(transfer);
+    f.call("panel-detached-ready", child, transfer);
+    f.call("panel-reattach", f.owner, transfer);
+    assert.equal(f.call("panel-detached-state", child).phase, "quiescing");
+    child.contentsListeners.get("render-process-gone")();
+    assert.equal(child.destroyed, true, "Crashed child is destroyed instead of re-shown");
+    assert.equal(f.owner.messages.at(-1)[0], channel("panel-detach-rollback"));
+    assert.equal(
+      [...f.owner.messages, ...child.messages].some(
+        ([name]) => name === channel("panel-reattach-rollback"),
+      ),
+      false,
+      "A dead renderer must not be asked to keep the panel",
+    );
+    const ownerMessages = f.owner.messages.length,
+      childMessages = child.messages.length;
+    f.expire();
+    assert.equal(f.owner.messages.length, ownerMessages, "No timeout loop stays armed after crash");
+    assert.equal(child.messages.length, childMessages);
+    assert.throws(() => f.call("panel-reattach", child, transfer), /owner required/);
+    assert.throws(() => f.call("panel-detached-state", child), /Detached panel required/);
+    assert.equal(f.owner.close(), false, "Source window is closable after crash recovery");
+    assert.equal(f.owner.destroyed, true);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("renderer crash during source restoration destroys the child and leaves no stranded handoff", () => {
+  const f = fixture();
+  try {
+    const transfer = f.start(),
+      child = f.prepare(transfer);
+    f.call("panel-detached-ready", child, transfer);
+    f.call("panel-reattach", f.owner, transfer);
+    f.call("panel-reattach-quiesced", child, transfer);
+    assert.equal(f.call("panel-detached-state", child).phase, "reattaching");
+    assert.equal(f.owner.messages.at(-1)[0], channel("panel-reattach-prepare"));
+    child.contentsListeners.get("render-process-gone")();
+    assert.equal(child.destroyed, true);
+    assert.equal(f.owner.messages.at(-1)[0], channel("panel-detach-rollback"));
+    f.call("panel-reattach-prepared", f.owner, transfer);
+    assert.equal(
+      f.owner.messages.at(-1)[0],
+      channel("panel-detach-rollback"),
+      "Late owner ACK cannot commit a return whose child crashed",
+    );
+    const again = f.start();
+    assert.notEqual(again.transferId, transfer.transferId);
+    assert.equal(f.windows.length, 3, "Recovery reuses the owner window without leftover panels");
+    f.expire();
+    assert.equal(f.owner.messages.at(-1)[0], channel("panel-detach-rollback"));
+    assert.equal(f.owner.close(), false, "Source window is closable after crash recovery");
+    assert.equal(f.owner.destroyed, true);
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("IPC refuses external senders, arbitrary targets and nonserializable or oversized state", () => {
   const f = fixture();
   try {

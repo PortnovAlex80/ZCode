@@ -2,8 +2,9 @@ import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { flushSync } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import {
-  afterPanelCleanup,
+  acknowledgePanelAfterCleanup,
   observePanelComposition,
+  panelCleanupKeys,
   specWindowBridge,
   type DetachedPanelTarget,
   type PanelTransfer,
@@ -29,11 +30,15 @@ export function useSpecDetachedPanels(
     const dispose = [
       bridge.onSpecPanelEvent("detach-prepare", (transfer) => {
         if (!owns(transfer)) return;
+        // 先快照当前登记的清理作用域（面板仍在挂载），再同步卸载；ACK 只等这个快照。
+        void acknowledgePanelAfterCleanup(
+          bridge,
+          "detach-prepared",
+          { transferId: transfer.transferId },
+          panelCleanupKeys(transfer.target),
+        );
         flushSync(() =>
           setTransfers((current) => ({ ...current, [transfer.target.panelKey]: transfer })),
-        );
-        void afterPanelCleanup().then(() =>
-          bridge.specPanelAck("detach-prepared", { transferId: transfer.transferId }),
         );
       }),
       bridge.onSpecPanelEvent("detach-rollback", (transfer) => {
@@ -56,6 +61,13 @@ export function useSpecDetachedPanels(
       }),
       bridge.onSpecPanelEvent("reattach-prepare", (transfer) => {
         if (!owns(transfer)) return;
+        // 先快照 detach 占位（若有）的清理作用域；重新挂载的新面板作用域不会被等待。
+        void acknowledgePanelAfterCleanup(
+          bridge,
+          "reattach-prepared",
+          { transferId: transfer.transferId },
+          panelCleanupKeys(transfer.target),
+        );
         try {
           flushSync(() => onRestoreRef.current?.(transfer.target));
         } catch (cause) {
@@ -69,9 +81,6 @@ export function useSpecDetachedPanels(
             delete next[transfer.target.panelKey];
             return next;
           }),
-        );
-        void afterPanelCleanup().then(() =>
-          bridge.specPanelAck("reattach-prepared", { transferId: transfer.transferId }),
         );
       }),
     ];
