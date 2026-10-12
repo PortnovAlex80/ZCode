@@ -4,6 +4,18 @@ packages:
   - apps/zcode-cli
   - apps/zcode-cli/packages/*
   - apps/zcode-cli/tools/*
+# pnpm 10 игнорирует pnpm.overrides/patchedDependencies из package.json и читает их
+# только отсюда; перенос обязателен, иначе пересборка lockfile молча теряет override
+# react 19.2.7 и 5 патчей (зафиксировано Wave 1 baseline-аудитом).
+overrides:
+  react: 19.2.7
+  react-dom: 19.2.7
+patchedDependencies:
+  vitest@4.1.7: patches/vitest@4.1.7.patch
+  wdio-electron-service@9.2.1: patches/wdio-electron-service@9.2.1.patch
+  "@arms/rum-electron@0.0.3": patches/@arms__rum-electron@0.0.3.patch
+  "@ai-sdk/openai-compatible@2.0.60": patches/@ai-sdk__openai-compatible@2.0.60.patch
+  "@ai-sdk/anthropic@3.0.81": patches/@ai-sdk__anthropic@3.0.81.patch
 supportedArchitectures:
   os:
     - current
