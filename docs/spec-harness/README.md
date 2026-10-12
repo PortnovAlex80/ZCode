@@ -1,6 +1,6 @@
 # Spec Harness: fork ZCODE
 
-План расширения на Word/Excel: [OFFICE-INTEGRATION.md](OFFICE-INTEGRATION.md).
+Интеграция Word/Excel/AutoCAD: [SRS](DOCUMENT-HOSTS.md), [сборка и подключение](../../prototypes/document-host/README.md). Ранний план: [OFFICE-INTEGRATION.md](OFFICE-INTEGRATION.md).
 
 Ветка `research/spec-harness`, база ZCODE 3.15.1. План и архитектурные решения: [REFRACTORING.md](REFRACTORING.md). Исходники дополнений теперь живут в форке; старый overlay автоматически применять сюда нельзя.
 

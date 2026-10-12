@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { mkdir, readFile, access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { updateSampleVersion } from "../document-host/sample-version.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(process.env.LOCALAPPDATA, "SpecHarness");
@@ -25,6 +26,7 @@ try {
   if (error.code !== "ENOENT") throw error;
 }
 if (exists) {
+  await updateSampleVersion(AdmZip, output, manifest);
   console.info(output);
   process.exit(0);
 }
@@ -39,7 +41,9 @@ const rows = [
   ["Блокноты", 4, 200, { formula: "B3*C3", value: 800 }],
   ["Итого", "", "", { formula: "SUM(D2:D3)", value: 2300 }],
   ["Выберите A1:D4 → ПКМ → ZCODE → Обсудить отдельно"],
-  ["Локальный UI-прототип: модель, транспорт и макросы отключены."],
+  [
+    "Подключение к ZCODE включается отдельно. Values/formulas применяются после проверки и подтверждения в панели. VBA не исполняется.",
+  ],
 ];
 const escape = (value) =>
   String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");

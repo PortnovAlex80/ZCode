@@ -1,0 +1,90 @@
+input,
+select {
+  color: var(--text);
+  font-family: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 6px;
+  max-width: 100%;
+}
+#connection {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+summary {
+  cursor: pointer;
+  color: var(--subtle);
+}
+.connection-fields {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+}
+.connection-fields label {
+  display: grid;
+  gap: 4px;
+}
+.proposals {
+  max-height: 240px;
+  overflow: auto;
+}
+.proposal,
+.interaction {
+  margin: 8px 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.proposal pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 130px;
+  overflow: auto;
+}
+.tool-detail {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  padding: 8px;
+  border-radius: 8px;
+}
+.tool-detail pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow: auto;
+}
+.tabs {
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.tabs button {
+  white-space: nowrap;
+}
+.selection {
+  flex-shrink: 0;
+}
+.message.reasoning {
+  color: var(--subtle);
+}
+fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 10px 0;
+  padding: 10px;
+}
+fieldset label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+fieldset small {
+  flex-basis: 100%;
+  color: var(--subtle);
+}
+fieldset textarea {
+  width: 100%;
+  min-height: 64px;
+}

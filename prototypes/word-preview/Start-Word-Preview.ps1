@@ -1,4 +1,6 @@
 $ErrorActionPreference = 'Stop'
+& (Join-Path $PSScriptRoot '..\document-host\Build-Document-Pane.ps1')
+if (-not $?) { throw 'Document pane build failed.' }
 $previewTools = Join-Path $env:LOCALAPPDATA 'SpecHarness\word-preview-tools'
 $previewState = Join-Path $env:LOCALAPPDATA 'SpecHarness\word-preview'
 if (-not (Test-Path -LiteralPath (Join-Path $previewTools 'node_modules\office-addin-dev-certs'))) {
@@ -9,16 +11,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $previewTools 'node_modules\office-a
 if ($LASTEXITCODE -ne 0) { throw 'Development certificate setup failed.' }
 & node (Join-Path $PSScriptRoot 'prepare.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Word preview registration failed.' }
-$running = $false
-try { $running = (Invoke-RestMethod 'https://localhost:43481/health').preview -eq $true } catch { }
-if (-not $running) {
-    $previewProcess = Start-Process -FilePath (Get-Command node).Source -ArgumentList ('"' + (Join-Path $PSScriptRoot 'server.mjs') + '"') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $previewState 'server.log') -RedirectStandardError (Join-Path $previewState 'server-error.log')
-    $previewProcess.Id | Set-Content (Join-Path $previewState 'server.pid')
-    for ($attempt = 0; $attempt -lt 40; $attempt++) {
-        Start-Sleep -Milliseconds 250
-        try { if ((Invoke-RestMethod 'https://localhost:43481/health').preview) { $running = $true; break } } catch { }
-    }
-    if (-not $running) { throw 'Word preview HTTPS server did not start. See server-error.log.' }
-}
+& (Join-Path $PSScriptRoot '..\document-host\Ensure-Preview-Server.ps1') -ServerPath (Join-Path $PSScriptRoot 'server.mjs') -StateDirectory $previewState -Port 43481
+if (-not $?) { throw 'Word document server failed.' }
 $wordPath = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WINWORD.EXE').'(default)'
 Start-Process -FilePath $wordPath -ArgumentList ('/n "' + (Join-Path $previewState 'Word-Preview.docx') + '"')

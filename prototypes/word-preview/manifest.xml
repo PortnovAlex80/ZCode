@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="TaskPaneApp">
   <Id>ff85b1f0-8ff1-4b82-b604-7a0d2e05d311</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.1.0.0</Version>
   <ProviderName>Spec Harness</ProviderName>
   <DefaultLocale>ru-RU</DefaultLocale>
   <DisplayName DefaultValue="Spec Harness — Word"/>
-  <Description DefaultValue="Локальный preview панели обсуждений. ZCODE не подключён."/>
+  <Description DefaultValue="Чат ZCODE, обсуждения выделения и проверяемые правки внутри Word. Подключение включается отдельно."/>
   <IconUrl DefaultValue="https://localhost:43481/icon.png"/>
   <SupportUrl DefaultValue="https://localhost:43481/"/>
   <AppDomains><AppDomain>https://localhost:43481</AppDomain></AppDomains>
@@ -49,7 +49,7 @@
       <bt:Images><bt:Image id="Icon" DefaultValue="https://localhost:43481/icon.png"/></bt:Images>
       <bt:Urls><bt:Url id="Panel.Url" DefaultValue="https://localhost:43481/"/><bt:Url id="Add.Url" DefaultValue="https://localhost:43481/?action=add"/><bt:Url id="Discuss.Url" DefaultValue="https://localhost:43481/?action=discuss"/></bt:Urls>
       <bt:ShortStrings><bt:String id="Group.Label" DefaultValue="ZCODE"/><bt:String id="Open.Label" DefaultValue="Панель ZCODE"/><bt:String id="Add.Label" DefaultValue="Добавить в беседу"/><bt:String id="Discuss.Label" DefaultValue="Обсудить отдельно"/></bt:ShortStrings>
-      <bt:LongStrings><bt:String id="Open.Help" DefaultValue="Открыть локальную панель обсуждений Word без подключения к модели."/><bt:String id="Add.Help" DefaultValue="Взять выделенный текст в контекст беседы о документе."/><bt:String id="Discuss.Help" DefaultValue="Создать независимое обсуждение выделенного фрагмента."/></bt:LongStrings>
+      <bt:LongStrings><bt:String id="Open.Help" DefaultValue="Открыть панель ZCODE в Word."/><bt:String id="Add.Help" DefaultValue="Взять выделенный текст в контекст беседы о документе."/><bt:String id="Discuss.Help" DefaultValue="Создать независимое обсуждение выделенного фрагмента."/></bt:LongStrings>
     </Resources>
   </VersionOverrides>
 </OfficeApp>

@@ -9,7 +9,13 @@ const toolRoot = path.join(process.env.LOCALAPPDATA, "SpecHarness", "word-previe
 const require = createRequire(path.join(toolRoot, "package.json"));
 const { getHttpsServerOptions } = require("office-addin-dev-certs");
 const files = new Map([
-  ["/", ["index.html", "text/html"]],
+  ["/", ["../document-host/index.html", "text/html"]],
+  ["/bootstrap.js", ["../document-host/office-bootstrap.js", "text/javascript"]],
+  ["/pane.js", ["../document-host/pane.js", "text/javascript"]],
+  ["/interactions.js", ["../document-host/interactions.js", "text/javascript"]],
+  ["/pane.css", ["../document-host/pane.css", "text/css"]],
+  ["/office-adapter.js", ["../document-host/office-adapter.js", "text/javascript"]],
+  ["/demo", ["index.html", "text/html"]],
   ["/panel.css", ["panel.css", "text/css"]],
   ["/panel.js", ["panel.js", "text/javascript"]],
   ["/model.js", ["model.js", "text/javascript"]],
@@ -31,16 +37,38 @@ export async function startPreviewServer({ port = 43481, host = "Word" } = {}) {
     }
     if (request.url === "/health" && request.method === "GET") {
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ preview: true, host, wordReady }));
+      response.end(JSON.stringify({ preview: true, documentHostVersion: 2, host, wordReady }));
       return;
     }
-    const file = files.get(new URL(request.url, "https://localhost:43481").pathname);
+    const pathname = new URL(request.url, "https://localhost:43481").pathname;
+    const file =
+      pathname === "/client.js"
+        ? [
+            path.join(
+              process.env.LOCALAPPDATA,
+              "SpecHarness",
+              "document-host",
+              "assets",
+              "client.js",
+            ),
+            "text/javascript",
+          ]
+        : files.get(pathname);
     if (!file || request.method !== "GET") {
       response.writeHead(404).end();
       return;
     }
     try {
       let bytes = await readFile(path.resolve(here, file[0]));
+      if (file[0] === "../document-host/index.html")
+        bytes = Buffer.from(
+          bytes
+            .toString()
+            .replace(
+              "<!--HOST_SCRIPT-->",
+              '<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>',
+            ),
+        );
       if (host === "Excel" && file[0] === "index.html")
         bytes = Buffer.from(bytes.toString().replaceAll("Word", "Excel"));
       response.writeHead(200, { "Content-Type": `${file[1]}; charset=utf-8` });

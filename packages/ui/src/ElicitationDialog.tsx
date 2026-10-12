@@ -7,7 +7,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import type { ZCodeElicitationQuestion, ZCodeElicitationRequest } from "@zcode/shared";
+import type { ZCodeElicitationRequest } from "@zcode/shared";
 import type { InteractionAutoResolution } from "@zcode/shared/zcode-protocol-v4";
 import { CheckIcon, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge.js";
@@ -18,6 +18,19 @@ import { InteractionRequestOriginBadge } from "@/InteractionRequestOriginBadge.j
 import { isImeComposingKeyEvent } from "@/lib/imeComposition.js";
 import type { ElicitationFormDraft } from "@/store/zcodeSessionStoreTypes.js";
 import { useZCodeIntl } from "./i18n/IntlProvider.js";
+import {
+  buildElicitationResponseContent,
+  getQuestionAnswers,
+  type NormalizedElicitationQuestion,
+  type AnswerDraft,
+  type DraftState,
+} from "@/lib/elicitationResponse.js";
+export {
+  buildElicitationResponseContent,
+  type NormalizedElicitationQuestion,
+  type AnswerDraft,
+  type DraftState,
+} from "@/lib/elicitationResponse.js";
 
 interface ElicitationDialogProps {
   request: ZCodeElicitationRequest;
@@ -101,17 +114,6 @@ function useElicitationCountdownSeconds(autoResolution: InteractionAutoResolutio
 
   return getElicitationCountdownSeconds(autoResolution, clockNow);
 }
-
-export interface NormalizedElicitationQuestion extends ZCodeElicitationQuestion {
-  key: string;
-}
-
-export interface AnswerDraft {
-  selectedValues: string[];
-  customAnswer: string;
-}
-
-export type DraftState = Record<string, AnswerDraft>;
 
 export type ElicitationCustomInputKeyAction =
   | "advance"
@@ -258,48 +260,6 @@ function getPreferredActiveOptionIndex(
   // 不预选任何选项，避免用户将键盘焦点（bg-hover）误认为"已选中"。
   // 用户必须通过方向键导航或点击才能聚焦选项，聚焦后点继续/提交才会自动补选。
   return -1;
-}
-
-function getQuestionAnswers(question: NormalizedElicitationQuestion, drafts: DraftState): string[] {
-  const draft = drafts[question.key] ?? {
-    selectedValues: [],
-    customAnswer: "",
-  };
-  const customAnswer = draft.customAnswer.trim();
-  return [...draft.selectedValues, ...(customAnswer ? [customAnswer] : [])];
-}
-
-export function buildElicitationResponseContent(
-  questions: readonly NormalizedElicitationQuestion[],
-  drafts: DraftState,
-): Record<string, unknown> {
-  // AskUserQuestion 是可选澄清，不是必填表单。只提交用户真实提供的答案，
-  // 避免用空字符串伪造偏好；部分或空 answers 由 Agent 使用最佳判断继续。
-  const answers = Object.fromEntries(
-    questions.flatMap((question) => {
-      const questionAnswers = getQuestionAnswers(question, drafts);
-      return questionAnswers.length > 0 ? [[question.question, questionAnswers.join(", ")]] : [];
-    }),
-  );
-  const content: Record<string, unknown> = { answers };
-
-  questions.forEach((question, index) => {
-    const questionAnswers = getQuestionAnswers(question, drafts);
-    if (questionAnswers.length > 0) {
-      content[`answer_${index}`] = question.multiSelect ? questionAnswers : questionAnswers[0];
-    }
-  });
-
-  // 兼容旧版单题 agent 读取 { answer } 的路径。
-  const onlyQuestion = questions.length === 1 ? questions[0] : undefined;
-  if (onlyQuestion) {
-    const questionAnswers = getQuestionAnswers(onlyQuestion, drafts);
-    if (questionAnswers.length > 0) {
-      content.answer = onlyQuestion.multiSelect ? questionAnswers : questionAnswers[0];
-    }
-  }
-
-  return content;
 }
 
 export function updateElicitationDraftsForOption(
