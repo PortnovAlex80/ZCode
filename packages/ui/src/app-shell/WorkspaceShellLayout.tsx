@@ -32,6 +32,18 @@ import {
   toggleSpecGeneralChatCollapse,
 } from "@/spec-document/specGeneralChatCollapse.js";
 import {
+  applySpecShellLayoutSwapOrders,
+  readSpecShellLayoutSwap,
+  specShellBodyLayoutId,
+  specShellLayoutSwapKey,
+  toggleSpecShellLayoutSwapMode,
+  writeSpecShellLayoutSwap,
+  SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_DEFAULT_SIZE,
+  SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_MIN_SIZE,
+  SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE,
+  type SpecShellLayoutSwapMode,
+} from "@/spec-document/specShellLayoutSwap.js";
+import {
   V4SplitPaneEntryProvider,
   type V4SplitPaneSessionTarget,
 } from "@/v4/splitPaneEntryContext.js";
@@ -155,6 +167,9 @@ const CONVERSATION_AUTO_COLLAPSE_RESIZE_IDLE_MS = 300;
 // 会跟随 chat streaming render 重算布局上下文；固定数组语义上不会随消息变化。
 const WORKSPACE_BODY_PANEL_IDS = ["conversation-column", "browser"];
 const WORKSPACE_CONVERSATION_PANEL_IDS = ["conversation", "terminal"];
+// U-01 交换排列下（tabs 容器在中心、聊天在右）布局存储按面板出现顺序拼键，
+// panelIds 必须与实际视觉顺序一致；同样保持模块级固定引用，避免 streaming 重渲染。
+const WORKSPACE_BODY_PANEL_IDS_DOCUMENT_CENTER = ["browser", "conversation-column"];
 
 type WebRemoteNavigationDragSession = {
   pointerId: number;
@@ -646,6 +661,45 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   const [generalChatCollapsedWorkspaceKey, setGeneralChatCollapsedWorkspaceKey] = useState<
     string | null
   >(null);
+  // U-01 «Документ в центре」：中心聊天与整个右侧 tabs 容器互换的呈现偏好，按
+  // workspaceIdentity 持久化；切换 workspace 时在渲染期同步重读，避免旧排列闪一帧。
+  const shellLayoutSwapStorageKey = specShellLayoutSwapKey(workspaceAbsPath, workspaceIdentity);
+  const [shellLayoutSwapMemory, setShellLayoutSwapMemory] = useState<{
+    key: string;
+    mode: SpecShellLayoutSwapMode;
+  }>(() => ({
+    key: specShellLayoutSwapKey(workspaceAbsPath, workspaceIdentity),
+    mode: readSpecShellLayoutSwap(specShellLayoutSwapKey(workspaceAbsPath, workspaceIdentity)),
+  }));
+  if (shellLayoutSwapMemory.key !== shellLayoutSwapStorageKey) {
+    setShellLayoutSwapMemory({
+      key: shellLayoutSwapStorageKey,
+      mode: readSpecShellLayoutSwap(shellLayoutSwapStorageKey),
+    });
+  }
+  const isDocumentCenterLayout =
+    shellLayoutSwapMemory.key === shellLayoutSwapStorageKey &&
+    shellLayoutSwapMemory.mode === "document-center";
+  const handleToggleShellLayoutSwap = useCallback(() => {
+    const nextMode = toggleSpecShellLayoutSwapMode(
+      isDocumentCenterLayout ? "document-center" : "chat-center",
+    );
+    writeSpecShellLayoutSwap(shellLayoutSwapStorageKey, nextMode);
+    setShellLayoutSwapMemory({
+      key: shellLayoutSwapStorageKey,
+      mode: nextMode,
+    });
+  }, [isDocumentCenterLayout, shellLayoutSwapStorageKey]);
+  // U-01：conversation-column 外层 flex item 的引用（RRP Panel 的 style prop 只作用于
+  // 内层包装 div，order 只能落到外层元素上）。
+  const conversationColumnOuterElementRef = useRef<HTMLDivElement | null>(null);
+  const handleConversationColumnElementRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      conversationColumnOuterElementRef.current = element;
+      if (element) element.style.order = isDocumentCenterLayout ? "3" : "1";
+    },
+    [isDocumentCenterLayout],
+  );
   const [specDocumentActiveState, setSpecDocumentActiveState] = useState<{
     workspaceKey: string;
     active: boolean;
@@ -698,12 +752,35 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
     // ResizablePanel 撑开；否则自动化页会闪出空白的 tab 栏，且面板过渡期间 guest surface
     // 仍可能被 Chromium 判定为不可合成。
     open: workspaceMainView === "chat" && isSidePaneOpen,
-    expandedSize: SIDE_PANE_DEFAULT_EXPANDED_SIZE,
+    // U-01：交换排列下文档初始占工作区大头；普通排列维持原 45% 默认宽度。
+    expandedSize: isDocumentCenterLayout
+      ? SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE
+      : SIDE_PANE_DEFAULT_EXPANDED_SIZE,
     rememberExpandedSize: true,
     resizeOnInitialVisibleMount: false,
   });
   const mobileSidePanePanelRef = useRef<PanelImperativeHandle | null>(null);
   const mobileSidePanePanelElementRef = useRef<HTMLDivElement | null>(null);
+  // U-01 «Документ в центре»：渲染期同步三个 flex item 的 order（聊天列/分隔条/tabs 容器
+  // = 1/2/3，交换排列对调两端）。不能放到 effect 里——RRP 面板重注册（约束随排列切换）
+  // 会在 layout effect 里读 offsetLeft（浏览器中反映 flex order）重排面板，order 必须先于
+  // 它生效，拖拽/键盘方向才能跟随实际视觉位置。写入幂等，DOM 顺序与组件树保持稳定：
+  // chat/timeline 零重挂载、browser <webview> guest 不被移动。
+  const shellLayoutSwapOrderStateRef = useRef<string | null>(null);
+  const shellLayoutSwapOrderState = `${shellLayoutSwapStorageKey}:${
+    isDocumentCenterLayout ? "document-center" : "chat-center"
+  }`;
+  if (shellLayoutSwapOrderStateRef.current !== shellLayoutSwapOrderState) {
+    if (
+      applySpecShellLayoutSwapOrders(
+        conversationColumnOuterElementRef.current,
+        sidePanePanelElementRef.current,
+        isDocumentCenterLayout,
+      )
+    ) {
+      shellLayoutSwapOrderStateRef.current = shellLayoutSwapOrderState;
+    }
+  }
   const workspaceSessionActionDisabled =
     Boolean(workspaceReadOnlyReason) || reloadSessionDisabled || reloadSessionPending;
   const isSpecDocumentActive =
@@ -1977,27 +2054,40 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
       });
     }
   }, [activeTaskId, workspaceKey]);
+  // U-01 «Документ в центре」：交换排列下最右外沿面板换成聊天列、tabs 容器成为内嵌面板，
+  // 圆角/边框与 Windows 窗控必须跟随实际位置而不是固定右侧。
+  const workspaceWindowChromeClass = resolveWorkspaceShellWindowChromeClass({
+    isMacDesktop,
+    isWindowsDesktop,
+    isLinuxDesktop,
+    macOSMajorVersion: desktopWindowChromeState?.macOSMajorVersion,
+    isWindowsMaximized: desktopWindowChromeState?.isMaximized ?? false,
+    supportsNativeRoundedCorners: desktopWindowChromeState?.supportsNativeRoundedCorners ?? null,
+  });
+  const workspaceInnerFrameClass = "rounded-[var(--workspace-panel-radius)] border border-border";
+  // 交换排列且聊天被隐藏（«Развернуть документ»）时 tabs 容器铺满并回到最外沿。
+  const sidePaneCaptionCarriesWindowControls = !isDocumentCenterLayout || generalChatCollapsed;
   const renderSidePanePanel = (options: { mobileOverlay?: boolean } = {}) => (
     <AnimatedSidePanePanel
       services={services}
       isDesktop={isDesktop}
       isWindowsDesktop={isWindowsDesktop}
-      frameClassName={resolveWorkspaceShellWindowChromeClass({
-        isMacDesktop,
-        isWindowsDesktop,
-        isLinuxDesktop,
-        macOSMajorVersion: desktopWindowChromeState?.macOSMajorVersion,
-        isWindowsMaximized: desktopWindowChromeState?.isMaximized ?? false,
-        supportsNativeRoundedCorners:
-          desktopWindowChromeState?.supportsNativeRoundedCorners ?? null,
-      })}
-      showWindowControls={!options.mobileOverlay && usesInlineWindowControls}
+      frameClassName={
+        isDocumentCenterLayout && isSidePaneVisible && !generalChatCollapsed
+          ? workspaceInnerFrameClass
+          : workspaceWindowChromeClass
+      }
+      showWindowControls={
+        !options.mobileOverlay && usesInlineWindowControls && sidePaneCaptionCarriesWindowControls
+      }
       isVisible={options.mobileOverlay ? isSidePaneOpen : isSidePaneVisible}
       onCloseSidePane={handleToggleSidePane}
       toggleSidePaneShortcutLabel={toggleSidePaneShortcutLabel}
       sidePaneState={presentedSidePaneState}
       generalChatCollapsed={generalChatCollapsed}
       onToggleGeneralChat={handleToggleGeneralChat}
+      documentCenter={isDocumentCenterLayout}
+      onToggleShellLayoutSwap={handleToggleShellLayoutSwap}
       onSpecDocumentActiveChange={handleSpecDocumentActiveChange}
       recentClosedSidePaneTabs={recentClosedSidePaneTabs}
       isBrowserOpen={isBrowserOpen}
@@ -2490,8 +2580,17 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
 
             <ResizablePanelGroup
               groupRef={generalChatGroupRef}
-              layoutId={specGeneralChatLayoutId(workspaceKey, isSpecDocumentActive)}
-              panelIds={WORKSPACE_BODY_PANEL_IDS}
+              // U-01：交换排列使用独立 layoutId 命名空间 + 与视觉顺序一致的 panelIds，
+              // 两种排列各自记住自己的宽度；RRP 存储键按面板出现顺序拼接。
+              layoutId={specShellBodyLayoutId(
+                specGeneralChatLayoutId(workspaceKey, isSpecDocumentActive),
+                isDocumentCenterLayout,
+              )}
+              panelIds={
+                isDocumentCenterLayout
+                  ? WORKSPACE_BODY_PANEL_IDS_DOCUMENT_CENTER
+                  : WORKSPACE_BODY_PANEL_IDS
+              }
               className={cn("min-h-0 flex-1", isWebRemoteControlShell && "max-md:!flex-col")}
             >
               <ResizablePanel
@@ -2502,8 +2601,25 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                 aria-hidden={generalChatCollapsed}
                 inert={generalChatCollapsed}
                 data-spec-general-chat-collapsed={generalChatCollapsed ? "true" : "false"}
-                minSize={isWebRemoteControlShell ? "0px" : "35%"}
-                defaultSize={isSidePaneVisible ? "52%" : undefined}
+                data-spec-shell-layout-side={isDocumentCenterLayout ? "right" : "center"}
+                // U-01：交换排列下聊天在右侧、文档占大头；min/default 随排列切换本身
+                // 会触发 RRP 面板重注册，库按 offsetLeft（含 flex order）重排面板顺序，
+                // 使拖拽与键盘方向跟随实际视觉位置。DOM/组件树保持稳定，零重挂载。
+                minSize={
+                  isWebRemoteControlShell
+                    ? "0px"
+                    : isDocumentCenterLayout
+                      ? SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_MIN_SIZE
+                      : "35%"
+                }
+                defaultSize={
+                  isSidePaneVisible
+                    ? isDocumentCenterLayout
+                      ? SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_DEFAULT_SIZE
+                      : "52%"
+                    : undefined
+                }
+                elementRef={handleConversationColumnElementRef}
                 className={
                   isWebRemoteControlShell
                     ? "max-md:!w-full max-md:!min-w-0 max-md:!flex-1 max-md:!basis-0"
@@ -2523,19 +2639,15 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                   >
                     <section
                       data-workspace-conversation-frame="true"
+                      data-spec-shell-layout={
+                        isDocumentCenterLayout ? "document-center" : "chat-center"
+                      }
                       className={cn(
                         "relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background",
-                        isSidePaneVisible
-                          ? "rounded-[var(--workspace-panel-radius)] border border-border"
-                          : resolveWorkspaceShellWindowChromeClass({
-                              isMacDesktop,
-                              isWindowsDesktop,
-                              isLinuxDesktop,
-                              macOSMajorVersion: desktopWindowChromeState?.macOSMajorVersion,
-                              isWindowsMaximized: desktopWindowChromeState?.isMaximized ?? false,
-                              supportsNativeRoundedCorners:
-                                desktopWindowChromeState?.supportsNativeRoundedCorners ?? null,
-                            }),
+                        // U-01：交换排列下聊天列是最右外沿面板，改用窗口 chrome；tabs 容器转内嵌。
+                        isSidePaneVisible && !isDocumentCenterLayout
+                          ? workspaceInnerFrameClass
+                          : workspaceWindowChromeClass,
                         isTerminalVisible && "rounded-b-[var(--workspace-panel-radius)] border-b",
                         isWebRemoteControlShell &&
                           "max-md:rounded-none max-md:border-x-0 max-md:border-b-0",
@@ -2654,7 +2766,9 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                             simplifyForNarrowRemote={simplifyHeaderForNarrowRemote}
                             isSidebarVisible={isSidebarVisible}
                             isTerminalOpen={isTerminalOpen}
-                            isSidePaneOpen={isSidePaneOpen}
+                            // U-01：交换排列下聊天列是最右面板，Windows/Linux 内联窗控必须
+                            // 由它的 Header 承载（tabs 容器 caption 不再贴窗口右上角）。
+                            isSidePaneOpen={isSidePaneOpen && sidePaneCaptionCarriesWindowControls}
                             onRefreshGit={handleRefreshGit}
                             onToggleTerminal={handleToggleTerminal}
                             onToggleBrowser={handleToggleBrowser}
@@ -2888,17 +3002,10 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                   (workspaceMainView !== "automations" && workspaceMainView !== "plugin-store") ? (
                     <AnimatedTerminalPanel
                       frameClassName={cn(
-                        isSidePaneVisible
-                          ? "rounded-[var(--workspace-panel-radius)] border border-border"
-                          : resolveWorkspaceShellWindowChromeClass({
-                              isMacDesktop,
-                              isWindowsDesktop,
-                              isLinuxDesktop,
-                              macOSMajorVersion: desktopWindowChromeState?.macOSMajorVersion,
-                              isWindowsMaximized: desktopWindowChromeState?.isMaximized ?? false,
-                              supportsNativeRoundedCorners:
-                                desktopWindowChromeState?.supportsNativeRoundedCorners ?? null,
-                            }),
+                        // U-01：交换排列下终端随聊天列贴窗口右沿，改用窗口 chrome。
+                        isSidePaneVisible && !isDocumentCenterLayout
+                          ? workspaceInnerFrameClass
+                          : workspaceWindowChromeClass,
                         "rounded-t-[var(--workspace-panel-radius)] border-t",
                       )}
                       services={services}

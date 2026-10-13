@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- Side pane 当前集中承载 tabs、browser/git/code-viewer 内容；完整拆分需按 pane 功能边界继续推进。 */
 import { ServiceProvider } from "@/hooks/useServices.js";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -106,12 +107,14 @@ import type { MessageFileLinkTarget } from "@/components/ai-elements/message.js"
 import { getVisibleSidePaneTabs } from "@/lib/workspaceSidePane.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import {
+  ArrowLeftRight,
   BugIcon,
   FileDiffIcon,
   FileTextIcon,
   GlobeIcon,
   MessageSquareTextIcon,
   PanelLeftOpen,
+  PanelRightOpen,
   PlusIcon,
   SquareTerminalIcon,
   type LucideIcon,
@@ -155,7 +158,10 @@ function SuspendedBrowserSidePaneContent({
     // info 级打点：挂起换壳会先卸载 <webview>，若卸载瞬间
     // CDP 仍 attached 即打开主进程 UAF 窗口；这条日志把换壳时刻与 UnifiedBrowserView 的
     // 卸载打点对齐，用于归因 guest destroyed 的销毁者。
-    logger.info("[browser-use] tab 换挂起壳，suspend ready ack", { generation, tabId });
+    logger.info("[browser-use] tab 换挂起壳，suspend ready ack", {
+      generation,
+      tabId,
+    });
     void platform.browserViewSuspendReady?.({ tabId, generation }).catch((error) => {
       logger.debug("[browser-use] suspend ready ack 失败", {
         error: error instanceof Error ? error.message : String(error),
@@ -305,6 +311,8 @@ export function AnimatedSidePanePanel({
   isVisible,
   generalChatCollapsed = false,
   onToggleGeneralChat,
+  documentCenter = false,
+  onToggleShellLayoutSwap,
   onSpecDocumentActiveChange,
   sidePaneState,
   recentClosedSidePaneTabs,
@@ -376,6 +384,9 @@ export function AnimatedSidePanePanel({
   isVisible: boolean;
   generalChatCollapsed?: boolean;
   onToggleGeneralChat?: () => void;
+  /** U-01 «Документ в центре」：当前排列是否已把 tabs 容器换到中心（聊天在右）。 */
+  documentCenter?: boolean;
+  onToggleShellLayoutSwap?: () => void;
   onSpecDocumentActiveChange?: (active: boolean) => void;
   sidePaneState: WorkspaceSidePaneState | null;
   recentClosedSidePaneTabs: RecentClosedSidePaneTab[];
@@ -567,7 +578,21 @@ export function AnimatedSidePanePanel({
   const isWindowResizeSettling = useWindowResizeSettling(hasRenderedSidePane);
   const widthUnlockTimerRef = useRef<number | null>(null);
   const previousIsVisibleRef = useRef(isVisible);
-  const panelLayout = resolveAnimatedSidePanePanelLayout({ mobileOverlay });
+  const panelLayout = resolveAnimatedSidePanePanelLayout({
+    documentCenter,
+    mobileOverlay,
+  });
+  // U-01 «Документ в центре»：RRP Panel 的 style prop 落在内层包装 div 上，外层 flex item
+  // 的 order 只能在挂载时经 elementRef 写入（运行期切换由宿主在渲染期同步，见
+  // WorkspaceShellLayout 的 applySpecShellLayoutSwapOrders）。排列恒为
+  // 聊天列=1 / 分隔条=2 / tabs 容器=3，交换排列把两端对调，分隔条始终在文档与聊天之间。
+  const handleBrowserPanelElementRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      panelElementRef.current = element;
+      if (element) element.style.order = documentCenter ? "1" : "3";
+    },
+    [documentCenter, panelElementRef],
+  );
   const hasReviewTab = visibleTabs.some((tab) => tab.type === "git");
   const canOpenSelectionSideConversation = shouldOfferSelectionSideConversation({
     activeTaskId,
@@ -958,10 +983,14 @@ export function AnimatedSidePanePanel({
       : []),
     ...nativeOpenTabLauncherItems,
   ];
+  // U-01：交换排列后聊天在 tabs 容器右侧，恢复聊天的箭头必须指向聊天实际所在的一侧。
+  const ShowChatIcon = documentCenter ? PanelRightOpen : PanelLeftOpen;
   const closeSidePaneButton =
     isVisible &&
     !mobileOverlay &&
-    (onCloseSidePane || (generalChatCollapsed && onToggleGeneralChat)) ? (
+    (onCloseSidePane ||
+      (generalChatCollapsed && onToggleGeneralChat) ||
+      onToggleShellLayoutSwap) ? (
       <div className="flex shrink-0 items-center gap-0.5 [app-region:no-drag]">
         {generalChatCollapsed && onToggleGeneralChat ? (
           <Button
@@ -971,7 +1000,20 @@ export function AnimatedSidePanePanel({
             title="Show main chat"
             onClick={onToggleGeneralChat}
           >
-            <PanelLeftOpen className="size-4" />
+            <ShowChatIcon className="size-4" />
+          </Button>
+        ) : null}
+        {onToggleShellLayoutSwap ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            data-spec-shell-layout-swap-toggle=""
+            aria-pressed={documentCenter}
+            aria-label={documentCenter ? "Чат в центре" : "Документ в центре"}
+            title={documentCenter ? "Чат в центре" : "Документ в центре"}
+            onClick={onToggleShellLayoutSwap}
+          >
+            <ArrowLeftRight className="size-4" />
           </Button>
         ) : null}
         {onCloseSidePane ? (
@@ -1082,10 +1124,18 @@ export function AnimatedSidePanePanel({
         }),
         planTitle: intl.formatMessage({ id: "planTool.panel.planTab" }),
         workflowRunTitle: intl.formatMessage({ id: "sidePane.workflowRun" }),
-        workflowDirectoryTitle: intl.formatMessage({ id: "sidePane.workflowDirectory" }),
-        workflowActorTitle: intl.formatMessage({ id: "sidePane.workflowActor" }),
-        workflowScriptTitle: intl.formatMessage({ id: "sidePane.workflowScript" }),
-        workflowArtifactTitle: intl.formatMessage({ id: "sidePane.workflowArtifact" }),
+        workflowDirectoryTitle: intl.formatMessage({
+          id: "sidePane.workflowDirectory",
+        }),
+        workflowActorTitle: intl.formatMessage({
+          id: "sidePane.workflowActor",
+        }),
+        workflowScriptTitle: intl.formatMessage({
+          id: "sidePane.workflowScript",
+        }),
+        workflowArtifactTitle: intl.formatMessage({
+          id: "sidePane.workflowArtifact",
+        }),
       }}
       onActivateTab={onActivateTab}
       onCloseTab={onCloseTab}
@@ -1405,7 +1455,10 @@ export function AnimatedSidePanePanel({
                           />
                         ) : tab.type === "code-viewer" ? (
                           <PreviewPane
-                            markdownSelectionTarget={{ sessionId: activeTaskId, workspaceKey }}
+                            markdownSelectionTarget={{
+                              sessionId: activeTaskId,
+                              workspaceKey,
+                            }}
                             source={tab.source}
                             onClose={onCloseCodeViewer}
                             workspacePath={workspaceAbsPath}
@@ -1568,6 +1621,9 @@ export function AnimatedSidePanePanel({
       {isVisible && !generalChatCollapsed ? (
         <ResizableHandle
           data-workspace-side-pane-resize-handle="true"
+          // U-01：order 恒为 2，位于聊天列(1/3)与 tabs 容器(3/1)之间 —— 分隔条
+          // 在两种排列下都落在文档与聊天之间；DOM 顺序保持稳定，内容零重挂载。
+          style={{ order: 2 }}
           className={cn(
             // 拖动条占据真实 4px 间距，关闭时随 handle 一起移除，不为隐藏面板保留空隙。
             "aria-[orientation=vertical]:w-1 aria-[orientation=vertical]:translate-x-0 aria-[orientation=vertical]:my-0 aria-[orientation=vertical]:h-full",
@@ -1582,7 +1638,7 @@ export function AnimatedSidePanePanel({
       <ResizablePanel
         id="browser"
         panelRef={panelRef}
-        elementRef={panelElementRef}
+        elementRef={handleBrowserPanelElementRef}
         defaultSize={panelLayout.defaultSize}
         minSize={panelLayout.minSize}
         maxSize={generalChatCollapsed ? "100%" : panelLayout.maxSize}

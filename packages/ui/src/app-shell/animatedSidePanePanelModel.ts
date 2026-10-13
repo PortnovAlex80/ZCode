@@ -1,3 +1,8 @@
+import {
+  SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE,
+  SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_MAX_SIZE,
+} from "@/spec-document/specShellLayoutSwap.js";
+
 export const MIN_PREVIEW_PANE_HEAVY_CONTENT_VISIBLE_INLINE_SIZE_PX = 96;
 
 export type OpenTabLauncherItemId =
@@ -53,7 +58,14 @@ export function shouldOfferSelectionSideConversation({
   return Boolean(activeTaskId && !mobileOverlay && !isMobileTextInputViewport);
 }
 
-export function resolveAnimatedSidePanePanelLayout({ mobileOverlay }: { mobileOverlay: boolean }) {
+export function resolveAnimatedSidePanePanelLayout({
+  documentCenter = false,
+  mobileOverlay,
+}: {
+  /** U-01 «Документ в центре」：tabs 容器移到中心，初始占工作区大头、可继续加宽。 */
+  documentCenter?: boolean;
+  mobileOverlay: boolean;
+}) {
   if (mobileOverlay) {
     return {
       collapsedSize: "0px",
@@ -61,6 +73,16 @@ export function resolveAnimatedSidePanePanelLayout({ mobileOverlay }: { mobileOv
       maxSize: "100%",
       minSize: "0px",
       useResizablePanel: false,
+    };
+  }
+
+  if (documentCenter) {
+    return {
+      collapsedSize: "0px",
+      defaultSize: SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE,
+      maxSize: SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_MAX_SIZE,
+      minSize: "240px",
+      useResizablePanel: true,
     };
   }
 

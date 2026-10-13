@@ -138,7 +138,7 @@ items plus parked N-01.
 
 ## U — Desktop UX (user requests 2026-10-13)
 
-- [ ] **U-01** Layout mode «Документ в центре»: the LEFT navigator (both states: file tree and projects/tasks) stays; the CENTER chat and the RIGHT tabs container (the whole existing container: Open doc, Side conversation, Review, Terminal, Browser) swap places — with Open doc selected the document is in the center, with Browser the browser is. Accessible icon toggles «Документ в центре» / «Чат в центре» and back. In the new mode the document initially takes most of the work area; widths adjustable; mode and sizes persist per workspace. The divider always sits between document and chat; drag and keyboard control follow the actual placement (the divider is currently embedded before the right pane — pane order, divider and control-button placement must be coordinated; boundary: inner pane group at packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2491). Collapse/expand buttons keep their meaning («Развернуть документ» hides the chat; «Вернуть чат» returns it to the chosen side) with matching arrows/tooltips. The toggle preserves open tabs, unsaved document text, chat draft, scroll and the running session; Windows window controls stay top-right; detach/return keep working. Acceptance: open document with unsaved edit + chat draft → several toggles, width change, expand document, return chat, restore after reopen. Concept: user request 2026-10-13, corrected and refined same day.
+- [ ] **U-01** (implemented 2026-10-13, live GUI acceptance pending user) Layout mode «Документ в центре»: the LEFT navigator (both states: file tree and projects/tasks) stays; the CENTER chat and the RIGHT tabs container (the whole existing container: Open doc, Side conversation, Review, Terminal, Browser) swap places — with Open doc selected the document is in the center, with Browser the browser is. Accessible icon toggles «Документ в центре» / «Чат в центре» and back. In the new mode the document initially takes most of the work area; widths adjustable; mode and sizes persist per workspace. The divider always sits between document and chat; drag and keyboard control follow the actual placement (the divider is currently embedded before the right pane — pane order, divider and control-button placement must be coordinated; boundary: inner pane group at packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2491). Collapse/expand buttons keep their meaning («Развернуть документ» hides the chat; «Вернуть чат» returns it to the chosen side) with matching arrows/tooltips. The toggle preserves open tabs, unsaved document text, chat draft, scroll and the running session; Windows window controls stay top-right; detach/return keep working. Acceptance: open document with unsaved edit + chat draft → several toggles, width change, expand document, return chat, restore after reopen. Concept: user request 2026-10-13, corrected and refined same day.
 - [ ] **U-02** ПКМ on a file or folder row in the left project tree offers «Добавить метаданные»: a document/folder passport (назначение, тип, источники, связи, методики — ссылки, не копии) stored in the workspace `.harness/project.json` keyed by normalized path; rows with metadata show a badge; edit reopens the passport; corrupted storage degrades to a visible error. Concept: проектный харнесс design discussion (per-level metadata, references over copies). Optional scope — implement only as a clean solution.
 
 ## N — Parked outside this release
@@ -390,3 +390,23 @@ revision 4ea6b6c6) — two defects found and fixed by root:
    lossless (SpecDocumentPane.tsx, cause comment in code). SCREEN-INVENTORY DOC-03
    updated. Verification: all 85 spec-document suites green after the change; live
    confirmation pending with the next build.
+
+2026-10-13 Wave 5 v3 integration (workflow `dwfrun-733758d8-03c0-4e58-a9a4-11687b8adcb9`,
+base `28203a43`; implementation agents never committed):
+
+```text
+ID(s): U-01 (implemented, live acceptance pending user), U-02 (partial honest stop)
+Revision / affected files: 9 files within wave-5 exclusive paths (app-shell layout +
+       model, specShellLayoutSwap.ts + swap suite, metadata service + tests)
+Check command or manual scenario: pnpm exec vitest run workspaceShellLayoutSwap.test.ts,
+       workspaceShellResizeAutoCollapse.test.ts, workspaceShellSidebarResizePerformance.test.ts,
+       projectMetadataService.test.ts; wave gates typecheck/lint/architecture all exit 0
+Result: 31 focused tests passed, 1 intentional skip; U-01 review passed after one 7-finding
+       fix round; U-02 review passed for the storage half
+Independent review: fresh reviewer per task; U-01 findings (divider direction math,
+       expand semantics in both arrangements, state preservation) fixed by the writer
+Remaining limits / runtime gate: U-01 closes only on the user's live run of the acceptance
+       scenario (unsaved edit + chat draft → toggles, width change, expand, return, reopen);
+       U-02 UI half (row menu/badge/dialog, i18n, renderer-to-host wiring) not implemented —
+       blocked by exclusive-path boundaries, next wave or root
+```
