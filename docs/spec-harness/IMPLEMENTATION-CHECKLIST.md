@@ -138,7 +138,7 @@ items plus parked N-01.
 
 ## U — Desktop UX (user requests 2026-10-13)
 
-- [ ] **U-01** The main chat column and the left workspace tree can swap sides via an explicit persistent toggle; the left/right resize divider keeps correct direction, limits and auto-collapse after the swap, on desktop and web layouts, keyboard accessible. Concept: user request 2026-10-13 (сamoе главное).
+- [ ] **U-01** The CENTER main chat and the RIGHT side pane (document / Open doc) can swap places via an explicit persistent toggle: the side pane becomes the wide center, the chat moves to the right; the LEFT workspace tree stays in place. The center/right resize divider keeps correct direction, limits and collapse/expand behavior after the swap and must not fight the existing document-expand (⤢) semantics (D-05). Desktop and web layouts, keyboard accessible. Concept: user request 2026-10-13, corrected 2026-10-13 (левое дерево не трогаем).
 - [ ] **U-02** ПКМ on a file or folder row in the left project tree offers «Добавить метаданные»: a document/folder passport (назначение, тип, источники, связи, методики — ссылки, не копии) stored in the workspace `.harness/project.json` keyed by normalized path; rows with metadata show a badge; edit reopens the passport; corrupted storage degrades to a visible error. Concept: проектный харнесс design discussion (per-level metadata, references over copies). Optional scope — implement only as a clean solution.
 
 ## N — Parked outside this release
