@@ -323,3 +323,38 @@ one-shot apply with receipt, duplicate/stale refusal, remount clears proposals
 (Test-Office-Adapters.ps1 + office-native-*.mjs; counts in the adapter READMEs).
 R-11 — per-capability status tables in all adapter READMEs with commands, counts and
 path:line citations. Full detail per task: wave3-report artifact.
+
+2026-10-13 Wave 4 integration (workflow `dwfrun-6725beb9-22b3-48ac-859a-0c1293754b8a`,
+base `f4456188`; implementation agents never committed):
+
+```text
+ID(s): R-08, R-10, R-03 (build-only), O-06, O-07, T-05 (fixture halves)
+Revision / affected files: Build-Installer.cmd (new), docs/spec-harness/README.md,
+       prototypes/document-host office tests + READMEs, documentGateway.test.ts,
+       + 8 tracked node-repl-host dist-types .d.ts refreshed by the verified build
+Check command or manual scenario: Build-Installer.cmd full and validated-cache paths
+       (real NSIS build, artifact path + versions + revision + SHA-256 printed, nothing
+       launched/installed/published); pnpm exec vitest run documentGateway.test.ts;
+       node --test office-adapter.test.mjs; wave gates typecheck/lint/architecture
+Result: installer built with hash receipt both paths; documentGateway 23/23; office
+       adapter guard/round-trip 14/14; gates all exit 0
+Independent review: fresh reviewer per task, 2/2 passed
+Remaining limits / runtime gate: installed-EXE and auto-update live confirmation (R-09),
+       real Word/Excel O-06/O-07 runs and T-05 live end-to-end stay closed; R-02 stays
+       open pending the final frozen-revision pass (pnpm verify:pre-push + production
+       receipt) at root's closing step
+```
+
+Per-item: R-08 — wrapper with full + validated-cache fast rebuild; prints artifact path,
+fork/upstream version, revision, SHA-256; never launches/installs/publishes. R-10 —
+packaged auto-update compiled off (ZCODE_AUTO_UPDATE=0 pin + preflight fail-closed;
+verified via build-time-config resolution and initAutoUpdater), placeholder feed inert,
+upstream merge/rebuild + official-installer fallback documented. R-03 — pinned-toolchain
+preparation/build/install/run instructions incl. winCodeSign cache note, no-Vite /
+no-temp-HOME / no-runtime-injection claims code-cited. O-06 — static fs-write guard
+(self-checked) + external file-write refused-as-stale fixtures both hosts + AutoCAD
+analog README rows. O-07 — binding-id round-trip through persisted Office settings across
+reopen + gateway-side same-bindingId reopen across restart. T-05 — allowed-origin/pairing
+rejection, canonical-workspace key, capability narrowing after disconnect (stale
+generation rejected), backpressure/saturation/drain/terminate, durable deletion across
+restart (documentGateway.test.ts 23/23). Detail: wave4-report artifact.

@@ -51,6 +51,11 @@ vi.mock("ws", async () => {
         if (name === "connection") this.clients.add(args[0]);
         return super.emit(name, ...args);
       }
+      // T-05 allowed-origin half: the real server upgrades a request only after the
+      // gateway origin check passed; the mock hands the same socket to the connection path.
+      handleUpgrade(_request: unknown, socket: any, _head: unknown, done: (socket: any) => void) {
+        done(socket);
+      }
       constructor() {
         super();
         state.wss = this;
@@ -90,6 +95,15 @@ class Socket extends EventEmitter {
 }
 let root = "";
 let gateway: Awaited<ReturnType<typeof startDocumentGateway>> | undefined;
+// T-05/T-04 reopen pattern: issue gateway RPCs over an arbitrary pane socket.
+const socketRpc =
+  (socket: Socket) =>
+  async (method: string, params: any = {}) => {
+    const id = crypto.randomUUID();
+    socket.emit("message", Buffer.from(JSON.stringify({ id, method, params })));
+    await vi.waitFor(() => expect(socket.replies.some((item) => item.id === id)).toBe(true));
+    return socket.replies.find((item) => item.id === id);
+  };
 afterEach(async () => {
   await gateway?.dispose();
   gateway = undefined;
@@ -930,5 +944,265 @@ describe("document gateway shutdown phase", () => {
     expect(bind.result.sessions).toEqual(["new-session"]);
     await gateway!.dispose();
     expect(state.server.listening).toBe(false);
+  });
+});
+
+describe("document gateway non-live boundaries (T-05/O-07 fixture halves)", () => {
+  const httpRequest = async (headers: Record<string, string>, body: unknown) => {
+    let value = "";
+    const request = {
+      method: "POST",
+      url: "/tool",
+      headers,
+      async *[Symbol.asyncIterator]() {
+        yield Buffer.from(JSON.stringify(body));
+      },
+    };
+    const response = Object.assign(new EventEmitter(), {
+      setHeader() {},
+      writeHead() {},
+      end(payload: string) {
+        value = payload;
+      },
+    });
+    await state.handler(request, response);
+    return JSON.parse(value);
+  };
+  const documentTool = (bindingId: string, secret: string, args: any) =>
+    httpRequest(
+      { authorization: `Bearer ${secret}` },
+      { binding: bindingId, method: "readTarget", args },
+    );
+  const refusingUpgradeSocket = () => {
+    const socket = {
+      destroyed: false,
+      destroy() {
+        socket.destroyed = true;
+      },
+    };
+    return socket;
+  };
+  const bindParams = (instanceId: string) => ({
+    workspacePath: root,
+    document: {
+      host: "word",
+      documentId: "document-1",
+      documentInstanceId: instanceId,
+      name: "Sample.docx",
+    },
+  });
+
+  it("rejects upgrades outside the allowed origin/path, browser origins on /tool and pairing without the config token", async () => {
+    const { config } = await fixture();
+    const wrongOrigin = refusingUpgradeSocket();
+    state.server.emit(
+      "upgrade",
+      { url: "/document", headers: { origin: "https://evil.invalid" } },
+      wrongOrigin,
+      Buffer.alloc(0),
+    );
+    expect(wrongOrigin.destroyed).toBe(true);
+    const wrongPath = refusingUpgradeSocket();
+    state.server.emit(
+      "upgrade",
+      { url: "/other", headers: { origin: "https://pane.invalid" } },
+      wrongPath,
+      Buffer.alloc(0),
+    );
+    expect(wrongPath.destroyed).toBe(true);
+    // The /tool endpoint serves the session-isolated MCP helper, not browsers: any
+    // Origin header (even the pane origin) is refused before the body is read.
+    expect(
+      (
+        await httpRequest(
+          { origin: "https://pane.invalid", authorization: "Bearer whatever" },
+          { binding: "none", method: "readSelection", args: {} },
+        )
+      ).error,
+    ).toMatch(/Unavailable endpoint/);
+    // Unpaired sockets never reach binding or agent operations, and a wrong token
+    // never pairs; a successful pair is once-per-connection.
+    const fresh = new Socket();
+    state.wss.emit("connection", fresh);
+    const rpc0 = socketRpc(fresh);
+    expect((await rpc0("bind", bindParams("instance-x"))).error).toMatch(/Pair first/);
+    expect((await rpc0("pair", { token: "wrong-token-that-also-has-length" })).error).toMatch(
+      /Pairing rejected/,
+    );
+    expect((await rpc0("bind", bindParams("instance-x"))).error).toMatch(/Pair first/);
+    expect((await rpc0("pair", { token: config.token })).error).toBeUndefined();
+    expect((await rpc0("pair", { token: config.token })).error).toMatch(/Pairing rejected/);
+    // The allowed origin upgrades into a real pane connection.
+    const upgraded = new Socket();
+    state.server.emit(
+      "upgrade",
+      { url: "/document", headers: { origin: "https://pane.invalid" } },
+      upgraded,
+      Buffer.alloc(0),
+    );
+    await vi.waitFor(() => expect(state.wss.clients.has(upgraded)).toBe(true));
+    const rpcUp = socketRpc(upgraded);
+    expect((await rpcUp("pair", { token: config.token })).error).toBeUndefined();
+    expect((await rpcUp("bind", bindParams("instance-y"))).error).toMatch(
+      /already has an active pane/,
+    );
+    fresh.close();
+    upgraded.close();
+  });
+
+  it("canonicalizes the workspace key: one binding per document across spellings, restarts and reopen (O-07 half)", async () => {
+    const { binding, command, config } = await fixture();
+    await command("canonical-create", { workspaceId: root });
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))).toHaveLength(1);
+    // A second pane binding the same document through a differently-cased spelling of
+    // the same workspace must collide on the canonical key, not fork a second binding.
+    const second = new Socket();
+    state.wss.emit("connection", second);
+    const rpc2 = socketRpc(second);
+    await rpc2("pair", { token: config.token });
+    const clash = await rpc2("bind", {
+      ...bindParams("instance-b"),
+      workspacePath: root.toUpperCase(),
+    });
+    expect(clash.error).toMatch(/already has an active pane/);
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))).toHaveLength(1);
+    await gateway!.dispose();
+    gateway = undefined;
+    gateway = await startDocumentGateway(
+      { get: (key: string) => (key === "agent" ? state.agent : state.mcp) } as any,
+      path.join(root, "config.json"),
+    );
+    const reopened = new Socket();
+    state.wss.emit("connection", reopened);
+    const rpc3 = socketRpc(reopened);
+    await rpc3("pair", { token: config.token });
+    const reopenedBind = await rpc3("bind", {
+      ...bindParams("instance-2"),
+      workspacePath: root.toUpperCase(),
+    });
+    // Same document identity (Office-settings documentId) → same canonical key → the
+    // persisted binding id and its sessions round-trip across the reopen (O-07).
+    expect(reopenedBind.error).toBeUndefined();
+    expect(reopenedBind.result.bindingId).toBe(binding.result.bindingId);
+    expect(reopenedBind.result.sessions).toEqual(["new-session"]);
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))).toHaveLength(1);
+  });
+
+  it("narrows capability after disconnect: tools refuse without a live pane and stale generations cannot answer", async () => {
+    const { socket, rpc, command, binding, config } = await fixture();
+    const saved = JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0];
+    await command("cap-create", { workspaceId: root });
+    await rpc("agent", { name: "subscribeConversationV4", args: { sessionId: "new-session" } });
+    socket.close();
+    // Transport-level narrowing: the pane scope reports the connection closed to the
+    // runtime instead of leaving a phantom live surface.
+    await vi.waitFor(() =>
+      expect(
+        state.agent.setConnectionFlowStateV4.mock.calls.some(
+          (call: any) => call[0]?.state === "closed",
+        ),
+      ).toBe(true),
+    );
+    // Document tools are refused while no live pane connection owns the binding.
+    expect(
+      (
+        await documentTool(binding.result.bindingId, saved.secret, {
+          documentInstanceId: "instance-1",
+          target: {},
+        })
+      ).error,
+    ).toMatch(/Document unavailable or binding revoked/);
+    const reopened = new Socket();
+    state.wss.emit("connection", reopened);
+    const rpc2 = socketRpc(reopened);
+    await rpc2("pair", { token: config.token });
+    const rebind = await rpc2("bind", bindParams("instance-2"));
+    expect(rebind.result.generation).not.toBe(binding.result.generation);
+    const flight = documentTool(binding.result.bindingId, saved.secret, {
+      documentInstanceId: "instance-2",
+      target: { quote: "Selection" },
+    });
+    await vi.waitFor(() =>
+      expect(reopened.replies.some((item) => item.event === "documentTool")).toBe(true),
+    );
+    const tool = reopened.replies.find((item) => item.event === "documentTool");
+    // A result framed with the previous connection generation cannot satisfy a
+    // new-generation tool call; only the current generation can.
+    expect(
+      (
+        await rpc2("documentResult", {
+          requestId: tool.requestId,
+          generation: binding.result.generation,
+          result: { text: "Stale" },
+        })
+      ).error,
+    ).toMatch(/Stale document result/);
+    await rpc2("documentResult", {
+      requestId: tool.requestId,
+      generation: tool.generation,
+      result: { text: "Fresh" },
+    });
+    expect((await flight).result).toEqual({ text: "Fresh" });
+  });
+
+  it("signals saturation and drain through the native transport flow and terminates runaway buffers", async () => {
+    const { socket, rpc, command } = await fixture();
+    await command("flow-create", { workspaceId: root });
+    await rpc("agent", { name: "subscribeConversationV4", args: { sessionId: "new-session" } });
+    const flowStates = () =>
+      state.agent.setConnectionFlowStateV4.mock.calls.map((call: any) => call[0]?.state);
+    // A pane socket backing up beyond 1 MiB flips the connection to saturated; the
+    // state is reported to the native runtime, not silently buffered.
+    socket.bufferedAmount = 2 * 1024 * 1024;
+    await rpc("agent", { name: "helloConversationV4" });
+    await vi.waitFor(() => expect(flowStates()).toContain("saturated"));
+    // Draining below the 256 KiB probe restores the connection to drained.
+    socket.bufferedAmount = 1024;
+    await vi.waitFor(() => expect(flowStates()).toContain("drained"), { timeout: 5000 });
+    // A runaway buffer beyond 4 MiB terminates the connection instead of growing.
+    socket.bufferedAmount = 5 * 1024 * 1024;
+    socket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({ id: "burst", method: "agent", params: { name: "helloConversationV4" } }),
+      ),
+    );
+    await vi.waitFor(() => expect(socket.readyState).toBe(3));
+  });
+
+  it("keeps acknowledged session deletion durable across a gateway restart and reopen", async () => {
+    const { command, rpc, binding, config } = await fixture();
+    await command("delete-durable-create", { workspaceId: root });
+    const reply = await rpc("agent", {
+      name: "sendConversationCommandV4",
+      args: {
+        envelope: {
+          type: "deleteSession",
+          commandId: "delete-durable-1",
+          clientId: "test-client",
+          sessionId: "new-session",
+          payload: {},
+          issuedAt: Date.now(),
+        },
+      },
+    });
+    expect(reply.result).toMatchObject({ status: "accepted" });
+    expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0].sessions).toEqual(
+      [],
+    );
+    await gateway!.dispose();
+    gateway = undefined;
+    gateway = await startDocumentGateway(
+      { get: (key: string) => (key === "agent" ? state.agent : state.mcp) } as any,
+      path.join(root, "config.json"),
+    );
+    const reopened = new Socket();
+    state.wss.emit("connection", reopened);
+    const rpc2 = socketRpc(reopened);
+    await rpc2("pair", { token: config.token });
+    const bind = await rpc2("bind", bindParams("instance-2"));
+    // The deleted session is not resurrected by reopen and the binding identity is stable.
+    expect(bind.result.bindingId).toBe(binding.result.bindingId);
+    expect(bind.result.sessions).toEqual([]);
   });
 });

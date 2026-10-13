@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createOfficeAdapter, validateExcelPatch } from "./office-adapter.js";
 
-function fixture(host) {
+function fixture(host, options = {}) {
   const state = {
     text: "Original fragment",
     matches: 1,
@@ -11,7 +12,10 @@ function fixture(host) {
     formulas: [[2]],
     tracking: "Off",
   };
-  const settings = new Map();
+  // O-07: an injected settings map models the settings Office persists inside the
+  // document (flushed by saveAsync in the real host) so a close/reopen can be simulated
+  // by building a new adapter instance over the same persisted settings.
+  const settings = options.settings ?? new Map();
   const Office = {
     AsyncResultStatus: { Succeeded: "ok" },
     context: {
@@ -320,4 +324,105 @@ test("Word reports an externally collapsed anchor as expired, not as a bad selec
   );
   await assert.rejects(adapter.execute("locate", expected), /expired/);
   assert.deepEqual(state.changes, []);
+});
+
+// O-06 (negative constraint, fixture half): adapters operate on open documents only
+// through the application API. The guard walks the Word/Excel adapter sources and fails
+// on any filesystem/path write reference, so a future edit cannot quietly add a
+// file-level write path behind the open application.
+const ADAPTER_SOURCES = ["office-adapter.js", "office-bootstrap.js"];
+const FILESYSTEM_WRITE_PATTERN =
+  /\b(?:writeFile|writeFileSync|appendFile|appendFileSync|writeSync|writev|createWriteStream|truncate|truncateSync|unlink|unlinkSync|rmdir|rmdirSync|rmSync|mkdir|mkdirSync|rename|renameSync|copyFile|copyFileSync|cpSync|chmod|chmodSync|chown|chownSync|utimes|utimesSync|lutimes|openSync|FileHandle)\b|\bfs\s*\.\s*\w+|\bpath\s*\.\s*\w+|(?:from\s+|import\s*\(\s*["']|require\s*\(\s*["'])(?:node:)?(?:fs|fs\/promises|path)["']/g;
+function scanForFilesystemWrites(source) {
+  return [...source.matchAll(FILESYSTEM_WRITE_PATTERN)].map((match) => match[0]);
+}
+test("O-06 guard: adapter sources contain no fs/path write APIs; edits go through the application API only", async () => {
+  // Self-check: the scanner actually detects filesystem write references.
+  assert.ok(
+    scanForFilesystemWrites('const fs = require("node:fs"); fs.writeFileSync(p, b);').length >= 2,
+  );
+  assert.deepEqual(scanForFilesystemWrites("range.insertText(text, 'Replace');"), []);
+  for (const name of ADAPTER_SOURCES) {
+    const source = await readFile(new URL(`./${name}`, import.meta.url), "utf8");
+    assert.deepEqual(
+      scanForFilesystemWrites(source),
+      [],
+      `${name} must not edit an open document by filesystem means (O-06)`,
+    );
+  }
+});
+test("O-06: an external file-level write under the open document is refused as stale and never performed by the adapter", async () => {
+  for (const host of ["word", "excel"]) {
+    const { adapter, state } = fixture(host);
+    const expected = await adapter.execute("readSelection");
+    // An external writer rewrites the backing file while the document stays open; the
+    // application then reports the externally written content, so the captured snapshot
+    // is stale. The fake host exposes application state only through its API — the
+    // adapter has no channel to the file at all (the guard test above proves that in
+    // source), so the only possible outcome is refusal, never a performed write.
+    if (host === "word") state.text = "Rewritten behind the application";
+    else state.values = [[7]];
+    const receipt = await adapter.execute("applyEdit", {
+      operationId: `external-file-${host}`,
+      expected,
+      patch:
+        host === "word"
+          ? { kind: "replaceText", text: "No file write" }
+          : { kind: "values", data: [[5]] },
+    });
+    assert.equal(receipt.status, "refused");
+    assert.match(String(receipt.reason), /changed/i);
+    assert.deepEqual(state.changes, []);
+    // A patch that asks for a file-level write is not an adapter operation at all.
+    await assert.rejects(
+      adapter.execute("applyEdit", {
+        operationId: `file-op-${host}`,
+        expected: await adapter.execute("readSelection"),
+        patch: { kind: "writeFile", path: "over-the-open-document", bytes: "..." },
+      }),
+      /Unsupported Word patch|do not match the target/,
+    );
+    assert.deepEqual(state.changes, []);
+  }
+});
+test("O-07: Office-settings identity round-trips the gateway binding id across reopen for both hosts", async () => {
+  for (const host of ["word", "excel"]) {
+    // The settings Office persists inside the document survive save + close + reopen.
+    const persistedSettings = new Map();
+    const opened = () => fixture(host, { settings: persistedSettings }).adapter;
+    // The gateway derives its binding key exactly like documentGateway.ts on win32:
+    // canonical lowercased workspace + host + documentId (never the file path).
+    const bindings = new Map();
+    const bind = (workspacePath, descriptor) => {
+      const key = JSON.stringify([
+        workspacePath.toLowerCase(),
+        descriptor.host,
+        descriptor.documentId,
+      ]);
+      if (!bindings.has(key)) bindings.set(key, { id: `binding-${host}`, key });
+      return bindings.get(key);
+    };
+    const first = await opened().descriptor();
+    const firstBinding = bind("D:\\Fixture\\Project", first);
+    // Pane-side metadata is persisted through the same Office settings store, so it
+    // travels inside the document instead of a pane-local cache.
+    persistedSettings.set(
+      "specHarness.pane.binding",
+      JSON.stringify({ bindingId: firstBinding.id, workspacePath: "D:\\Fixture\\Project" }),
+    );
+    // Reopen: a fresh adapter instance over the persisted settings keeps the document
+    // identity and gains a new instance identity.
+    const reopened = await opened().descriptor();
+    assert.equal(reopened.documentId, first.documentId);
+    assert.notEqual(reopened.documentInstanceId, first.documentInstanceId);
+    // The gateway resolves the reopened document — even through a differently-cased
+    // workspace spelling — to the same persisted binding id.
+    const reopenedBinding = bind("d:\\fixture\\project", reopened);
+    assert.equal(reopenedBinding.id, firstBinding.id);
+    // The metadata read back from the document still matches that binding id.
+    assert.equal(
+      JSON.parse(persistedSettings.get("specHarness.pane.binding")).bindingId,
+      reopenedBinding.id,
+    );
+  }
 });

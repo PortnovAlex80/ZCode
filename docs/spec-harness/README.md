@@ -37,29 +37,72 @@
 
 ## Сборка без запуска
 
-Рекомендуемая версия Node берётся из `mise.toml` (24.14.0), pnpm — из `packageManager` (10.33.2). В текущей проверке использован Node 24.13.1; это отклонение от закреплённой версии, а не обновление требования.
+### Подготовка на чистой машине (R-03)
+
+Закреплённые инструменты: Node из `mise.toml` (24.14.0; проверка сборки требует Node 24+, `scripts/assert-node-version.mjs`), pnpm из `packageManager` (10.33.2), Electron 41.0.3 и electron-builder `^26.8.1` из `packages/desktop/package.json`. В текущей проверке использован Node 24.13.1; это отклонение от закреплённой версии, а не обновление требования.
 
 ```powershell
-Set-Location D:\Development\ZCode-Harness
+git clone https://github.com/PortnovAlex80/ZCode.git ZCode-Harness
+cd ZCode-Harness
+git switch dev
+# Node 24.14.0 + pnpm 10.33.2 (mise), затем:
 pnpm install --frozen-lockfile
-pnpm prepare:desktop-runtime
+```
+
+Установка только `--frozen-lockfile`: `pnpm-lock.yaml` не перегенерируется. Postinstall (`node-pty-rebuild.mjs`) подготавливает нативный prebuild для Windows; отдельный `pnpm prepare:desktop-runtime` нужен только для запуска из исходников (см. ниже) — установщик готовит runtime-активы сам.
+
+### Сборка production-кода из исходников
+
+```powershell
 .\Build-Harness.cmd
 ```
 
-Первичная подготовка устанавливает Electron/native зависимости и агентные runtime assets. Это сборочные операции, не открытие приложения. В этой работе зависимости установлены с `--ignore-scripts` и `ELECTRON_SKIP_BINARY_DOWNLOAD=1`, поэтому Electron и native postinstall ещё нужно подготовить перед самостоятельным запуском. Если зависимости уже установлены таким способом, выполните `pnpm rebuild electron`, `pnpm --filter @zcode/desktop exec node scripts/node-pty-rebuild.mjs`, затем `pnpm prepare:desktop-runtime` и сборку.
+Build компилирует в `packages/desktop/out`, создаёт receipt с хешами (`out/spec-harness-production.json`: отпечаток исходников + SHA-256 всех выходов) и заканчивает работу. Start ничего не собирает и не поднимает Vite. После любых изменений исходников снова выполняйте Build. Сборка записывает только `packages/desktop/out` и не касается установленного ZCODE, профиля или ярлыков.
 
-Build компилирует в `packages/desktop/out`, создаёт receipt с хешами и заканчивает работу. Start ничего не собирает и не поднимает Vite. После любых изменений исходников снова выполняйте Build.
+### Сборка установщика Windows x64 (R-08)
 
-Это ещё не сборка установщика. Штатная упаковка Windows x64 уже есть в `bundle:desktop` (electron-builder/NSIS); наш единый `Build-Installer.cmd`, проверка установленной версии и политика обновлений включены в [план](IMPLEMENTATION-PLAN.md#windows-installer-delivery) и пункты R-08..R-10 [чеклиста](IMPLEMENTATION-CHECKLIST.md). Скрипт пока не реализован. Исходная база форка совпадает с официальным тегом `v3.15.1` (`aac47556…`); EXE из Downloads служит запасным установщиком и не участвует в сборке исходников.
+```powershell
+.\Build-Installer.cmd          # полный путь: prepare -> production build -> упаковка
+.\Build-Installer.cmd fast     # быстрый пересбор по проверенному кешу
+```
+
+Единый корневой скрипт над штатной upstream-цепочкой `pnpm bundle:desktop -- --os win --arch x64` (electron-builder/NSIS, `packages/desktop/scripts/bundle.mjs` + `packages/desktop/electron-builder.config.js`). Полный путь: (1) `pnpm --filter @zcode/desktop prepare:runtime-assets` — сборка CLI-агента из `apps/zcode-cli` в `bundled-agents/win32-x64/glm/zcode.cjs` и нативные инструменты поиска (ugrep из встроенного в репозиторий архива и ripgrep из официального релиза, оба с закреплённым SHA-256); (2) `node scripts/spec-harness-production.mjs build` — production-компиляция с receipt; (3) electron-builder NSIS с механическими проверками: замыкание runtime-зависимостей в `app.asar`, границы нативных пакетов только win32-x64, prebuild `node-pty` и аудит размера. Быстрый путь перед упаковкой валидирует кеш: receipt (исходники и выходы не менялись), побайтовое равенство `bundled-agents/win32-x64/glm/zcode.cjs` собранному `apps/zcode-cli/packages/cli/dist/zcode.cjs` и наличие `bundled-tools/win32-x64/{ugrep,ripgrep}`; при любой ошибке — явный отказ с кодом 1.
+
+Скрипт фиксирует издательскую среду: `ZCODE_ENV=production` (одна установленная идентичность `ZCode`, appId `dev.zcode.app`), `ZCODE_AUTO_UPDATE=0` (см. политику обновлений ниже), цель win/x64, пропуск mock-cdn remote-активов (установщик их не потребляет), `CI=` очищен (electron-builder не публикует сам). Перед сборкой отдельная проверка отказывает в работе, если идентичность не production или автоматическое обновление включилось бы. Результат печатается явно: абсолютный путь артефакта, размер, SHA-256, базовая версия upstream (3.15.1, тег `v3.15.1` = `aac47556…`), ревизия форка (`git rev-parse HEAD`) и версия/коммит внутри пакета (`out/metadata/build-meta.json`).
+
+Скрипт ничего не запускает, не устанавливает и не публикует: установщик не выполняется, профиль и установленный ZCODE не затрагиваются. Первая сборка может скачивать Electron runtime и NSIS-инструменты (зеркала — как в upstream-скриптах); подпись не предполагается — локальная подпись остаётся опциональной конфигурацией (проверено: артефакт `NotSigned`). Особенность машины без права создания symbolic links (включённый Developer Mode или администратор): распаковка кеша electron-builder `winCodeSign-2.6.0.7z` падает на darwin-симлинках. Обход без изменения системы: один раз распаковать архив в `%LOCALAPPDATA%\electron-builder\Cache\winCodeSign\winCodeSign-2.6.0` (ошибки симлинков игнорируются) и удалить оттуда папку `darwin` — проверено, `app-builder download-artifact --name winCodeSign` после этого берёт кеш без скачивания. В пакет идут оригинальные upstream-иконки из `packages/desktop/build` (установщика, окна и трея), CLI-агент и нативные зависимости с закреплёнными контрольными суммами; исходники, dev-кеш, карты кода, логи и приватные данные исключены (`files: out/**` + шаблоны обрезки в `electron-builder.config.js`, очистка sourcemap-ссылок в afterPack). Установщик содержит только desktop-приложение: настройки узлов Office (Word/Excel task pane через opt-in document gateway после установки desktop) и плагин AutoCAD (ручной NETLOAD из `prototypes/autocad-preview`) — отдельные шаги, которые этот пакет не выполняет. Исходная база форка совпадает с официальным тегом `v3.15.1`; EXE из Downloads служит запасным установщиком и не участвует в сборке исходников.
+
+### Отсутствие инъекций (проверено по исходникам, R-03)
+
+- Без Vite: production-сборка — разовый `tsup` + `vite build` (`packages/desktop/scripts/run-production-build.mjs`, `NODE_ENV=production`), без dev-сервера и вотчеров. Упакованное приложение грузит renderer из `app.asar`; dev-URL (`ELECTRON_RENDERER_URL`) читается только при `!app.isPackaged` (`packages/desktop/src/main/desktopHostProcess.ts:146`, `index.ts:2260`), а `scripts/spec-harness-production.mjs` дополнительно удаляет эту переменную из окружения запуска.
+- Без временного HOME: `Build-Harness.cmd`, `Start-Harness.cmd` и `Build-Installer.cmd` не задают `HOME`/`ZCODE_DATA_BASE_DIR`; изолированный `ZCODE_DATA_BASE_DIR` в `mise.toml` относится только к dev-задаче `mise run dev`, не к production-запуску. Запуск из исходников использует обычный выбор dataBaseDir ZCODE.
+- Без инъекций в активный runtime: сборки пишут только в `packages/desktop/out`, `packages/desktop/dist`, `packages/desktop/bundled-agents`, `packages/desktop/bundled-tools` и кеши сборки; не патчат установленный ASAR, не правят профиль/ярлыки и не перезапускают живой ZCODE. Установщик не запускается сборкой.
 
 ## Самостоятельный запуск после завершения текущей работы
 
-Сначала завершите текущий ZCODE через Quit. Затем:
+Установите собранный `Build-Installer.cmd` EXE вручную (установка — отдельное разрешённое действие, не часть сборки; живая приёмка установки — R-09) или запустите из исходников. Сначала завершите текущий ZCODE через Quit. Затем:
 
 ```powershell
 Set-Location D:\Development\ZCode-Harness
 .\Start-Harness.cmd
 ```
+
+## Политика fork-safe обновлений (R-10)
+
+Автообновление в сборке форка отключено на этапе компиляции, и это проверяется механически:
+
+- `Build-Installer.cmd` ставит `ZCODE_AUTO_UPDATE=0`; `scripts/build-time-config.mjs` превращает это в define `__ZCODE_AUTO_UPDATE_ENABLED__=false` (tsup/vite), явная переменная окружения сильнее любых локальных приватных значений.
+- `packages/desktop/src/main/index.ts` вызывает `initAutoUpdater({ enabled: ZCODE_PRODUCT_FLAVOR === "production" && ZCODE_AUTO_UPDATE_ENABLED })`; при `false` модуль (`packages/desktop/src/main/autoUpdater.ts`) очищает опрос обновлений и закрывается fail-closed — ручная проверка обновлений тоже отказывает внутри модуля.
+- В пакете остаётся upstream-файл `resources/app-update.yml` с конфигурацией-заполнителем (`http://localhost:8081`, проверено в собранном win-unpacked); он инертен — код обновления отключён на уровне компиляции, это второй независимый барьер.
+- Предполётная проверка скрипта отказывает собирать, если автообновление включилось бы или идентичность не production. Официальный stable feed раздаёт официальные установщики; молчаливая замена ими форка исключена конструкцией.
+
+Разрешённые пути обновления:
+
+1. **Upstream-исходники** — рецензируемый merge (см. раздел ниже) и пересборка `Build-Installer.cmd` с повторными проверками. Только так изменения upstream попадают в форк.
+2. **Официальный установщик** — явный запасной выбор пользователя, не автоматизм. Его запуск — отдельное осознанное действие.
+3. **Профиль и данные** — переустановка приложения сама по себе не откатывает миграцию профиля; восстановление данных/схемы — отдельная процедура от переустановки приложения (резервная копия профиля при полностью закрытом приложении, R-04).
+
+Известная оговорка (за пределами этого скрипта): packaged-приложение с production-идентичностью при старте опрашивает официальный `/api/v1/client/configs` на минимальную версию (`packages/desktop/src/main/forceUpdateGuard.ts`). Он не заменяет бинарник, но при повышении официальной минимальной версии выше 3.15.1 может блокировать старт форка с предложением обновиться. Это живое поведение, требующее решения в исходниках Main (не входило в R-08/R-10 и не проверялось под закрытым runtime-гейтом).
 
 Запуск использует обычный выбор dataBaseDir ZCODE и домашний профиль, не создаёт временные HOME и не копирует креды. Не переопределяйте HOME/dataBaseDir, если нужен тот же список проектов и авторизация. Перед открытием новой версии сохраните резервную копию профиля при полностью закрытом приложении: upstream может изменять схему данных. На другой машине подготовьте зависимости там и используйте её локальный профиль установленного ZCODE; личные данные и токены в Git не передаются.
 
@@ -74,7 +117,11 @@ pnpm architecture:check -- --changed
 pnpm exec vitest run packages/ui/src/spec-document packages/services/src/spec-document packages/ui/src/root/diffsWorkerBudget.test.ts packages/desktop/test/specDetachedPanels.test.mjs packages/ui/test/documentFirstInput.test.ts --maxWorkers=1
 node --test scripts/test/spec-harness-production.test.mjs
 .\Build-Harness.cmd
+.\Build-Installer.cmd full
+.\Build-Installer.cmd fast
 ```
+
+Сборка установщика не запускает модель и не открывает GUI; она только компилирует и упаковывает.
 
 Оконные unit tests исполняют реальный coordinator с fake Electron: ACK, ранний возврат, таймаут и отказ неверному отправителю. Документные проверки покрывают пути, запись, якоря, восстановление состояния, изоляцию контекста и владение native composer. Проверка receipt отказывает при изменении/удалении lazy chunks и устаревших исходниках. Эти проверки не вызывают модель и не запускают GUI.
 
@@ -88,4 +135,4 @@ git switch dev
 git merge upstream/main
 ```
 
-Сначала убедитесь в чистом рабочем дереве. Конфликты разрешайте по контрактам текущей версии, сохраняя upstream возможности. Затем повторите проверки и Build. Сохраняйте опубликованную историю `dev`; upstream обновляйте merge, без force-push и дополнительных постоянных веток. После приёмки на чистом дереве выполните `git switch master`, `git merge --ff-only dev`, `git push origin master`, затем `git switch dev`. Выпуск и обновление живого профиля выполняйте только после ручной приёмки.
+Сначала убедитесь в чистом рабочем дереве. Конфликты разрешайте по контрактам текущей версии, сохраняя upstream возможности. Затем повторите проверки, `Build-Harness.cmd` и полный `Build-Installer.cmd` (быстрый путь здесь не подходит — исходники изменились, receipt откажет). Автоматическое обновление установленного официального приложения эти изменения не принесёт — оно отключено в сборке форка (см. политику выше); единственный путь — merge, пересборка и ручная переустановка. Сохраняйте опубликованную историю `dev`; upstream обновляйте merge, без force-push и дополнительных постоянных веток. После приёмки на чистом дереве выполните `git switch master`, `git merge --ff-only dev`, `git push origin master`, затем `git switch dev`. Выпуск и обновление живого профиля выполняйте только после ручной приёмки.
