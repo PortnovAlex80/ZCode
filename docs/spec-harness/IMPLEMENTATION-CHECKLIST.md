@@ -125,7 +125,7 @@ items plus parked N-01.
 ## R — One release, build, profile and docs
 
 - [x] **R-01** Root plan/prompt/checklist distinguish implemented, fixture-verified and live-unverified work. Earlier Office/preview design documents point to current SRS and are labeled historical.
-- [ ] **R-02** After implementation, focused tests, root typecheck, lint, changed architecture gate, affected pre-push checks and production receipt validation pass on the final frozen revision. Document prior failures/warnings and checker coverage honestly.
+- [x] **R-02** After implementation, focused tests, root typecheck, lint, changed architecture gate, affected pre-push checks and production receipt validation pass on the final frozen revision. Document prior failures/warnings and checker coverage honestly. Evidence (2026-10-13, frozen tree at 9a001156+fix): typecheck/lint/architecture exit 0 (Wave 4 gates); pnpm verify:pre-push exit 0 after root fixed the one real failure it caught — Wave 2 P-03 clock guard broke two pre-existing highspeedFooterExpiryClock regression cases whose fake clock was static (now: () => 0); fixed by teaching the fakes to advance while preserving the no-catch-up-before-expiry contract; production receipt validateProductionBuild() = VALID.
 - [ ] **R-03** Complete Electron/native/runtime preparation and fresh-machine build/install/run instructions using pinned toolchains; verify no Vite, temporary HOME or active-runtime source injection is used.
 - [ ] **R-04** Fork uses that machine's normal ZCODE profile, project list and local authorization without shipping credentials. Shared-profile concurrent start is refused/handled; schema/version/fallback data recovery documented and verified with disposable profile copies first.
 - [ ] **R-05** One supported launcher/shortcut and original upstream Z icon (including its two slits) appear correctly in first/child windows, Alt+Tab, taskbar/pinning. User-provided replacement art is a later optional input.
@@ -358,3 +358,13 @@ reopen + gateway-side same-bindingId reopen across restart. T-05 — allowed-ori
 rejection, canonical-workspace key, capability narrowing after disconnect (stale
 generation rejected), backpressure/saturation/drain/terminate, durable deletion across
 restart (documentGateway.test.ts 23/23). Detail: wave4-report artifact.
+
+2026-10-13 R-02 final frozen pass (root): pnpm verify:pre-push initially failed on 2
+pre-existing highspeedFooterExpiryClock.test.ts regression cases — the Wave 2 P-03 guard
+(now() < nextExpiryMs skip) is product-correct, but those cases injected a static
+now: () => 0 clock so the boundary could never elapse. Root fixed the fakes to advance
+time (Chinese cause comment in the test) and added a no-catch-up-before-expiry assertion,
+preserving both the regression intent (footer needs no extra message after foreground
+return) and the P-03 bound. Re-run: both clock suites green; pnpm verify:pre-push exit 0;
+production receipt validateProductionBuild() = VALID. R-02 accepted. Remaining open work
+is live-gated only.

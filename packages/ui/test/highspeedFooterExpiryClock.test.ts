@@ -92,17 +92,27 @@ describe("armHighspeedFooterExpiryClock", () => {
   it("窗口隐藏冻结 setTimeout 后，恢复可见时补偿刷新（回归：footer 不再需要用户再发消息）", () => {
     const targets = createFakeTargets();
     const onExpire = vi.fn();
+    // Bug 修复说明：P-03 之后补偿只在真实越过到期边界时触发。原用例注入恒定 now()=0，
+    // 边界永远未越过，补偿被合法跳过。这里让 fake 时钟前进到已过期，保留回归语义：
+    // 隐藏期间定时器被冻结错过边界，回到前台必须立即追平 footer 时钟。
+    let fakeNow = 0;
     armHighspeedFooterExpiryClock(1_000, onExpire, {
       windowTarget: targets.windowTarget,
       documentTarget: targets.documentTarget,
-      now: () => 0,
+      now: () => fakeNow,
     });
 
     // 模拟窗口隐藏：到期 setTimeout 被冻结（不触发）。切到隐藏态本身不应补偿。
     targets.setVisibility("hidden");
     expect(onExpire).not.toHaveBeenCalled();
 
+    // 未到期时回到前台/聚焦不补偿（P-03：空闲唤醒不得触发 O(rows) 重建）。
+    fakeNow = 500;
+    targets.setVisibility("visible");
+    expect(onExpire).not.toHaveBeenCalled();
+
     // 卡此时已到期。窗口回到前台，必须立即把 footer 时钟追平——无需触发原定时器。
+    fakeNow = 1_500;
     targets.setVisibility("visible");
     expect(onExpire).toHaveBeenCalledTimes(1);
   });
@@ -110,12 +120,14 @@ describe("armHighspeedFooterExpiryClock", () => {
   it("窗口获得焦点时也补偿刷新", () => {
     const targets = createFakeTargets();
     const onExpire = vi.fn();
+    let fakeNow = 0;
     armHighspeedFooterExpiryClock(1_000, onExpire, {
       windowTarget: targets.windowTarget,
       documentTarget: targets.documentTarget,
-      now: () => 0,
+      now: () => fakeNow,
     });
 
+    fakeNow = 1_500;
     targets.focus();
     expect(onExpire).toHaveBeenCalledTimes(1);
   });
