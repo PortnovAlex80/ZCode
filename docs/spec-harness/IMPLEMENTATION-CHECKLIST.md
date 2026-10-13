@@ -136,6 +136,11 @@ items plus parked N-01.
 - [ ] **R-10** Define and verify fork-safe update behavior: automatic official update cannot silently replace our changes; reviewed upstream source update/rebuild is documented. Official installer is an explicit fallback; profile-schema/data restoration is separate from application reinstall.
 - [ ] **R-11** Each adapter README (Word/Excel/AutoCAD) lists per-capability status and actual acceptance evidence, kept current with each accepted wave. Evidence: DOCUMENT-HOSTS.md:76.
 
+## U — Desktop UX (user requests 2026-10-13)
+
+- [ ] **U-01** The main chat column and the left workspace tree can swap sides via an explicit persistent toggle; the left/right resize divider keeps correct direction, limits and auto-collapse after the swap, on desktop and web layouts, keyboard accessible. Concept: user request 2026-10-13 (сamoе главное).
+- [ ] **U-02** ПКМ on a file or folder row in the left project tree offers «Добавить метаданные»: a document/folder passport (назначение, тип, источники, связи, методики — ссылки, не копии) stored in the workspace `.harness/project.json` keyed by normalized path; rows with metadata show a badge; edit reopens the passport; corrupted storage degrades to a visible error. Concept: проектный харнесс design discussion (per-level metadata, references over copies). Optional scope — implement only as a clean solution.
+
 ## N — Parked outside this release
 
 - [ ] **N-01** Compact agent capability/reference map for Word/Excel/AutoCAD (object → operation → limits → minimal example; versioned startup index plus lazy resources). Intentionally outside this checklist's release scope as a separate user request. Evidence: IMPLEMENTATION-PLAN.md:277-282.
