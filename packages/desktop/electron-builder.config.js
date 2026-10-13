@@ -854,10 +854,11 @@ export default {
   win: {
     target: ["nsis"],
     artifactName: buildDesktopArtifactName("win"),
-    // Bug 修复（R-05 活体反馈 2026-10-13）：win.icon 未设置时 electron-builder 会给 EXE
-    // 嵌入默认 Electron 图标，安装后任务栏/快捷方式/Alt+Tab 显示通用 Electron 而非 Z。
-    // 嵌入仓库原始 build/icon.ico；运行态窗口/托盘仍用 extraResources 的独立资源。
-    icon: "build/icon.ico",
+    // Bug 修复（R-05 活体反馈 2026-10-13, вторая итерация）：icon.ico содержит только
+    // кадры до 32x32 — без 256x256 electron-builder v26 молча оставляет дефолтную
+    // иконку Electron в EXE. Используем 512px PNG: electron-builder сам конвертирует
+    // его во все кадры при упаковке;运行态 окно/тrey по-прежнему идут через extraResources.
+    icon: "build/icon_windows.png",
     signExts: [".node", ".dll"],
     // Bugfix: Windows CI 之前完全依赖 electron-builder 内置 signtool.exe，
     // 一旦 runner 的证书链路要求改走 vsigntool，打包阶段就会在内置签名环节卡死。
