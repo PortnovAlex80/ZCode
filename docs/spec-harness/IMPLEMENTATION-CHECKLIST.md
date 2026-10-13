@@ -25,10 +25,10 @@ recheck those items before restoring their accepted status.
 | Field                          | State                                                                                              |
 | ------------------------------ | -------------------------------------------------------------------------------------------------- |
 | Product decision               | One maintained fork build; official installer is fallback; no maintained overlay build             |
-| Current assignment             | Wave 2 integrated 2026-10-13: 5/5 exclusive-path tasks reviewed and committed by root; unmapped-requirements triage created T-07..T-10, O-06, O-07, R-11 (parked N-01); no active implementation assignment |
-| Live runtime gate              | CLOSED: user has active ZCODE sessions (agents running in other projects); no launch/stop/profile changes or paid prompts; code/fixture/docs work only |
+| Current assignment             | Wave 3 in flight: D-02/D-03 fixture halves (Impl D-lanes) then D-05 (Impl D5); T-07/T-10 pane compactness + streaming drafts (Impl T-pane); T-09 gateway shutdown phase (Impl T9); O-02..O-05 fixture depth on owned disposable Office fixtures (Impl OFix); R-11 adapter READMEs (Impl R11); T-08 accepted by root |
+| Live runtime gate              | CLOSED: user has active ZCODE sessions (agents running in other projects); no launch/stop/profile changes or paid prompts; code/fixture/docs work only; Word/Excel allowed solely on owned disposable fixture documents |
 | Toolchain decisions            | `pnpm.overrides`/`patchedDependencies` live in `pnpm-workspace.yaml` (frozen-lockfile install verified, react 19.2.7, typecheck green); agents may run `pnpm install --frozen-lockfile` but never lockfile-refreshing commands; node 24.13.1 shell deviation recorded per evidence |
-| Immediate implementation order | Next non-live wave: D-02/D-03/D-05 fixture halves; T-07/T-09/T-10 code halves (T-08 is spec-text-only); O/C fixture-depth halves with owned disposable fixtures; R-11 adapter READMEs; live gates only after an explicit fresh user release |
+| Immediate implementation order | Wave 3 → root integration → remaining non-live edges (D-01/D-04 fixture remainders, W fixture edges) → only live-gated work remains (P thresholds, GUI/model/Office-GUI/install acceptance) until the user explicitly releases the runtime |
 | Release status                 | Not accepted: GUI, performance, live agent and installation gates remain open                      |
 
 ## Exclusive write assignments
@@ -51,7 +51,12 @@ items plus parked N-01.
 
 | Item IDs   | Agent / role         | Exclusive paths                       | Depends on         | Reviewer / result                                |
 | ---------- | -------------------- | ------------------------------------- | ------------------ | ------------------------------------------------ |
-| (next wave) | To be assigned by root before Wave 3 starts | — | Frozen Wave 2 tree | — |
+| D-02, D-03 (fixture halves) | Impl D-lanes / context lanes | `packages/ui/src/spec-document/**`, `packages/services/src/spec-document/**` | Frozen Wave 2 tree | Independent reviewer; root accepts |
+| T-07, T-10 (code halves) | Impl T-pane / compact pane | `prototypes/document-host/pane.js`, `prototypes/document-host/pane.test.mjs`, `packages/ui/src/document-host/**` | Frozen boundary spec; Wave 2 parity code | Independent reviewer; root accepts |
+| T-09 (code half) | Impl T9 / gateway shutdown | `packages/desktop/src/host/**`, `packages/desktop/test/documentGateway.test.ts` | Frozen boundary spec | Independent reviewer; root accepts |
+| D-05 (fixture half) | Impl D5 / pane persistence | `packages/ui/src/spec-document/**` | Impl D-lanes done | Independent reviewer; root accepts |
+| O-02..O-05 (fixture-depth halves) | Impl OFix / office fixtures | `prototypes/document-host/**` (adapter sources, `Test-Office-Adapters.ps1`, fixture docs; not pane.js while T-pane runs — sequenced after) | Impl T-pane done | Independent reviewer; root accepts |
+| R-11 | Impl R11 / adapter READMEs | `prototypes/document-host/README.md`, per-host READMEs, `prototypes/autocad-preview/README.md` | Impl OFix done | Independent reviewer; root accepts |
 
 ## A — Canonical fork and architecture
 
@@ -100,7 +105,7 @@ items plus parked N-01.
 - [ ] **T-05** Real allowed-origin/pairing/canonical-workspace/capability boundaries and disconnect/cancel/backpressure/session deletion work end to end. Preserve complete preexisting MCP configuration; provider credentials never enter the pane.
 - [ ] **T-06** Trace real pane → native transport → Host/services → CLI `app-server --stdio` → provider/tool → native projection. Verify create-without-input, stream, permission/question, stop, busy admission and recovery with authorized model usage only.
 - [ ] **T-07** Native panes never mount the desktop Root/SessionPane and never spawn eager diff/highlight workers; pane conversations render through the frozen compact surface only. Evidence: ADR 001 pre-live-use expectation; DOCUMENT-HOSTS.md:70 (Wave 2 requirements triage).
-- [ ] **T-08** Bounded-tool policy is stated explicitly in the specs: bounded document tools do not constrain other agent filesystem/MCP tools, and no global single-writer claim is made without a separate policy for them. Evidence: DOCUMENT-HOSTS.md:74; ADR 001:30.
+- [x] **T-08** Bounded-tool policy is stated explicitly in the specs: bounded document tools do not constrain other agent filesystem/MCP tools, and no global single-writer claim is made without a separate policy for them. Evidence: the explicit policy paragraph in the DOCUMENT-HOSTS.md verification section ("Наличие bounded document tools не ограничивает автоматически сторонние filesystem/MCP инструменты агента; не заявлять глобального единственного writer без отдельной политики этих инструментов") and ADR 001:30; root verified both 2026-10-13 — documentation-only criterion already satisfied.
 - [ ] **T-09** Gateway shutdown runs as a bounded phase of Host shutdown: in-flight pane operations drain or fail visibly; no orphaned helper process or listener. Evidence: DOCUMENT-HOSTS.md:68.
 - [ ] **T-10** The pane preserves drafts and focus during streaming, including AskUserQuestion rendered through the shared clean ZCODE answer builder. Evidence: DOCUMENT-HOSTS.md:70.
 
