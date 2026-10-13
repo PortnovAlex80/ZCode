@@ -89,8 +89,16 @@ export function createOfficeAdapter({ Office, Word, Excel, host }) {
       const range = captured ?? context.document.getSelection();
       range.load("text");
       await context.sync();
-      if (!range.text.trim() || range.text.length > MAX_TEXT)
+      // 原因：外部作者整体改写或删除锚定片段时，Word 会把 tracked Range 折叠为空；
+      // 旧实现此时抛出与“新鲜选择”相同的 1..20000 字符错误，把陈旧目标伪装成
+      // 输入校验失败，调用方无法区分“用户没选好”与“锚点已失效”。
+      // 修复依据：DOCUMENT-HOSTS 规定外部改动/切换后旧请求必须拒绝并要求重新
+      // 读取；锚定目标的空/超限文本等价于锚点失效，统一走 anchor expired 拒绝。
+      if (!range.text.trim() || range.text.length > MAX_TEXT) {
+        if (target)
+          throw new Error("Text anchor expired; capture the original fragment again");
         throw new Error("Select between 1 and 20000 characters");
+      }
       let anchorId = target?.anchorId;
       if (!anchorId) {
         anchorId = crypto.randomUUID();

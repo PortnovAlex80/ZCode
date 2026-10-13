@@ -279,3 +279,45 @@ test("Excel bounds reads before loading values and does not substitute another i
   excelRange.cellCount = 1001;
   await assert.rejects(adapter.execute("readSelection"), /1000/);
 });
+test("Word preserves tracking that was already TrackAll before the write", async () => {
+  const { adapter, state } = fixture("word");
+  state.tracking = "TrackAll";
+  const expected = await adapter.execute("readSelection");
+  const receipt = await adapter.execute("applyEdit", {
+    operationId: "trackall",
+    expected,
+    patch: { kind: "replaceText", text: "Kept under tracking" },
+  });
+  assert.equal(receipt.status, "applied");
+  assert.equal(receipt.trackingCleanupError, undefined);
+  assert.equal(state.tracking, "TrackAll");
+  assert.deepEqual(state.changes, [["replace", "Kept under tracking", "TrackAll"]]);
+});
+test("Word refuses plain replacement of a fragment containing pictures", async () => {
+  const { adapter, range, state } = fixture("word");
+  const expected = await adapter.execute("readSelection");
+  range.inlinePictures.items = [{}];
+  const receipt = await adapter.execute("applyEdit", {
+    operationId: "pictures",
+    expected,
+    patch: { kind: "replaceText", text: "No" },
+  });
+  assert.equal(receipt.status, "refused");
+  assert.deepEqual(state.changes, []);
+});
+test("Word reports an externally collapsed anchor as expired, not as a bad selection", async () => {
+  const { adapter, state } = fixture("word");
+  const expected = await adapter.execute("readSelection");
+  // Real Word collapses a tracked range whose content was wholly replaced externally.
+  state.text = "";
+  await assert.rejects(
+    adapter.execute("applyEdit", {
+      operationId: "collapsed",
+      expected,
+      patch: { kind: "replaceText", text: "Wrong" },
+    }),
+    /expired/,
+  );
+  await assert.rejects(adapter.execute("locate", expected), /expired/);
+  assert.deepEqual(state.changes, []);
+});

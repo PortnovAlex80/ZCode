@@ -25,10 +25,10 @@ recheck those items before restoring their accepted status.
 | Field                          | State                                                                                              |
 | ------------------------------ | -------------------------------------------------------------------------------------------------- |
 | Product decision               | One maintained fork build; official installer is fallback; no maintained overlay build             |
-| Current assignment             | Wave 3 in flight: D-02/D-03 fixture halves (Impl D-lanes) then D-05 (Impl D5); T-07/T-10 pane compactness + streaming drafts (Impl T-pane); T-09 gateway shutdown phase (Impl T9); O-02..O-05 fixture depth on owned disposable Office fixtures (Impl OFix); R-11 adapter READMEs (Impl R11); T-08 accepted by root |
+| Current assignment             | Wave 3 integrated 2026-10-13: 6/6 tasks reviewed and committed by root; T-08 accepted earlier; no active assignment — next root action is Wave 4 (build-only release work) |
 | Live runtime gate              | CLOSED: user has active ZCODE sessions (agents running in other projects); no launch/stop/profile changes or paid prompts; code/fixture/docs work only; Word/Excel allowed solely on owned disposable fixture documents |
 | Toolchain decisions            | `pnpm.overrides`/`patchedDependencies` live in `pnpm-workspace.yaml` (frozen-lockfile install verified, react 19.2.7, typecheck green); agents may run `pnpm install --frozen-lockfile` but never lockfile-refreshing commands; node 24.13.1 shell deviation recorded per evidence |
-| Immediate implementation order | Wave 3 → root integration → remaining non-live edges (D-01/D-04 fixture remainders, W fixture edges) → only live-gated work remains (P thresholds, GUI/model/Office-GUI/install acceptance) until the user explicitly releases the runtime |
+| Immediate implementation order | Wave 4 (build-only): R-08 Build-Installer.cmd, R-10 fork-safe updates, R-03 build/run instructions, O-06/O-07 and T-05 fixture halves, R-06 doc pass → R-02 full gates at the frozen revision → only live-gated work remains until the user explicitly releases the runtime |
 | Release status                 | Not accepted: GUI, performance, live agent and installation gates remain open                      |
 
 ## Exclusive write assignments
@@ -51,12 +51,7 @@ items plus parked N-01.
 
 | Item IDs   | Agent / role         | Exclusive paths                       | Depends on         | Reviewer / result                                |
 | ---------- | -------------------- | ------------------------------------- | ------------------ | ------------------------------------------------ |
-| D-02, D-03 (fixture halves) | Impl D-lanes / context lanes | `packages/ui/src/spec-document/**`, `packages/services/src/spec-document/**` | Frozen Wave 2 tree | Independent reviewer; root accepts |
-| T-07, T-10 (code halves) | Impl T-pane / compact pane | `prototypes/document-host/pane.js`, `prototypes/document-host/pane.test.mjs`, `packages/ui/src/document-host/**` | Frozen boundary spec; Wave 2 parity code | Independent reviewer; root accepts |
-| T-09 (code half) | Impl T9 / gateway shutdown | `packages/desktop/src/host/**`, `packages/desktop/test/documentGateway.test.ts` | Frozen boundary spec | Independent reviewer; root accepts |
-| D-05 (fixture half) | Impl D5 / pane persistence | `packages/ui/src/spec-document/**` | Impl D-lanes done | Independent reviewer; root accepts |
-| O-02..O-05 (fixture-depth halves) | Impl OFix / office fixtures | `prototypes/document-host/**` (adapter sources, `Test-Office-Adapters.ps1`, fixture docs; not pane.js while T-pane runs — sequenced after) | Impl T-pane done | Independent reviewer; root accepts |
-| R-11 | Impl R11 / adapter READMEs | `prototypes/document-host/README.md`, per-host READMEs, `prototypes/autocad-preview/README.md` | Impl OFix done | Independent reviewer; root accepts |
+| (wave 4) | To be assigned by root before Wave 4 starts (build-only release work) | — | Frozen Wave 3 tree | — |
 
 ## A — Canonical fork and architecture
 
@@ -287,3 +282,44 @@ and green.
 Requirements triage (root, from the read-only researcher's 8 findings): created T-07,
 T-08, T-09, T-10, O-06, O-07, R-11 and parked N-01 above; the earlier "7 unmapped"
 count is superseded by this verified list.
+
+2026-10-13 Wave 3 integration (workflow `dwfrun-8f213d71-286d-4112-a0bb-28e507c9ee22`,
+base `778fd340`; implementation agents never committed):
+
+```text
+ID(s): D-02, D-03, D-05, T-07, T-09, T-10 (fixture/code halves), O-02..O-05
+       (fixture-depth halves), R-11 (doc half)
+Revision / affected files: 21 files within Wave 3 exclusive paths (root diff check);
+       stray `nul` artifact removed
+Check command or manual scenario: pnpm exec vitest run over 9 spec-document/host/gateway
+       suites; node --test paneStructureGuard.test.mjs and pane.test.mjs; the Office task
+       ran Test-Office-Adapters.ps1 on owned disposable Word/Excel fixtures (reviewer
+       re-ran it); wave gates pnpm typecheck / lint / architecture:check --changed
+Result: 57 vitest tests passed, 1 intentionally skipped (15.0 s, node 24.13.1);
+       structural guard 1/1; pane tests 8/8; final gates all exit 0
+Independent review: fresh read-only reviewer per task, 6/6 passed, no fix round
+Remaining limits / runtime gate: every live half stays open — GUI/model acceptance,
+       renderer profiling, real Office/CAD GUI, install; no item claims live acceptance
+```
+
+Per-item (all stay `[ ]` — live halves remain): D-02/D-03 — payload-level lane separation
+and empty-draft composer-before-Send with zero model input at the sendCommand boundary
+(`specDiscussionLanes.test.ts` 5/5); Open-doc/Add-in-side-chat for new and existing
+parents, capability-derived disabled reasons, byte-exact fragment selection
+(`specDocumentEntryPoints.test.ts` 4/4 + byte cases). T-07 — structural guard test fails
+on any desktop-Root/worker import in the pane surface (`paneStructureGuard.test.mjs`).
+T-10 — streaming keeps draft/caret/focus; AskUserQuestion via the shared builder
+(`pane.test.mjs` extended, 8/8). T-09 — gateway shutdown is a bounded Host phase:
+in-flight ops fail visibly, helper terminated, port released (`documentGateway.test.ts`
+extended). D-05 — expand/restore, hide≠stop/delete, CAS save + reload restore, external
+conflict with recoverable Reload, project-collapse persistence, identity-keyed
+(`specDocumentPanePersistence.test.ts`, `specProjectCollapsePersistence.test.ts`, 12
+cases). O-02..O-05 — real-Word/Excel fixture depth: anchored duplicates, external-edit
+refusal (+ adapter fix for collapsed tracked ranges), comments and revision-tracking
+restore, table/rich-content refusal; Excel sheetId identity across renames/inserts,
+1000-cell limit, protected/merged/spill/legacy-CSE refusals, verified receipts;
+fixture-mode control IDs/aria, theme toggle, Enter/Shift+Enter/IME, 320px viewport;
+one-shot apply with receipt, duplicate/stale refusal, remount clears proposals
+(Test-Office-Adapters.ps1 + office-native-*.mjs; counts in the adapter READMEs).
+R-11 — per-capability status tables in all adapter READMEs with commands, counts and
+path:line citations. Full detail per task: wave3-report artifact.

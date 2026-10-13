@@ -197,3 +197,34 @@ test("document context contains only project path, document link, quote and the 
     "binding metadata and surrounding document text must not leak into the model context",
   );
 });
+
+test("document context preserves the exact fragment bytes for keyboard and view selections (D-03)", () => {
+  // 原因：锚点 quote 来自 textarea selectionStart/End 或视图选择文本，D-03 要求
+  // 逐字节保留（含 CRLF、制表符、NBSP、西里尔、emoji），载荷构造不得做任何归一化。
+  const fragment = "фрагмент\tс табом «cañón» 🎯\u00A0end\r\nsecond line";
+  const thread: SpecThread = {
+    id: "bytes",
+    documentPath: "docs/bytes.md",
+    parentSessionId: "parent",
+    anchor: {
+      quote: fragment,
+      prefix: "before",
+      suffix: "after",
+      start: 7,
+      sha256: "sha",
+    },
+  };
+  const text = documentQuestion(thread, "Вопрос", "D:/проект");
+  const embedded = `Selected fragment:\n${fragment}\n`;
+  assert.ok(text.includes(embedded));
+  // 字节级断言：载荷中的片段与源片段逐字节一致（非视觉等价）。
+  const index = text.indexOf(embedded);
+  assert.equal(
+    Buffer.compare(
+      Buffer.from(text.slice(index + embedded.length - fragment.length - 1, index + embedded.length - 1), "utf8"),
+      Buffer.from(fragment, "utf8"),
+    ),
+    0,
+  );
+  assert.ok(!text.includes("before") && !text.includes("after"));
+});

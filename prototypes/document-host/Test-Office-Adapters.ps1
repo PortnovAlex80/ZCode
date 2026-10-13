@@ -47,6 +47,17 @@ try {
         $excelProcess = Start-Process -WindowStyle Hidden -FilePath $excelPath -ArgumentList ('/x "' + (Join-Path $officeTestRoot 'Excel-Acceptance.xlsx') + '"') -PassThru
         $excelApp = Wait-OfficeObject 'Excel.Application'
         $excelApp.Visible = $true
+        # Office.js cannot create legacy CSE (Ctrl+Shift+Enter) array formulas, but the
+        # adapter must refuse writes to savedAsArray targets. Seed one on the disposable
+        # fixture copy through the same owned Excel instance via its application API
+        # (not the filesystem) before the acceptance checks start.
+        $fixtureWorkbook = $null
+        for ($attempt = 0; $attempt -lt 80 -and -not $fixtureWorkbook; $attempt++) {
+            $fixtureWorkbook = @($excelApp.Workbooks) | Where-Object { $_.Name -like 'Excel-Acceptance*' } | Select-Object -First 1
+            if (-not $fixtureWorkbook) { Start-Sleep -Milliseconds 250 }
+        }
+        if (-not $fixtureWorkbook) { throw 'Owned Excel acceptance workbook not found.' }
+        $fixtureWorkbook.Worksheets.Item(1).Range('AB1:AB2').FormulaArray = '=1+2'
     }
     & node (Join-Path $PSScriptRoot 'office-native-acceptance.mjs') $HostName
     if ($LASTEXITCODE -ne 0) { throw 'Native Office acceptance failed.' }

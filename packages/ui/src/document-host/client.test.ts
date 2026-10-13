@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { DocumentSessionClient } from "./client.js";
+import { DocumentSessionClient, buildElicitationResponseContent } from "./client.js";
+import { buildElicitationResponseContent as sharedBuilder } from "@/lib/elicitationResponse.js";
 
 function fixture() {
   const adapter = {
@@ -63,6 +64,21 @@ describe("document pane old-history pagination through the native rows-range tar
       rows: { firstRowId: 2, window: [{ rowId: 5 }] },
     });
     expect(client.hasOlderRows).toBe(true);
+  });
+});
+
+describe("document pane AskUserQuestion answer sharing (T-10)", () => {
+  it("re-exports the shared clean ZCODE answer builder, not a copy", () => {
+    // 原因：部署产物 client.js（Build-Document-Pane.ps1 打包 client.ts）是面板
+    // AskUserQuestion 答案的唯一来源；若有人把 builder 复制成局部实现，桌面
+    // ElicitationDialog 与面板会静默分叉。恒等断言把这层共享钉在源头上。
+    expect(buildElicitationResponseContent).toBe(sharedBuilder);
+    expect(
+      buildElicitationResponseContent(
+        [{ question: "Q", header: "H", multiSelect: false, options: [], key: "answer_0" }],
+        { answer_0: { selectedValues: [], customAnswer: "free" } },
+      ),
+    ).toEqual({ answers: { Q: "free" }, answer_0: "free", answer: "free" });
   });
 });
 

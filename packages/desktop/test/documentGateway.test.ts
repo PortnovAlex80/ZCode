@@ -20,8 +20,23 @@ vi.mock("node:https", async () => {
     createServer: (_tls: unknown, handler: unknown) => {
       state.handler = handler;
       state.server = new Emitter() as any;
-      state.server.listen = (_port: number, _host: string, ready: () => void) => ready();
-      state.server.close = (done: () => void) => done();
+      state.server.listening = false;
+      state.server.idleCloses = 0;
+      state.server.allCloses = 0;
+      state.server.listen = (_port: number, _host: string, ready: () => void) => {
+        state.server.listening = true;
+        ready();
+      };
+      state.server.close = (done: () => void) => {
+        state.server.listening = false;
+        done();
+      };
+      state.server.closeIdleConnections = () => {
+        state.server.idleCloses += 1;
+      };
+      state.server.closeAllConnections = () => {
+        state.server.allCloses += 1;
+      };
       return state.server;
     },
   };
@@ -793,5 +808,127 @@ describe("document gateway routing, no live CLI", () => {
     expect(JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0].sessions).toEqual([
       "new-session",
     ]);
+  });
+});
+
+describe("document gateway shutdown phase", () => {
+  // helper 侧的 /tool HTTP 回调：与现有 tool 分发用例相同的请求/响应 mock。
+  const toolCall = async (bindingId: string, secret: string, args: any) => {
+    let value = "";
+    const request = {
+      method: "POST",
+      url: "/tool",
+      headers: { authorization: `Bearer ${secret}` },
+      async *[Symbol.asyncIterator]() {
+        yield Buffer.from(JSON.stringify({ binding: bindingId, method: "readTarget", args }));
+      },
+    };
+    const response = Object.assign(new EventEmitter(), {
+      setHeader() {},
+      writeHead() {},
+      end(body: string) {
+        value = body;
+      },
+    });
+    await state.handler(request, response);
+    return JSON.parse(value);
+  };
+  it("shutdown with an active pane connection fails in-flight operations with a visible closed error, not a hang", async () => {
+    const { socket, binding } = await fixture();
+    const saved = JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0];
+    // 在飞 pane 工具调用：documentTool 已发给 pane，pane 永不回结果。
+    // vi.waitFor 默认 1s 上限即「不得挂起」的判定；旧实现依赖 terminate 后的异步 close 事件。
+    const flight = toolCall(binding.result.bindingId, saved.secret, {
+      documentInstanceId: "instance-1",
+      target: { quote: "Selection" },
+    });
+    await vi.waitFor(() =>
+      expect(socket.replies.some((item) => item.event === "documentTool")).toBe(true),
+    );
+    // 模拟真实 ws 语义：terminate 只销毁底层连接，close 事件异步派发。
+    // 旧实现依赖 close 事件善后在飞操作，在此桩下会挂起；dispose 必须自行有界地失败它们。
+    socket.terminate = () => {
+      socket.readyState = 3;
+    };
+    const disposal = gateway!.dispose();
+    const settled = await vi.waitFor(() => flight);
+    expect(settled.error).toMatch(/gateway closed/i);
+    await vi.waitFor(() => expect(socket.readyState).toBe(3));
+    await disposal;
+    gateway = undefined;
+    // shutdown 之后新操作立即被拒，同样不挂起。
+    expect(
+      (
+        await toolCall(binding.result.bindingId, saved.secret, {
+          documentInstanceId: "instance-1",
+          target: {},
+        })
+      ).error,
+    ).toMatch(/Host shutting down/);
+  });
+  it("terminates the session-isolated MCP helper callback channel during the bounded shutdown phase", async () => {
+    const { socket, binding } = await fixture();
+    const saved = JSON.parse(await readFile(path.join(root, "state.json"), "utf8"))[0];
+    const listener = state.server;
+    const flight = toolCall(binding.result.bindingId, saved.secret, {
+      documentInstanceId: "instance-1",
+      target: { quote: "Selection" },
+    });
+    await vi.waitFor(() =>
+      expect(socket.replies.some((item) => item.event === "documentTool")).toBe(true),
+    );
+    await gateway!.dispose();
+    gateway = undefined;
+    // 在飞回调收到可见错误（MCP cancellation 语义：HTTP callback 终止，不等待 pane）。
+    expect((await vi.waitFor(() => flight)).error).toMatch(/gateway closed/i);
+    // helper 的回调通道被显式销毁（closeAllConnections），listener 不再持有 helper 句柄。
+    expect(listener.allCloses).toBe(1);
+    // helper 进程随后由 CLI session runtime 随 service-dispose 阶段终止（进程归属不在 gateway）。
+    expect(
+      (
+        await toolCall(binding.result.bindingId, saved.secret, {
+          documentInstanceId: "instance-1",
+          target: {},
+        })
+      ).error,
+    ).toMatch(/Host shutting down/);
+  });
+  it("releases the listener port during shutdown so a subsequent host can bind", async () => {
+    const { command, config } = await fixture();
+    await command("port-create", { workspaceId: root });
+    const first = state.server;
+    expect(first.listening).toBe(true);
+    await gateway!.dispose();
+    expect(first.listening).toBe(false);
+    expect(first.allCloses).toBeGreaterThanOrEqual(1);
+    gateway = undefined;
+    gateway = await startDocumentGateway(
+      { get: (key: string) => (key === "agent" ? state.agent : state.mcp) } as any,
+      path.join(root, "config.json"),
+    );
+    expect(state.server).not.toBe(first);
+    expect(state.server.listening).toBe(true);
+    const reopened = new Socket();
+    state.wss.emit("connection", reopened);
+    const rpc2 = async (method: string, params: any = {}) => {
+      const id = crypto.randomUUID();
+      reopened.emit("message", Buffer.from(JSON.stringify({ id, method, params })));
+      await vi.waitFor(() => expect(reopened.replies.some((item) => item.id === id)).toBe(true));
+      return reopened.replies.find((item) => item.id === id);
+    };
+    await rpc2("pair", { token: config.token });
+    const bind = await rpc2("bind", {
+      workspacePath: root,
+      document: {
+        host: "word",
+        documentId: "document-1",
+        documentInstanceId: "instance-2",
+        name: "Sample.docx",
+      },
+    });
+    // 绑定已在 shutdown 阶段持久化，后续 Host 恢复同一文档绑定。
+    expect(bind.result.sessions).toEqual(["new-session"]);
+    await gateway!.dispose();
+    expect(state.server.listening).toBe(false);
   });
 });

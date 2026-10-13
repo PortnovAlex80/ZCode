@@ -187,6 +187,56 @@ test("missing persisted document recovery clears the stale path but retains layo
     defaultDocumentPresentation(),
   );
 });
+test("every persisted presentation field is keyed by the stable workspace identity, with path fallback", () => {
+  const storage = memoryStorage();
+  const identity = "stable-identity";
+  const key = documentPresentationKey("D:\\original\\root", identity);
+  const state = {
+    ...defaultDocumentPresentation(),
+    path: "docs/full.md",
+    editing: true,
+    scrollTop: 96,
+    activeThreadId: "thread-full",
+    discussionsVisible: true,
+    discussionMode: "floating" as const,
+    discussionRect: { x: 8, y: 16, width: 320, height: 480 },
+  };
+  assert.equal(writeDocumentPresentation(key, state, storage), true);
+  // 同一 identity、根目录移动后：全部持久化字段原样恢复。
+  assert.deepEqual(
+    readDocumentPresentation(documentPresentationKey("E:\\moved", identity), storage),
+    state,
+  );
+  // 字段集合即持久化契约：新增字段必须进入本枚举（并随 identity 键控恢复）。
+  assert.deepEqual(Object.keys(state).sort(), [
+    "activeThreadId",
+    "discussionMode",
+    "discussionRect",
+    "discussionsVisible",
+    "editing",
+    "path",
+    "scrollTop",
+  ]);
+  // 草稿同样按 identity 键控：路径变化不丢、其他 identity 不可见。
+  assert.equal(
+    writeDocumentDraft(key, "docs/full.md", { content: "draft", baseSha256: "h" }, storage),
+    true,
+  );
+  assert.deepEqual(
+    readDocumentDraft(documentPresentationKey("E:\\moved", identity), "docs/full.md", storage),
+    { content: "draft", baseSha256: "h" },
+  );
+  assert.equal(
+    readDocumentDraft(
+      documentPresentationKey("D:\\original\\root", "other-identity"),
+      "docs/full.md",
+      storage,
+    ),
+    null,
+  );
+  // 空白 identity 回退到路径键（AGENTS.md Workspace Identity：trim || path）。
+  assert.equal(documentPresentationKey("D:/fallback", "   "), documentPresentationKey("D:\\fallback"));
+});
 test("retired pane write tokens keep the successor draft authoritative across windows", () => {
   const storage = memoryStorage();
   const key = documentPresentationKey("D:/handoff");

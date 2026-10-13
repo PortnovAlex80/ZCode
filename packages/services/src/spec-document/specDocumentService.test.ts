@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -182,6 +183,36 @@ test("document symlink cannot escape the grant", async (context) => {
     }
     const service = createSpecDocumentService({ desktopLocal: true });
     await assert.rejects(service.read({ workspacePath: directory, path: "linked.md" }), /Linked/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// D-02/D-03 服务侧佐证：讨论载荷引用的文档 identity/path 与片段字节来源。
+// 快照必须逐字节保留磁盘内容（CRLF、制表符、NBSP、西里尔、emoji），sha256 对原始
+// 字节计算（锚点 sha256 的比对基准）；相对路径 identity 归一为正斜杠（Document link）。
+// “不静默附带整份文档”是 UI 载荷约束（specDiscussionLanes.test.ts 断言
+// documentQuestion 只含片段），本服务按定义返回完整快照供编辑器使用。
+test("discussion snapshot source preserves exact bytes and normalizes the document identity path", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "spec-document-exact-bytes-"));
+  try {
+    await mkdir(join(directory, "docs", "nested"), { recursive: true });
+    const raw = Buffer.from(
+      "# Заголовок\r\n\tfragment\t«кириллица» cañón 🎯\u00A0end\r\n",
+      "utf8",
+    );
+    await writeFile(join(directory, "docs", "nested", "exact.md"), raw);
+    const service = createSpecDocumentService({ desktopLocal: true });
+    const snapshot = await service.read({
+      workspacePath: directory,
+      // 反斜杠相对输入（launcher/绝对路径裁剪后的形态）必须归一为正斜杠 identity。
+      path: join("docs", "nested", "exact.md"),
+    });
+    assert.equal(snapshot.path, "docs/nested/exact.md");
+    assert.equal(Buffer.from(snapshot.content, "utf8").equals(raw), true);
+    assert.equal(snapshot.sha256, createHash("sha256").update(raw).digest("hex"));
+    // 片段字节从快照原样切片：锚点 quote 的字节来源不做任何归一化。
+    assert.equal(snapshot.content.includes("\tfragment\t"), true);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

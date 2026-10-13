@@ -145,6 +145,24 @@ export async function startDocumentGateway(services: ServiceCollection, configPa
       });
     });
   };
+  // 原因：旧 dispose 依赖 terminate 之后异步派发的 close 事件才善后连接，在飞调用失败与否
+  // 取决于事件时序。修复依据：善后收敛为幂等唯一入口（closing 防重入），socket close 与
+  // dispose 共用，使 dispose 同步给出可见 closed 错误，scope 释放进入 cleanupFlights 被等待。
+  const shutdownConnection = (connection: Connection, reason: string) => {
+    if (connection.closing) return;
+    connection.closing = true;
+    clearInterval(connection.drainTimer);
+    connections.delete(connection);
+    for (const listener of connection.listeners) listener.dispose();
+    for (const [id, job] of pending)
+      if (job.connection === connection) {
+        clearTimeout(job.timer);
+        pending.delete(id);
+        job.reject(new Error(reason));
+      }
+    const cleanup = connection.scope.dispose().catch(() => {});
+    cleanupFlights.add(cleanup.finally(() => cleanupFlights.delete(cleanup)));
+  };
   const server = createServer(
     { key: await readFile(config.keyPath), cert: await readFile(config.certPath) },
     async (request, response) => {
@@ -363,22 +381,7 @@ export async function startDocumentGateway(services: ServiceCollection, configPa
     socket.on("close", () => {
       closed = true;
       clearTimeout(pairDeadline);
-      if (!connection) return;
-      connection.closing = true;
-      clearInterval(connection.drainTimer);
-      connections.delete(connection);
-      for (const listener of connection.listeners) listener.dispose();
-      for (const [id, job] of pending)
-        if (job.connection === connection) {
-          clearTimeout(job.timer);
-          pending.delete(id);
-          job.reject(new Error("Document pane disconnected"));
-        }
-      const cleanup = connection.scope
-        .dispose()
-        .catch(() => {})
-        .finally(() => cleanupFlights.delete(cleanup));
-      cleanupFlights.add(cleanup);
+      if (connection) shutdownConnection(connection, "Document pane disconnected");
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -390,8 +393,17 @@ export async function startDocumentGateway(services: ServiceCollection, configPa
       if (disposalFlight) return disposalFlight;
       disposing = true;
       disposalFlight = (async () => {
+        // 原因：旧 dispose 只 terminate 客户端后 await server.close(cb)，回调要等全部已建连接
+        // 结束才触发：helper 的 keep-alive、慢请求体或无响应 /tool 回调都能把端口释放拖过
+        // Host 的 4s phase 边界，只能以超时收场（超时掩盖未完成的释放）。修复依据：disposing
+        // 已同步停 admission；shutdownConnection 同步失败 pane 在飞操作并释放 scope；随后
+        // terminate 客户端，留一拍事件循环把已拒绝 tool 的 400 写回 helper，再 closeAllConnections
+        // 销毁剩余连接（终止 helper 的 HTTP callback）并关 listener，端口本 phase 内释放可重绑。
+        for (const connection of connections) shutdownConnection(connection, "Gateway closed");
         for (const socket of wss.clients) socket.terminate();
         wss.close();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        server.closeAllConnections();
         await new Promise<void>((resolve) => server.close(() => resolve()));
         await Promise.all([...cleanupFlights, writeFlight]);
       })();
