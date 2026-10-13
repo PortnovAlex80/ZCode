@@ -368,3 +368,20 @@ preserving both the regression intent (footer needs no extra message after foreg
 return) and the P-03 bound. Re-run: both clock suites green; pnpm verify:pre-push exit 0;
 production receipt validateProductionBuild() = VALID. R-02 accepted. Remaining open work
 is live-gated only.
+
+2026-10-13 first live GUI feedback (user, installed fork build from C:\Program Files\ZCode,
+revision 4ea6b6c6) — two defects found and fixed by root:
+
+1. R-05 icon: installed EXE, taskbar and desktop shortcut show the generic Electron icon,
+   not the Z. Cause: `win.icon` was never set in `electron-builder.config.js`, so
+   electron-builder embedded its default icon; the Z resources were only copied as
+   extraResources for runtime window/tray. Fix: `win.icon = "build/icon.ico"` embedded at
+   packaging. Verification: rebuild below; taskbar/shortcut appearance needs the user's
+   next live look (R-05 stays open until then).
+2. D-03/D-05 document re-selection: the "Choose project document" select rendered only
+   while no document was open — after opening a document it was impossible to switch.
+   Fix: the select is always rendered, selects the current path, disabled only during
+   I/O or an empty list; drafts are persisted per workspace+path so switching is
+   lossless (SpecDocumentPane.tsx, cause comment in code). SCREEN-INVENTORY DOC-03
+   updated. Verification: all 85 spec-document suites green after the change; live
+   confirmation pending with the next build.

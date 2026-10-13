@@ -742,24 +742,27 @@ function Documents({
       className="flex h-full min-h-0 flex-col bg-background text-foreground"
       data-spec-document-pane
     >
-      {!document ? (
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <select
-            aria-label="Choose project document"
-            disabled={dirty || ioPending || !files.length}
-            value=""
-            className="min-w-0 flex-1 rounded-md border border-input-border bg-background px-2 py-1 text-ui-sm"
-            onChange={(event) => void open(event.target.value)}
-          >
+      {/* Bug 修复（D-03/D-05 活体反馈 2026-10-13）：选择器之前只在 !document 时渲染，
+          文档打开后无法 перевыбрать/切换。现在始终显示并选中当前路径；草稿按
+          workspace+path 持久化，切换无损；仅 I/O 进行中或列表为空时禁用。 */}
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <select
+          aria-label="Choose project document"
+          disabled={ioPending || !files.length}
+          value={document?.path ?? ""}
+          className="min-w-0 flex-1 rounded-md border border-input-border bg-background px-2 py-1 text-ui-sm"
+          onChange={(event) => void open(event.target.value)}
+        >
+          {!document ? (
             <option value="" disabled>
               Choose a document…
             </option>
-            {files.map((path) => (
-              <option key={path}>{path}</option>
-            ))}
-          </select>
-        </div>
-      ) : null}
+          ) : null}
+          {files.map((path) => (
+            <option key={path}>{path}</option>
+          ))}
+        </select>
+      </div>
       {error ? (
         <div role="alert" className="border-b border-border px-3 py-2 text-ui-sm text-destructive">
           {error}
