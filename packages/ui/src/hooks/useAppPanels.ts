@@ -44,6 +44,7 @@ import {
   BROWSER_USE_OPERATION_INDICATOR_DURATION_MS,
   openCodeViewerSidePane,
   openCodeViewerSidePanes,
+  attachSpecDocumentSidePaneTab,
   activateGitSidePane,
   getActiveSidePaneTab,
   getVisibleSidePaneTabs,
@@ -379,6 +380,17 @@ export function useAppPanels(options: {
       });
     },
     [commitOpenedSidePaneState, revealSidePaneForCurrentOwner, workspaceAbsPath],
+  );
+
+  // U-12 多开：文档 tab 面板内选择/切换文件后回填 tab 身份（标题=文件名、
+  // sourceKey=该文件稳定 key）。纯字段更新：不抢激活、不展开面板——tab 本来就在前台。
+  const handleSpecDocumentPathChange = useCallback(
+    (tabId: string, relativeDocumentPath: string) => {
+      commitSidePaneState((current) =>
+        attachSpecDocumentSidePaneTab(current, tabId, relativeDocumentPath),
+      );
+    },
+    [commitSidePaneState],
   );
 
   const handleOpenBrowserUrl = useCallback(
@@ -1614,6 +1626,7 @@ export function useAppPanels(options: {
     // 回调
     handleOpenCodeViewer,
     handleOpenCodeViewers,
+    handleSpecDocumentPathChange,
     handleOpenBrowserUrl,
     handleToggleBrowser,
     handleOpenBrowserTab,

@@ -93,6 +93,22 @@ export interface SpecDocumentPaneProps {
   onOpenCodeViewer?: (source: CodeViewerSource) => void;
   visible?: boolean;
   onActivate?: () => void;
+  /**
+   * U-12 多开：文档 tab 实例的稳定身份（宿主传 tab id）。缺省回退 initialPath
+   * （旧单实例语义）；提供后 tab 内切换文档不再因 initialPath 变化重挂面板。
+   */
+  instanceKey?: string;
+  /**
+   * U-12 多开：false 时挂载不自动恢复持久化的上一次文档——新 «+» tab 保持
+   * 选择器初始态（标题维持「Open doc」直到用户选择文档）。缺省 true（旧语义，
+   * 单实例/测试直接渲染时仍恢复上一次文档）。
+   */
+  autoOpenLastDocument?: boolean;
+  /**
+   * U-12 多开：本 tab 内打开/切换文档（workspace 相对路径）后通知宿主；宿主据此
+   * 把 tab 标题更新为文件名并回填稳定 sourceKey（同文件的链接按它复用本 tab）。
+   */
+  onDocumentOpen?: (relativePath: string) => void;
 }
 
 function Documents({
@@ -105,6 +121,8 @@ function Documents({
   onOpenCodeViewer,
   visible = true,
   onActivate,
+  autoOpenLastDocument = true,
+  onDocumentOpen,
 }: SpecDocumentPaneProps) {
   const { specDocumentService: documentService, fileWatcherService } =
     useServices();
@@ -153,6 +171,13 @@ function Documents({
   );
   const onActivateRef = useRef(onActivate);
   onActivateRef.current = onActivate;
+  // U-12：文档变更通知走 ref（与 onActivateRef 同款）——异步读取完成后调用时
+  // 永远拿到宿主最新回调，不把 onDocumentOpen 加进挂载 effect 依赖而重跑恢复流程。
+  const onDocumentOpenRef = useRef(onDocumentOpen);
+  onDocumentOpenRef.current = onDocumentOpen;
+  function notifyDocumentOpen(relativePath: string) {
+    onDocumentOpenRef.current?.(relativePath);
+  }
   const restoringScrollRef = useRef(true);
   const [baseSha256, setBaseSha256] = useState("");
   const baseSha256Ref = useRef("");
@@ -476,7 +501,12 @@ function Documents({
     if (!documents) setError("Documents are unavailable in this build.");
     else {
       // 恢复目标在链外计算，失败分类时需要原始请求路径（而不是序列化后的异常文本）。
-      const requestedPath = initialPath || restoredPresentation.path;
+      // U-12：autoOpenLastDocument=false（«+» 新开的选择器 tab）不回退到持久化的
+      // 上一次文档——新 tab 必须停在「未选文档」初始态，标题维持 Open doc；
+      // 有 initialPath（tab 绑定的文件 / 消息链接）时优先 initialPath，行为不变。
+      const requestedPath =
+        initialPath ||
+        (autoOpenLastDocument ? restoredPresentation.path : null);
       void documents
         .getWorkspace()
         .then(async (grant) => {
@@ -499,6 +529,8 @@ function Documents({
             const opened = await documents.read({ path: relativePath });
             if (live) {
               install(opened);
+              // U-12：挂载恢复也回填 tab 身份（标题/sourceKey 跟随实际打开的文件）。
+              notifyDocumentOpen(opened.path);
               const restored = restoreDocumentDraft(
                 opened,
                 readDocumentDraft(presentationKey, opened.path),
@@ -562,7 +594,7 @@ function Documents({
       releaseThreads?.();
       threadStoreRef.current = null;
     };
-  }, [documents, storageKey, workspacePath, initialPath]);
+  }, [documents, storageKey, workspacePath, initialPath, autoOpenLastDocument]);
   function persist(next: SpecThread[]) {
     // Storage failure prevents uplink; an untracked native session is not silently created.
     if (!threadStoreRef.current || !discussionWriter.canWrite())
@@ -621,6 +653,8 @@ function Documents({
       install(next);
       setSelection(null);
       setActiveThreadId(null);
+      // U-12：tab 内切换文档后回填 tab 身份（标题=文件名、sourceKey=该文件稳定 key）。
+      notifyDocumentOpen(next.path);
       const restored = restoreDocumentDraft(
         next,
         readDocumentDraft(presentationKey, next.path),
@@ -789,6 +823,8 @@ function Documents({
             scrollTop: 0,
           };
           install(next);
+          // U-12：原生讨论把面板切到目标文档，同样回填 tab 身份。
+          notifyDocumentOpen(next.path);
           draftRef.current = restored.content;
           setDraft(restored.content);
           baseSha256Ref.current = restored.baseSha256;
@@ -874,9 +910,13 @@ function Documents({
           U-08（2026-10-14）：原生 select 升级为可搜索 combobox（内联过滤 + 键盘优先 +
           双击直接打开，见 specDocumentPicker.tsx）；.txt 与 .md 同列一等工作区文档。 */}
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        {/* U-13：root 只用于展示归一（剥离绝对前缀）；打开仍走服务相对路径。
+            修复：这条注释原先误写在 JSX 属性位（属性列表中不接受块注释表达式），
+            属语法错误；移到元素上方，U-13 的 workspaceRoot 接线保持不变。 */}
         <SpecDocumentPicker
           files={files}
           value={document?.path ?? null}
+          workspaceRoot={workspacePath}
           disabled={ioPending || !files.length}
           onOpen={(path) => void open(path)}
         />
@@ -1412,7 +1452,10 @@ export function SpecDocumentPane(props: SpecDocumentPaneProps) {
   return (
     <V4PaneConversationProvider scope={scope}>
       <Documents
-        key={`${props.workspaceIdentity || props.workspacePath}:${props.initialPath || "launcher"}`}
+        /* U-12 多开：key 优先用宿主提供的 tab 实例身份（tab id）——tab 内切换文档会
+           更新 initialPath（宿主回填绑定路径），按 initialPath 键控会把刚选完文档的面板
+           整个重挂（闪烁 + 重复 IO）。无宿主身份时回退旧的单实例键控。 */
+        key={`${props.workspaceIdentity || props.workspacePath}:${props.instanceKey ?? props.initialPath ?? "launcher"}`}
         {...props}
       />
     </V4PaneConversationProvider>

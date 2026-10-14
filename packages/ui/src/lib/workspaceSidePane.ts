@@ -5,7 +5,12 @@ import {
   type BrowserViewRestoredTabShell,
 } from "@zcode/shared";
 import type { PluginUiSidePaneTab } from "@/plugin-ui/contract.js";
-import { inferMediaPreview, isPptxPreviewPath, type CodeViewerSource } from "@/lib/codeViewer.js";
+import {
+  inferMediaPreview,
+  isPptxPreviewPath,
+  type CodeViewerSource,
+  type FileCodeViewerSource,
+} from "@/lib/codeViewer.js";
 import { normalizeCodeViewerSource } from "@/lib/codeViewerSource.js";
 
 export interface BrowserSidePaneTab {
@@ -967,6 +972,51 @@ function createWhiteboardSidePaneTab(options: {
   };
 }
 
+function normalizeSpecDocumentIdentityPath(value: string): string {
+  return value.replaceAll("\\", "/").replace(/\/$/, "").toLowerCase();
+}
+
+/**
+ * U-12 判定：spec 文档 tab 是否仍是“未绑定具体文档”的选择器入口。
+ *
+ * 原因：«+» 菜单的 Open doc 入口用 workspace 根路径占位（source.path === workspacePath）。
+ * 面板选择具体文档后，source.path 会回填为该文件的绝对路径（attachSpecDocumentSidePaneTab），
+ * 此时 tab 才获得与消息文件链接一致的稳定文件身份。
+ */
+export function isUnboundSpecDocumentPickerSource(
+  source: FileCodeViewerSource,
+): boolean {
+  const root = source.workspacePath?.trim();
+  if (!root) return true;
+  return (
+    normalizeSpecDocumentIdentityPath(source.path) ===
+    normalizeSpecDocumentIdentityPath(root)
+  );
+}
+
+/**
+ * U-12：«+» Open doc 入口的 source 构造（单一真相，面板与测试共用同一形状）。
+ *
+ * 原因：path 用 workspace 根占位（绑定前 isUnboundSpecDocumentPickerSource 为 true，
+ * sourceKey 为 null → 每次点击新开一张 tab）；面板选择文档后由
+ * attachSpecDocumentSidePaneTab 把 path/title/sourceKey 回填为具体文件身份。
+ */
+export function buildSpecDocumentPickerSource(options: {
+  workspacePath: string;
+  workspaceIdentity?: string;
+}): FileCodeViewerSource {
+  return {
+    type: "file",
+    title: "Open doc",
+    path: options.workspacePath,
+    specDocument: true,
+    workspacePath: options.workspacePath,
+    ...(options.workspaceIdentity
+      ? { workspaceIdentity: options.workspaceIdentity }
+      : {}),
+  };
+}
+
 function getCodeViewerTabSourceKey(source: CodeViewerSource): string | null {
   const workspaceScope = source.workspaceIdentity?.trim()
     ? source.workspaceIdentity.trim()
@@ -982,6 +1032,19 @@ function getCodeViewerTabSourceKey(source: CodeViewerSource): string | null {
         ? "media"
         : source.type;
 
+  // Bug 修复（U-12 活体回归 2026-10-14）：«+» 的 Open doc 入口此前按
+  // `file:{workspace 根}` 计算稳定 sourceKey，第二次点击命中同一张 tab 只做激活——
+  // 已开着文档时看起来“按了没反应”。选择器入口的身份是“实例”而不是“文件”，
+  // 未绑定文档前不参与 sourceKey 去重，每次点击都新开一张 tab；
+  // 面板选择文档后由 attachSpecDocumentSidePaneTab 回填稳定文件 key。
+  if (
+    source.type === "file" &&
+    source.specDocument === true &&
+    isUnboundSpecDocumentPickerSource(source)
+  ) {
+    return null;
+  }
+
   if (
     source.type === "file" ||
     source.type === "code-review" ||
@@ -990,11 +1053,14 @@ function getCodeViewerTabSourceKey(source: CodeViewerSource): string | null {
     source.type === "pdf" ||
     source.type === "pptx"
   ) {
-    return `${scopedKeyPrefix}${resourceType}:${source.path}`;
+    // U-12：同一文件可能经不同入口产生正/反斜杠混用的绝对路径（消息链接保留
+    // 原始分隔符，文档面板按 POSIX 形拼接）。key 只归一分隔符，保证「选择器绑定
+    // 的 tab」与「消息链接」互相命中同一身份；大小写保持原样（unix 文件名大小写敏感）。
+    return `${scopedKeyPrefix}${resourceType}:${source.path.replaceAll("\\", "/")}`;
   }
 
   if (source.type === "text" && source.path) {
-    return `${scopedKeyPrefix}${source.type}:${source.path}`;
+    return `${scopedKeyPrefix}${source.type}:${source.path.replaceAll("\\", "/")}`;
   }
 
   if (source.type === "patch") {
@@ -1649,10 +1715,68 @@ export function openCodeViewerSidePane(
       tab.sourceKey === nextTab.sourceKey &&
       sidePaneOwnerKey(tab.ownerTaskId) === ownerKey,
   );
+  // Bug 修复（U-12）：消息文件链接命中已绑定该文件的文档 tab 时，原地替换 source 会
+  // 丢掉 specDocument 标记——tab 会从“可持久化恢复的文档 tab”退化成普通预览 tab。
+  // 这里在复用时保留该标记，重启后文档 tab 仍能恢复。
+  const matchedSource =
+    matchedTab?.source.type === "file" &&
+    matchedTab.source.specDocument === true &&
+    nextTab.source.type === "file"
+      ? { ...nextTab.source, specDocument: true }
+      : nextTab.source;
   return activateSidePaneTab(
     current,
-    matchedTab ? { ...matchedTab, source: nextTab.source } : nextTab,
+    matchedTab ? { ...matchedTab, source: matchedSource } : nextTab,
   );
+}
+
+/**
+ * U-12：把文档 tab 绑定到面板当前打开的具体文件。
+ *
+ * 原因：多开之后 tab 身份必须跟随面板内选择器切换的文件——标题更新为文件名，
+ * sourceKey 回填为该文件的稳定 key，让同一文件的再次打开（消息链接/+）复用这张 tab
+ * 而不是新开重复 tab。未变更（路径与标题都已一致）时原样返回，避免重复渲染。
+ */
+export function attachSpecDocumentSidePaneTab(
+  current: WorkspaceSidePaneState | null,
+  tabId: string,
+  relativeDocumentPath: string,
+): WorkspaceSidePaneState | null {
+  if (!current) return current;
+  const normalizedRelative = relativeDocumentPath
+    .replaceAll("\\", "/")
+    .replace(/^\/+/, "");
+  if (!normalizedRelative) return current;
+  let didUpdate = false;
+  const tabs = current.tabs.map((tab) => {
+    if (tab.id !== tabId || tab.type !== "code-viewer" || tab.source.type !== "file") {
+      return tab;
+    }
+    const root = tab.source.workspacePath
+      ?.replaceAll("\\", "/")
+      .replace(/\/$/, "");
+    const absolutePath = root ? `${root}/${normalizedRelative}` : normalizedRelative;
+    const nextTitle = normalizedRelative.split("/").at(-1) || tab.source.title;
+    if (
+      normalizeSpecDocumentIdentityPath(tab.source.path) ===
+        normalizeSpecDocumentIdentityPath(absolutePath) &&
+      tab.source.title === nextTitle
+    ) {
+      return tab;
+    }
+    const nextSource: FileCodeViewerSource = {
+      ...tab.source,
+      title: nextTitle,
+      path: absolutePath,
+    };
+    didUpdate = true;
+    return {
+      ...tab,
+      source: nextSource,
+      sourceKey: getCodeViewerTabSourceKey(nextSource),
+    };
+  });
+  return didUpdate ? { ...current, tabs } : current;
 }
 
 /**

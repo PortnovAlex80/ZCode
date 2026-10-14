@@ -425,7 +425,9 @@ test("actual side panel keeps a restore route in the caption and relaxes bounds 
   )[0] as ts.JsxSelfClosingElement;
   assert.equal(
     prop(documentPane, "onActivate", source),
-    "onActivate={() => onOpenCodeViewer(tab.source)}",
+    // U-12 多开：讨论回流/激活只聚焦本 tab（tab.id），不再经
+    // onOpenCodeViewer(picker source) 另开新 tab。
+    "onActivate={() => onActivateTab(tab.id)}",
   );
   assert.equal(prop(documentPane, "generalChatCollapsed", source), undefined);
   assert.equal(prop(documentPane, "onToggleGeneralChat", source), undefined);

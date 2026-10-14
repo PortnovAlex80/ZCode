@@ -4,6 +4,8 @@
  * 覆盖：点击行打开下拉、内联过滤（对相对路径不区分大小写、即时）、
  * ↓/↑ 键盘导航、Enter 打开顶部/高亮匹配、双击直接打开、Esc 关闭、
  * txt 与 md 同列（一等文档）、禁用态、trigger 反映当前文档。
+ * U-13：展示形 = 干净工作区相对路径（名称主文本 + 目录次级 muted 文本），
+ * 过滤按展示形匹配，选择/打开仍用服务原路径。
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
@@ -17,13 +19,22 @@ const FILES = [
   "notes/расчёт.txt",
 ];
 
-function renderPicker(options?: { value?: string | null; disabled?: boolean }) {
+function renderPicker(options?: {
+  files?: readonly string[];
+  value?: string | null;
+  workspaceRoot?: string;
+  disabled?: boolean;
+}) {
   const onOpen = vi.fn();
+  const files = options?.files ?? FILES;
   const value: string | null = options?.value ?? FILES[0] ?? null;
   render(
     createElement(SpecDocumentPicker, {
-      files: FILES,
+      files,
       value,
+      ...(options?.workspaceRoot === undefined
+        ? {}
+        : { workspaceRoot: options.workspaceRoot }),
       ...(options?.disabled === undefined ? {} : { disabled: options.disabled }),
       onOpen,
     }),
@@ -152,5 +163,95 @@ describe("U-08 searchable document picker", () => {
     fireEvent.click(trigger);
     expect(screen.queryByLabelText("Filter documents")).toBeNull();
     expect(onOpen).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * U-13（活体反馈 2026-10-14）：下拉/搜索必须显示干净的工作区相对路径——
+ * 名称为主文本、目录为次级 muted 文本；过滤按展示形匹配；打开仍用服务原路径。
+ * 服务当前只返回干净的相对 POSIX 路径；这里故意混入脏形态（«./»、绝对 Windows
+ * 路径、带工作区根前缀）来锁定视图层的展示契约：脏输入也不会漏到界面上。
+ */
+describe("U-13 clean workspace-relative display", () => {
+  afterEach(() => cleanup());
+
+  const ROOT = "D:\\Development\\ws";
+  const DIRTY_FILES = [
+    "docs/spec-harness/IMPLEMENTATION-PLAN.md",
+    "./notes/расчёт.txt",
+    "D:\\Development\\ws\\docs\\abs\\deep-plan.md",
+    "README.md",
+  ];
+
+  it("shows the file name as primary text and the directory muted, with no «./» or absolute prefixes", () => {
+    renderPicker({
+      files: DIRTY_FILES,
+      value: DIRTY_FILES[2],
+      workspaceRoot: ROOT,
+    });
+    openDropdown();
+    const rows = optionRows();
+    // 选择源保持服务原路径（打开链路不变）。
+    expect(rows.map((row) => row.dataset.pickerPath)).toEqual(DIRTY_FILES);
+    expect(rows.map((row) => row.querySelector("[data-picker-file-name]")?.textContent)).toEqual([
+      "IMPLEMENTATION-PLAN.md",
+      "расчёт.txt",
+      "deep-plan.md",
+      "README.md",
+    ]);
+    expect(
+      rows.map((row) => row.querySelector("[data-picker-directory]")?.textContent ?? ""),
+    ).toEqual(["docs/spec-harness", "notes", "docs/abs", ""]);
+    // 可见文本没有任何 «./»、盘符或根斜杠前缀。
+    for (const row of rows) {
+      expect(row.textContent).not.toContain("./");
+      expect(row.textContent).not.toMatch(/[a-z]:/i);
+    }
+    // 目录是次级 muted 文本；根目录文件（README.md）不渲染目录片段。
+    const directory = rows[2]!.querySelector("[data-picker-directory]")!;
+    expect(directory.className).toContain("text-foreground-subtlest");
+    expect(rows[3]!.querySelector("[data-picker-directory]")).toBeNull();
+    // 触发器同一展示形：正文 = 名称 + muted 目录，title = 完整干净相对路径。
+    // （下拉开着时 dialog 与按钮共用同一 aria-label，按 role=button 收窄到触发器。）
+    const trigger = screen.getByRole("button", { name: "Choose project document" });
+    expect(trigger.textContent).toContain("deep-plan.md");
+    expect(trigger.textContent).not.toContain("D:");
+    expect(trigger.textContent).not.toContain("./");
+    expect(trigger.getAttribute("title")).toBe("docs/abs/deep-plan.md");
+  });
+
+  it("filters over exactly the displayed form", () => {
+    renderPicker({ files: DIRTY_FILES, workspaceRoot: ROOT });
+    const filter = openDropdown();
+    // 目录段 + 名称的组合（展示形）可过滤。
+    fireEvent.change(filter, { target: { value: "abs/deep" } });
+    expect(optionRows().map((row) => row.dataset.pickerPath)).toEqual([DIRTY_FILES[2]]);
+    fireEvent.change(filter, { target: { value: "расч" } });
+    expect(optionRows().map((row) => row.dataset.pickerPath)).toEqual([DIRTY_FILES[1]]);
+    // 盘符与 «./» 不属于展示形：按原始（脏）形态过滤必须一无所获。
+    fireEvent.change(filter, { target: { value: "D:" } });
+    expect(optionRows()).toEqual([]);
+    fireEvent.change(filter, { target: { value: "./notes" } });
+    expect(optionRows()).toEqual([]);
+    expect(screen.getByText(/No documents match/u)).toBeTruthy();
+  });
+
+  it("opens the file by the source service path, not the display form", () => {
+    const onOpen = renderPicker({ files: DIRTY_FILES, workspaceRoot: ROOT });
+    openDropdown();
+    const absoluteRow = optionRows().find(
+      (row) => row.dataset.pickerPath === DIRTY_FILES[2],
+    )!;
+    fireEvent.doubleClick(absoluteRow);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith(DIRTY_FILES[2]);
+    // 键盘路径（过滤 + Enter）同样拿服务原路径。
+    onOpen.mockClear();
+    fireEvent.click(screen.getByLabelText("Choose project document"));
+    const filter = screen.getByLabelText("Filter documents");
+    fireEvent.change(filter, { target: { value: "deep-plan" } });
+    fireEvent.keyDown(filter, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith(DIRTY_FILES[2]);
   });
 });

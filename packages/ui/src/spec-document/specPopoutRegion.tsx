@@ -9,7 +9,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { PictureInPicture2, Undo2 } from "lucide-react";
+import { Ban, CircleAlert, PictureInPicture2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { PresentationHostDocumentContext } from "@/v4/usePresentationVisibility.js";
 import {
@@ -136,8 +136,24 @@ export function useSpecPopoutRegion(options: {
     forceReturnSpecPopoutOwner(regionId);
     setOpening(true);
     const size = readSpecPopoutSize(sizeKey);
-    api
-      .requestWindow({ width: size.width, height: size.height })
+    // 修复原因（活体缺陷 2026-10-14）：requestWindow 在部分运行时（Electron：API 存在
+    // 但窗口从不创建，electron/electron#39633）会同步 throw 而不是 reject——原实现直接
+    // 调用 `.then` 链，同步异常会让 setOpening(true) 永远收不回，按钮从此永久禁用。
+    // 这里把同步调用包进 try/catch，异常与 rejection 走同一条可见错误路径。
+    let pipPromise: Promise<SpecPopoutWindow>;
+    try {
+      pipPromise = api.requestWindow({
+        width: size.width,
+        height: size.height,
+      });
+    } catch (cause) {
+      setOpening(false);
+      setLastError(
+        cause instanceof Error ? cause.message : "The separate window could not be opened.",
+      );
+      return;
+    }
+    pipPromise
       .then((pip) => {
         if (pipRef.current) {
           // 并发保护：打开期间已被占用（如另一区域刚申请）则立即让位关闭。
@@ -146,6 +162,22 @@ export function useSpecPopoutRegion(options: {
           } catch {
             /* ignore */
           }
+          return;
+        }
+        // 修复原因（活体缺陷 2026-10-14，Electron 实测）：Electron 对 requestWindow
+        // 返回 resolve——给的是一个 0×0 的离屏文档，OS 窗口从不创建。若照常 adopt，
+        // 子树会被移进这份不可见文档：面板里内容消失、用户哪里都看不到。真窗口在
+        // resolve 时已带请求尺寸，不可能 0×0；命中 0×0 即判为「假窗口」：关掉、
+        // 报可见错误、内容留在原面板。
+        if (pip.innerWidth <= 0 && pip.innerHeight <= 0) {
+          try {
+            pip.close();
+          } catch {
+            /* ignore */
+          }
+          setLastError(
+            "The runtime resolved the window request without creating a window (invisible 0×0 document). Separate windows are not supported here; the region stays in place.",
+          );
           return;
         }
         pipRef.current = pip;
@@ -226,6 +258,13 @@ export function useSpecPopoutRegion(options: {
 /**
  * «вынести в окно»/«вернуть» 直达图标按钮（U-07：不做分层菜单）。
  * API 不可用时显示明确的 absent-with-reason 禁用态；既有 in-app 浮动不受影响。
+ *
+ * 修复原因（活体缺陷 2026-10-14）：不可用态原先用原生 disabled——Button 基类带
+ * `disabled:pointer-events-none`，原生 disabled 连 title 提示都不显示，用户视角就是
+ * 「图标看着正常、点了没反应」的死按钮。现改为仓库既有模式（见 V4ComposerCuaEntry）：
+ * `aria-disabled` + 点击短路 + 半透明 + Ban 角标，hover 即见完整原因（title/aria）；
+ * 原生 disabled 只保留给瞬时 opening 态。requestWindow 失败（含 Electron 0×0 假窗口
+ * 防护）时换 CircleAlert 红色图标，错误文本同样在 title/aria 中可发现。
  */
 export function SpecPopoutIconButton({
   region,
@@ -243,18 +282,46 @@ export function SpecPopoutIconButton({
       ? undefined
       : region.availability.reason
     : (region.lastError ?? undefined);
+  const state = unavailable
+    ? "unavailable"
+    : region.lastError
+      ? "error"
+      : region.popped
+        ? "popped"
+        : "idle";
   return (
     <Button
       variant="ghost"
       size="icon-sm"
       aria-label={label}
       aria-pressed={region.popped}
+      // absent-with-reason / 运行时错误走 aria-disabled（可 hover、可聚焦、屏幕阅读器
+      // 读出禁用），不用原生 disabled（pointer-events-none 会让 title 原因不可见）。
+      aria-disabled={unavailable || Boolean(region.lastError) || undefined}
       title={reason ? `${label} — unavailable: ${reason}` : label}
-      disabled={unavailable || region.opening}
+      disabled={region.opening}
       onClick={region.toggle}
       data-spec-popout-control={region.popped ? "restore" : "pop"}
+      data-spec-popout-state={state}
+      data-spec-popout-reason={reason ?? undefined}
+      className={unavailable || region.lastError ? "relative opacity-50" : "relative"}
     >
-      {region.popped ? <Undo2 /> : <PictureInPicture2 />}
+      {unavailable ? (
+        // 角标式禁用标记：不依赖 hover 也能看出「此运行时不可用」，区别于死按钮。
+        <>
+          <PictureInPicture2 />
+          <Ban
+            aria-hidden
+            className="absolute right-0.5 bottom-0.5 size-2 text-foreground-subtle"
+          />
+        </>
+      ) : region.lastError ? (
+        <CircleAlert className="text-destructive" />
+      ) : region.popped ? (
+        <Undo2 />
+      ) : (
+        <PictureInPicture2 />
+      )}
     </Button>
   );
 }
@@ -322,18 +389,10 @@ export function SpecPopoutRegionPortal({
   if (!region.hostNode || serverRender) return <>{children}</>;
   return createPortal(
     <PresentationHostDocumentContext.Provider value={hostDocument}>
-      <div
-        className={
-          region.popped ? "flex h-full min-h-0 w-full flex-col" : "contents"
-        }
-      >
+      <div className={region.popped ? "flex h-full min-h-0 w-full flex-col" : "contents"}>
         {region.popped ? <SpecPopoutHostHeader region={region} title={title} /> : null}
         <div
-          className={
-            region.popped
-              ? "flex min-h-0 flex-1 flex-col overflow-hidden"
-              : "contents"
-          }
+          className={region.popped ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "contents"}
         >
           {children}
         </div>

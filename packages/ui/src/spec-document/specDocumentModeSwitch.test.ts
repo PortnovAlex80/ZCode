@@ -441,9 +441,9 @@ describe("U-11 switching documents loads the file, keeps per-path drafts, picker
       expect(current.value).toBe(TXT_CONTENT);
       return current;
     });
-    // picker 反映当前文档。
+    // picker 反映当前文档（U-13 展示形：文件名为主文本，目录为次级 muted 文本）。
     expect(screen.getByLabelText("Choose project document").textContent).toContain(
-      "notes/rendering.txt",
+      "rendering.txt",
     );
     // 旧文档草稿仍按 path 保留；txt 自身无草稿（干净缓冲）。
     expect(readDocumentDraft(key, MD_PATH)).toEqual({

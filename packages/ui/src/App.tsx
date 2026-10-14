@@ -233,6 +233,7 @@ export function App({
     setBrowserNavigationRequest,
     handleOpenCodeViewer,
     handleOpenCodeViewers,
+    handleSpecDocumentPathChange,
     handleOpenBrowserUrl,
     handleToggleBrowser,
     handleOpenBrowserTab,
@@ -1353,6 +1354,7 @@ export function App({
           handleToggleSidePane={handleToggleSidePane}
           handleOpenBrowserUrl={handleOpenBrowserUrl}
           handleOpenCodeViewer={handleOpenCodeViewerIfWritable}
+          handleSpecDocumentPathChange={handleSpecDocumentPathChange}
           handleAutoOpenAssistantPptx={handleAutoOpenAssistantPptx}
           handleOpenSubagentSession={handleOpenSubagentSession}
           handleOpenBackgroundBash={handleOpenBackgroundBash}

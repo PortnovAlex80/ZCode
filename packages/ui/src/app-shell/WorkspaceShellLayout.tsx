@@ -459,6 +459,7 @@ export const WorkspaceShellLayout = memo(
     handleToggleSidePane,
     handleOpenBrowserUrl,
     handleOpenCodeViewer,
+    handleSpecDocumentPathChange,
     handleAutoOpenAssistantPptx,
     handleOpenSubagentSession,
     handleOpenBackgroundBash,
@@ -2313,6 +2314,7 @@ export const WorkspaceShellLayout = memo(
         onRevealGitFileInTree={handleRevealGitFileInTree}
         onOpenBrowserUrl={handleOpenBrowserUrl}
         onOpenCodeViewer={handleOpenCodeViewer}
+        onSpecDocumentPathChange={handleSpecDocumentPathChange}
         onOpenFileLink={handleOpenMarkdownFileLink}
         onOpenBackgroundBash={handleOpenBackgroundBash}
         onOpenSubagentSession={handleOpenSubagentSession}

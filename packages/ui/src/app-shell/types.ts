@@ -263,6 +263,11 @@ export interface WorkspaceShellLayoutProps extends Omit<AppProps, "baseFeedbackS
   handleToggleSidePane: () => void;
   handleOpenBrowserUrl: (url: string) => void;
   handleOpenCodeViewer: (source: CodeViewerSource) => void;
+  /** U-12 多开：文档 tab 内选择/切换文件后回填 tab 身份（标题=文件名、稳定 sourceKey）。 */
+  handleSpecDocumentPathChange: (
+    tabId: string,
+    relativeDocumentPath: string,
+  ) => void;
   handleAutoOpenAssistantPptx: (request: AssistantPreviewCardsAutoOpenRequest) => void;
   handleOpenBackgroundBash: (request: OpenBackgroundBashSideTabRequest) => void;
   handleOpenSubagentSession: (request: OpenScopedSubagentSideTabRequest) => void;

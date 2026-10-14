@@ -3,8 +3,14 @@
  *
  * 边界（checklist U-06/U-07，用户请求 2026-10-14 «вынести в окно … плавали везде,
  * пин автоматический, иконками»）：
- * - 只用浏览器端 `documentPictureInPicture`（Electron 41 / Chromium ≥116）；不新增任何
+ * - 只用浏览器端 `documentPictureInPicture`（Chromium ≥116）；不新增任何
  *   Main 进程窗口机制，不复活 RETIREMENT-2 已退役的 detach 栈——本模块是唯一的弹窗实现。
+ * - ⚠️ Electron 运行时证据（2026-10-14，Electron 41.0.3 / Chromium 146 实测）：
+ *   Electron renderer 里 `documentPictureInPicture` 存在且 `requestWindow()` 在
+ *   用户手势内同步调用会 resolve，但 Electron 不为它创建任何 OS 窗口
+ *   （electron/electron#39633，add-new-contents 未实现 PiP 的 disposition），
+ *   返回的是 0×0 的离屏文档。因此 Electron 里必须按「不可用」处理，
+ *   否则子树会被移进不可见文档，表现为「点了没反应、内容消失」。
  * - 一个 App 只有一个 PiP 窗口（共享槽位）：第二个区域请求弹出时，先让在窗口里的
  *   区域自动返回原面板（状态由 React portal 保活的同一棵子树携带，无损）。
  * - PiP 窗口按规范自动置顶（automatic pin），不提供手动置顶开关。
@@ -38,19 +44,36 @@ function currentHost(): PopoutWindowHost {
   return (globalThis as { window?: PopoutWindowHost }).window ?? {};
 }
 
+function currentUserAgent(): string {
+  return (globalThis as { navigator?: { userAgent?: string } }).navigator?.userAgent ?? "";
+}
+
+/** 运行时证据见文件头：Electron 暴露 API 但从不创建 OS 窗口（electron/electron#39633）。 */
+const ELECTRON_ONLY_REASON =
+  "Electron exposes the API but never creates the OS window for it (electron/electron#39633): the request would silently resolve with an invisible window. Separate windows work in the web app (Chrome/Edge 116+); in-app floating remains available here.";
+
 /**
- * Chromium < 116（或非 Chromium）运行时没有 documentPictureInPicture。
- * 原因字符串同时用于禁用态的 title/aria 说明（absent-with-reason）。
+ * 可用性判定（absent-with-reason）：
+ * 1. Electron 运行时（UA 含 `Electron/`）一律不可用——即使 renderer 里
+ *    `documentPictureInPicture` 存在（实测如此），Electron 也不会创建窗口（见文件头）。
+ *    在这里放行就是活体缺陷的根因：按钮可点 → requestWindow 静默 resolve →
+ *    子树被移进不可见文档，用户只看到「点击没反应/内容消失」。
+ * 2. Chromium < 116（或非 Chromium）运行时没有 documentPictureInPicture。
+ * 原因字符串同时用于禁用态的 title/aria 说明。
  */
 export function readSpecPopoutAvailability(
   host: PopoutWindowHost = currentHost(),
+  userAgent: string = currentUserAgent(),
 ): SpecPopoutAvailability {
+  if (/Electron\//.test(userAgent)) {
+    return { supported: false, reason: ELECTRON_ONLY_REASON };
+  }
   const api = host?.documentPictureInPicture;
   if (!api || typeof api.requestWindow !== "function") {
     return {
       supported: false,
       reason:
-        "Separate windows need Document Picture-in-Picture (Chromium 116+ / Electron 41+); this runtime does not provide it.",
+        "Separate windows need Document Picture-in-Picture (Chromium 116+ browser); this runtime does not provide it.",
     };
   }
   return { supported: true };

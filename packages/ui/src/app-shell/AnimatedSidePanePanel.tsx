@@ -103,6 +103,8 @@ import { formatTaskRelativeTime } from "@/lib/taskListItemPresentation.js";
 import {
   shouldMountSidePaneContent,
   shouldMountBrowserTabGuest,
+  buildSpecDocumentPickerSource,
+  isUnboundSpecDocumentPickerSource,
   type BrowserSidePaneTab,
   type BrowserUseSidePaneTab,
   type BrowserSidePaneMetadata,
@@ -370,6 +372,7 @@ export function AnimatedSidePanePanel({
   onRevealGitFileInTree,
   onOpenBrowserUrl,
   onOpenCodeViewer,
+  onSpecDocumentPathChange,
   onOpenFileLink,
   onOpenSubagentSession,
   onOpenWorkflowActorSession,
@@ -448,6 +451,11 @@ export function AnimatedSidePanePanel({
   onRevealGitFileInTree?: (path: string) => void;
   onOpenBrowserUrl: (url: string) => void;
   onOpenCodeViewer: (source: CodeViewerSource) => void;
+  /**
+   * U-12 多开：文档 tab 内选择/切换文件后回填 tab 身份（标题=文件名、
+   * sourceKey=该文件稳定 key）。tabId 是 side pane tab id。
+   */
+  onSpecDocumentPathChange: (tabId: string, relativeDocumentPath: string) => void;
   onOpenFileLink?: (target: MessageFileLinkTarget) => void;
   onOpenBackgroundBash?: (request: OpenBackgroundBashSideTabRequest) => void;
   onOpenSubagentSession: (request: OpenScopedSubagentSideTabRequest) => void;
@@ -530,17 +538,24 @@ export function AnimatedSidePanePanel({
   const normalizeDocumentPath = (path: string) =>
     path.replaceAll("\\", "/").replace(/\/$/, "").toLowerCase();
   const hasSpecDocumentGrant = Boolean(specDocumentRoot);
+  // Bug 修复（U-12 活体回归 2026-10-14，build d67a52cd）：«+» 的 Open doc 入口此前
+  // 每次都以同一 sourceKey（file:{workspace 根}）打开，第二次点击只会激活既有 tab——
+  // 已开着文档时看起来“按了没反应”。现在未绑定文档的选择器入口不再参与 sourceKey
+  // 去重（见 workspaceSidePane.getCodeViewerTabSourceKey），每次点击都新开一张
+  // 「Open doc」tab；面板内选择文档后经 onSpecDocumentPathChange 绑定文件身份
+  // （标题=文件名，同文件链接复用该 tab）。恢复/重开监听只做“确保至少一张文档 tab”。
   const openSpecDocument = () => {
     if (!hasSpecDocumentGrant) return;
-    onOpenCodeViewer({
-      type: "file",
-      title: "Open doc",
-      path: workspaceAbsPath,
-      specDocument: true,
-      workspacePath: workspaceAbsPath,
-      ...(workspaceIdentity ? { workspaceIdentity } : {}),
-    });
+    onOpenCodeViewer(
+      buildSpecDocumentPickerSource({
+        workspacePath: workspaceAbsPath,
+        ...(workspaceIdentity ? { workspaceIdentity } : {}),
+      }),
+    );
   };
+  // reopen 监听需要“当前”可见 tabs 来复用已有文档 tab；effect 依赖保持稳定
+  //（不随 tabs 变化重挂监听），经 ref 读最新值（与 SpecDocumentPane 的回调 ref 同款）。
+  const reopenSpecDocumentRef = useRef(() => {});
   useEffect(() => {
     const reopen = (event: Event) => {
       const target = (event as CustomEvent<ManagedNativeDiscussionOpenRequest>)
@@ -553,14 +568,9 @@ export function AnimatedSidePanePanel({
         target.workspaceIdentity !== workspaceIdentity
       )
         return;
-      onOpenCodeViewer({
-        type: "file",
-        title: "Open doc",
-        path: workspaceAbsPath,
-        specDocument: true,
-        workspacePath: workspaceAbsPath,
-        ...(workspaceIdentity ? { workspaceIdentity } : {}),
-      });
+      // U-12 多开：原生讨论回流优先激活既有文档 tab（其面板自身监听会切到目标文档），
+      // 只有当前没有任何文档 tab 时才新开——否则每次回流都会多开一张选择器 tab。
+      reopenSpecDocumentRef.current();
     };
     window.addEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, reopen);
     return () =>
@@ -569,7 +579,6 @@ export function AnimatedSidePanePanel({
     hasSpecDocumentGrant,
     workspaceAbsPath,
     workspaceIdentity,
-    onOpenCodeViewer,
   ]);
   const canOpenSpecDocument = (source: CodeViewerSource) => {
     if (
@@ -594,6 +603,16 @@ export function AnimatedSidePanePanel({
       !/^(?:\/|[a-z]:)/i.test(relativePath) &&
       !relativePath.split("/").some((part) => part === ".." || part === "")
     );
+  };
+  reopenSpecDocumentRef.current = () => {
+    const existingSpecTab = visibleTabs.find(
+      (tab) => tab.type === "code-viewer" && canOpenSpecDocument(tab.source),
+    );
+    if (existingSpecTab) {
+      onActivateTab(existingSpecTab.id);
+      return;
+    }
+    openSpecDocument();
   };
   const activeSpecTab = visibleTabs.find(
     (tab) => tab.id === visibleActiveTabId,
@@ -1506,15 +1525,26 @@ export function AnimatedSidePanePanel({
                             workspaceIdentity={workspaceIdentity}
                             visible={isVisible && tab.id === visibleActiveTabId}
                             parentSessionId={activeTaskId || sidePaneOwnerId}
+                            // U-12 多开：面板实例键 = tab id（tab 内切换文档不重挂）；
+                            // 恢复目标 = tab 已绑定的文件路径，纯选择器入口（未绑定）
+                            // 不自动打开上一次文档，保持 Open doc 初始态。
+                            instanceKey={tab.id}
                             initialPath={
-                              tab.source.specDocument
+                              tab.source.specDocument &&
+                              isUnboundSpecDocumentPickerSource(tab.source)
                                 ? undefined
                                 : tab.source.path
+                            }
+                            autoOpenLastDocument={false}
+                            onDocumentOpen={(relativePath) =>
+                              onSpecDocumentPathChange(tab.id, relativePath)
                             }
                             onClose={onCloseCodeViewer}
                             onOpenBrowserUrl={onOpenBrowserUrl}
                             onOpenCodeViewer={onOpenCodeViewer}
-                            onActivate={() => onOpenCodeViewer(tab.source)}
+                            // U-12：讨论回流/激活只聚焦本 tab，不再经
+                            // onOpenCodeViewer(picker source) 另开新 tab。
+                            onActivate={() => onActivateTab(tab.id)}
                           />
                         ) : tab.type === "code-viewer" ? (
                           <PreviewPane

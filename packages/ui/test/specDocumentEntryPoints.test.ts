@@ -1238,6 +1238,7 @@ function createWorkspaceShellProps() {
     handleOpenBrowserTab: vi.fn(),
     handleOpenBrowserUrl: vi.fn(),
     handleOpenCodeViewer: vi.fn(),
+    handleSpecDocumentPathChange: vi.fn(),
     handleRefreshGit: vi.fn(),
     handleReloadSession: vi.fn(async () => {}),
     handleReorderSidePaneTab: vi.fn(),

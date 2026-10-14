@@ -7,7 +7,10 @@
  * - 状态保活：portal host 是稳定节点——弹出/返回只挪 DOM，子树状态不丢（计数器演示）；
  * - 共享槽位：第二个区域弹出时先强制第一个回位（顺序：回位 → 再开窗）；
  * - 关闭：OS 关闭（pagehide）与 «вернуть»（close()）都恢复原位并持久化最终尺寸；
- * - 不可用：无 API 时 absent-with-reason（禁用态 + 原因文案），不改动现有布局。
+ * - 不可用：无 API 时 absent-with-reason（aria-disabled + 原因文案），不改动现有布局；
+ * - Electron 活体缺陷回归（2026-10-14 实测 Electron 41/Chromium 146）：API 存在但
+ *   availability 必须按不可用处理（#39633）；requestWindow 同步 throw 不卡死 opening；
+ *   resolve 出 0×0 假窗口时内容留在原面板并给出可见错误。
  */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement, useState } from "react";
@@ -62,17 +65,29 @@ interface FakeWindow extends SpecPopoutWindow {
   closeCalls: number;
 }
 
-function installFakePiP() {
+/** 假 API 的可变行为：测试中途可切换（同步 throw / 0×0 假窗口 → 恢复正常）。 */
+interface FakePipBehavior {
+  size: { width: number; height: number };
+  throwSync: boolean;
+}
+
+function installFakePiP(initial?: Partial<FakePipBehavior>) {
+  const behavior: FakePipBehavior = {
+    size: { width: 480, height: 640 },
+    throwSync: false,
+    ...initial,
+  };
   const windows: FakeWindow[] = [];
   const requests: ({ width?: number; height?: number } | undefined)[] = [];
   const api = {
-    async requestWindow(options?: { width?: number; height?: number }) {
+    requestWindow(options?: { width?: number; height?: number }) {
       requests.push(options);
+      if (behavior.throwSync) throw new Error("sync rejection before promise");
       const pipDocument = document.implementation.createHTMLDocument("pip");
       const pip = {
         document: pipDocument,
-        innerWidth: 480,
-        innerHeight: 640,
+        innerWidth: behavior.size.width,
+        innerHeight: behavior.size.height,
         pagehideListeners: new Set<() => void>(),
         closeCalls: 0,
         close() {
@@ -87,14 +102,14 @@ function installFakePiP() {
         },
       } as FakeWindow;
       windows.push(pip);
-      return pip;
+      return Promise.resolve(pip);
     },
   };
   Object.defineProperty(window, "documentPictureInPicture", {
     configurable: true,
     value: api,
   });
-  return { windows, requests };
+  return { windows, requests, behavior };
 }
 
 function uninstallFakePiP() {
@@ -119,7 +134,12 @@ function RegionHost({
   enabled?: boolean;
   onRegion?: (region: SpecPopoutRegion) => void;
 }) {
-  const region = useSpecPopoutRegion({ regionId, workspaceKey, title, enabled });
+  const region = useSpecPopoutRegion({
+    regionId,
+    workspaceKey,
+    title,
+    enabled,
+  });
   onRegion?.(region);
   const [count, setCount] = useState(0);
   return createElement(
@@ -127,7 +147,10 @@ function RegionHost({
     { "data-region-host": regionId },
     createElement(
       "div",
-      { ref: region.anchorRef, className: region.popped ? "popped-anchor" : "contents" },
+      {
+        ref: region.anchorRef,
+        className: region.popped ? "popped-anchor" : "contents",
+      },
       region.popped
         ? createElement("p", { "data-in-pane-placeholder": regionId }, "popped out")
         : null,
@@ -196,7 +219,10 @@ describe("U-06/U-07 spec popout controller (mocked documentPictureInPicture)", (
     // PiP 内：宿主与外层包装切换为填充布局（w-full 只允许存在于 PiP 文档中）。
     expect(hostInPane.className).toContain("w-full");
     expect(hostInPane.className).not.toContain("contents");
-    const [pinnedOuter, ...pinnedRest] = Array.from(hostInPane.children) as (HTMLElement | undefined)[];
+    const [pinnedOuter, ...pinnedRest] = Array.from(hostInPane.children) as (
+      | HTMLElement
+      | undefined
+    )[];
     expect(pinnedOuter?.className).toContain("h-full");
     expect(pinnedOuter?.className).toContain("flex");
     expect(pinnedRest).toEqual([]);
@@ -349,7 +375,7 @@ describe("U-06/U-07 spec popout controller (mocked documentPictureInPicture)", (
     expect(windows[0]!.closeCalls).toBe(1);
   });
 
-  it("unavailable API: icon is disabled with an explicit reason and nothing opens (in-app floating stays)", async () => {
+  it("unavailable API: icon shows absent-with-reason (aria-disabled, hoverable title) and nothing opens (in-app floating stays)", async () => {
     uninstallFakePiP();
     let region: SpecPopoutRegion | undefined;
     render(
@@ -363,7 +389,12 @@ describe("U-06/U-07 spec popout controller (mocked documentPictureInPicture)", (
       }),
     );
     const button = screen.getByLabelText("Вынести дискуссию в окно") as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    // 修复回归（活体缺陷 2026-10-14）：不可用态不再用原生 disabled——Button 基类的
+    // disabled:pointer-events-none 会让 title 里的原因永远不可见（「死按钮」）。
+    // 契约改为 aria-disabled + 可 hover 的 title + 显式 state 锚点。
+    expect(button.hasAttribute("disabled")).toBe(false);
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(button.getAttribute("data-spec-popout-state")).toBe("unavailable");
     // absent-with-reason：title 里带明确原因。
     expect(button.title).toContain("unavailable");
     expect(button.title).toContain("Chromium 116");
@@ -379,6 +410,94 @@ describe("U-06/U-07 spec popout controller (mocked documentPictureInPicture)", (
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(region?.popped).toBe(false);
     expect(region?.lastError).toContain("Chromium 116");
+  });
+
+  it("Electron runtime: API present but availability must report unsupported (electron/electron#39633)", async () => {
+    // 实测（2026-10-14，Electron 41.0.3 / Chromium 146，file:// 加载）：Electron renderer
+    // 里 documentPictureInPicture 存在、requestWindow 在点击手势内 resolve——但 Electron
+    // 不创建任何 OS 窗口，返回 0×0 离屏文档。可用性判定必须在 Electron UA 上一律
+    // 不可用，否则就是活体缺陷路径（内容被移进不可见文档）。
+    installFakePiP();
+    const electronAvailability = readSpecPopoutAvailability(
+      undefined,
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) zcode/1.0 Chrome/146.0.0.0 Electron/41.0.3 Safari/537.36",
+    );
+    expect(electronAvailability.supported).toBe(false);
+    expect(electronAvailability.supported ? null : electronAvailability.reason).toContain("#39633");
+    // 同一份 API（同一 host）在非 Electron 浏览器 UA 下仍然可用——Web 端（Chrome/Edge）
+    // 的真实 PiP 不受影响。
+    expect(
+      readSpecPopoutAvailability(
+        undefined,
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+      ).supported,
+    ).toBe(true);
+    uninstallFakePiP();
+  });
+
+  it("runtime resolves an invisible 0×0 window: region stays in place with a visible error and the fake window is closed", async () => {
+    // Electron 形态的假窗口：requestWindow resolve，但窗口 0×0（无 OS 窗口）。
+    const { windows, behavior } = installFakePiP({
+      size: { width: 0, height: 0 },
+    });
+    let region: SpecPopoutRegion | undefined;
+    render(
+      createElement(RegionHost, {
+        regionId: "spec-discussion",
+        workspaceKey: "D:\\ws",
+        title: "Дискуссия",
+        label: "discuss",
+        popLabel: "Вынести дискуссию в окно",
+        onRegion: (value) => (region = value),
+      }),
+    );
+    fireEvent.click(screen.getByLabelText("Вынести дискуссию в окно"));
+    await waitFor(() => expect(region?.lastError).toContain("without creating a window"));
+    expect(region?.popped).toBe(false);
+    // 关键契约：子树绝不被移进不可见文档——留在主文档锚点里。
+    expect(document.querySelector("[data-region-subtree='spec-discussion']")?.ownerDocument).toBe(
+      document,
+    );
+    // 假窗口被关闭（释放共享槽位），且报错后按钮进入可见 error 态而非死按钮。
+    expect(windows[0]!.closeCalls).toBe(1);
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Вынести дискуссию в окно") as HTMLElement).getAttribute(
+          "data-spec-popout-state",
+        ),
+      ).toBe("error"),
+    );
+    // 行为恢复后（真实浏览器里窗口带尺寸）可以重试成功：错误态不是永久卡死。
+    behavior.size = { width: 480, height: 640 };
+    fireEvent.click(screen.getByLabelText("Вынести дискуссию в окно"));
+    await waitFor(() => expect(region?.popped).toBe(true));
+    expect(windows[1]!.document.body.hasChildNodes()).toBe(true);
+  });
+
+  it("requestWindow throwing synchronously records a visible error and does not wedge the opening state", async () => {
+    const { behavior } = installFakePiP();
+    let region: SpecPopoutRegion | undefined;
+    render(
+      createElement(RegionHost, {
+        regionId: "main-chat",
+        workspaceKey: "ws-id-1",
+        title: "Чат",
+        label: "chat",
+        popLabel: "Вынести чат в окно",
+        onRegion: (value) => (region = value),
+      }),
+    );
+    // 修复回归：同步异常原先会让 setOpening(true) 永远收不回（.finally 挂不上没有
+    // 的 promise），按钮从此永久禁用。现在异常走可见错误路径，opening 复位。
+    behavior.throwSync = true;
+    fireEvent.click(screen.getByLabelText("Вынести чат в окно"));
+    await waitFor(() => expect(region?.lastError).toBe("sync rejection before promise"));
+    expect(region?.popped).toBe(false);
+    expect(region?.opening).toBe(false);
+    // 恢复后再次点击可以正常弹出（opening 未被卡死）。
+    behavior.throwSync = false;
+    fireEvent.click(screen.getByLabelText("Вынести чат в окно"));
+    await waitFor(() => expect(region?.popped).toBe(true));
   });
 
   it("disabled region (hidden/unavailable owner) auto-returns from the PiP window", async () => {
