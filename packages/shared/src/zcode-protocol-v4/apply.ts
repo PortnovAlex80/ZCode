@@ -36,7 +36,9 @@ export function createMutableConversationSnapshotAccumulator(
 
 // row.delta 只允许作用于流式态行（§4.4.4 不变量，服务端保证）。
 // 本函数按协议语义实现为：路径不存在/行不存在时 no-op（§4.3：patch 命中未加载行 = no-op）。
-function appendToRow(
+// Wave B 起导出：applyFrame.ts 的一帧批量路径复用同一实现，避免两份流式追加语义走散；
+// applyConversationDelta / applyConversationDeltas 两个裁判函数的行为保持不变。
+export function appendToRow(
   row: ConversationRow,
   path: StreamablePath,
   append: string,

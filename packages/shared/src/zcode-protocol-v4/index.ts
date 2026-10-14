@@ -32,6 +32,8 @@ export * from "./delta.js";
 export * from "./coalesce.js";
 export * from "./profiles.js";
 export * from "./apply.js";
+// Wave B：客户端安全的一帧批量应用（apply.js 逐条语义的等价快路径）。
+export * from "./applyFrame.js";
 export * from "./transport.js";
 export * from "./wire.js";
 export * from "./wire-codec.js";

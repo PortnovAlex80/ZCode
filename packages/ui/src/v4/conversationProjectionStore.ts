@@ -6,7 +6,7 @@
 //   3. base 与状态同生共死——断档时状态未被污染，携当前水位重订阅，由服务端裁决 resume/snapshot。
 // 除 optimistic overlay（pending 命令展示）外，本 store 不产生任何 conversation 事实。
 import {
-  applyConversationDeltas,
+  applyConversationFrame,
   isDeterministicContentFault,
   parseConversationTopic,
   PROTOCOL_V4_LIMITS,
@@ -731,7 +731,10 @@ export class ConversationProjectionStore {
       }
       return;
     }
-    const applied = applyConversationDeltas(current, frame.payload.deltas);
+    // Wave B：一帧只复制一次 rows.window / 只建一次行位置索引。逐条 apply 在长窗口上
+    // 每条 delta 都线性查找 + 整窗复制（24 op 未合并流式帧在 2 万行窗口上是 O(24×N)）；
+    // applyConversationFrame 与逐条语义逐字节等价（property 测试钉住），no-op 帧保持原引用。
+    const applied = applyConversationFrame(current, frame.payload.deltas);
     // seq 是快照对齐水位（R-03），delta 帧应用完推进到帧右端点。
     const next = this.shareDeltaRows({ ...applied, seq: frame.toSeq }, frame.payload.deltas);
     logSubagentProjectionTransition(this.topic, current, next, "deltas");
