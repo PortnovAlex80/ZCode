@@ -753,6 +753,14 @@ export default {
       from: "build/icon_windows.png",
       to: "icon_windows.png",
     },
+    {
+      // Bug 修复（R-05 活体反馈 2026-10-13，第二处）：Windows 窗口 HICON 最大 256x256，
+      // 主进程从 resources 加载 1024px PNG 作为 BrowserWindow icon 时会静默回退到
+      // Electron 默认图标——任务栏在应用运行时显示 Electron 而非 Z。补充 256px 帧，
+      // 主进程在打包态改用它（见 index.ts iconPath）。
+      from: "build/icon_windows_256.png",
+      to: "icon_windows_256.png",
+    },
     ...(targetPlatform.os === "win32"
       ? [
           {
