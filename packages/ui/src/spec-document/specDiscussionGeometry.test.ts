@@ -116,8 +116,31 @@ test("actual pane keeps one aside and one keyed discussion subtree across dock/f
   assert.equal(tags.filter((tag) => tag === "SpecDiscussionPane").length, 1);
   assert.match(text, /key=\{thread.id\}/);
   assert.match(text, /data-discussion-mode=\{discussionMode\}/);
+  // U-06 之后面板内的弹出窗口 portal 被重新授权，但只允许经由 specPopoutRegion
+  // （renderer-only 的 Document PiP 机制）。旧断言“面板源码不得出现 createPortal”
+  // 继续成立（portal 集中在 specPopoutRegion.tsx），不再是唯一的防线；这里同时
+  // 钉住被授权的边界：面板只经 useSpecPopoutRegion 接线，不得直接开窗口，
+  // 也不得回潮任何 Main 侧弹窗机制（RETIREMENT-2）。
   assert.equal(text.includes("createPortal("), false);
   assert.equal(text.includes("window.open("), false);
+  assert.match(text, /useSpecPopoutRegion/);
+  const popoutSource = await readFile(
+    new URL("./specPopoutWindow.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(popoutSource, /requestWindow/);
+  assert.equal(popoutSource.includes("window.open("), false);
+  assert.equal(popoutSource.includes("BrowserWindow"), false);
+  assert.equal(popoutSource.includes("ipcRenderer"), false);
+  assert.equal(popoutSource.includes("window.zcode"), false);
+  // 评审修复回归（2026-10-14）：宿主节点在面板内必须是 display:contents 透传——
+  // 创建处不得写死填充 class（w-full 的宿主在 contents 锚点下会把内容列挤到 0px）。
+  const regionSource = await readFile(
+    new URL("./specPopoutRegion.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(regionSource, /POPOUT_HOST_DOCKED_CLASS = "contents"/);
+  assert.match(regionSource, /host\.className = POPOUT_HOST_DOCKED_CLASS;/);
   assert.match(text, /ResizeObserver/);
   assert.match(text, /onPointerCancel/);
   assert.match(text, /flex-col overflow-y-auto/);
