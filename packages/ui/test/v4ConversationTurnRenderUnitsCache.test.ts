@@ -266,10 +266,40 @@ describe("cached conversation turn render units (Wave C)", () => {
     expect(unitByTurn(after).get("turn-11")).toBe(beforeByTurn.get("turn-11"));
   });
 
-  it("pluginUiPinResolver 身份变化：含工具行轮次失效，无工具行轮次引用恒等", () => {
+  it("pluginUiPinResolver 失效（发现 1 语义）：普通工具行不敏感；无版本号时身份翻转只失效 pin-sensitive 轮", () => {
     const { rows } = generateV4ReplayRows({ turns: 12, seed: 11 });
-    // 把 turn-2 的工具行移除，制造一个「无工具行」的对照组。
-    const curated = rows.filter((row) => !(row.kind === "toolCall" && row.turnId === "turn-2"));
+    // 回放 fixture 的工具行都是普通 toolCall（无 mcp ui）——按发现 1 的修复它们不消费
+    // resolver 裁决，不再视为敏感。给 turn-3 注入一条真正的插件 UI 工具行作对照组；
+    // turn-2 保留普通工具行。
+    const donor = rows.find((row) => row.kind === "toolCall" && row.turnId === "turn-4")!;
+    const pluginRow = {
+      ...donor,
+      rowId: 900_010,
+      createdAtSeq: 900_010,
+      entityId: "toolCall-900010",
+      turnId: "turn-3",
+      toolCallId: "plugin-call-900010",
+      status: "success",
+      display: {
+        kind: "mcp_tool",
+        serverName: "server-c",
+        toolName: "edit",
+        ui: {
+          pluginId: "plugin-c",
+          resourceUri: "ui://plugin-c/main",
+          surface: "panel",
+          preferredDisplayMode: "fullscreen",
+          showInline: false,
+        },
+      },
+    } as typeof donor;
+    const curated = insertRowBefore(
+      rows,
+      rows.find(
+        (row) => row.kind === "assistantText" && row.turnId === "turn-3" && "actions" in row,
+      )!.rowId,
+      pluginRow,
+    );
     const unpinned: PluginUiRowPinResolver = () => ({
       disposition: undefined,
       manualPinned: false,
@@ -288,6 +318,7 @@ describe("cached conversation turn render units (Wave C)", () => {
       scopeKey: "s1",
     });
     const warmByTurn = unitByTurn(warm);
+    const materializedAfterWarm = cache.stats.materialized;
     const flipped = cache.build(curated, {
       nowMs: BASE_NOW_MS,
       pluginUiPinResolver: pinned,
@@ -295,11 +326,95 @@ describe("cached conversation turn render units (Wave C)", () => {
     });
     expect(flipped).toEqual(oracle(curated, { nowMs: BASE_NOW_MS, pluginUiPinResolver: pinned }));
     const flippedByTurn = unitByTurn(flipped);
+    // 普通工具行轮（turn-2，fixture 原生工具）不失效；无工具轮也不失效。
     expect(flippedByTurn.get("turn-2")).toBe(warmByTurn.get("turn-2"));
+    expect(flippedByTurn.get("turn-5")).toBe(warmByTurn.get("turn-5"));
+    // 含插件 UI 工具行的轮（turn-3）在保守身份回退（未提供版本号）下失效。
     expect(flippedByTurn.get("turn-3")).not.toBe(warmByTurn.get("turn-3"));
+    expect(cache.stats.materialized).toBeGreaterThan(materializedAfterWarm);
   });
 
-  it("highspeed 跨轮 footer 到期：nowMs 越过 expiresAt 时与 oracle 一致，未标记轮引用恒等", () => {
+  it("pluginUiPinResolver 语义签名（发现 1）：提供版本号时身份翻转不失效；版本号变化才失效", () => {
+    const { rows } = generateV4ReplayRows({ turns: 12, seed: 15 });
+    const donor = rows.find((row) => row.kind === "toolCall" && row.turnId === "turn-4")!;
+    const pluginRow = {
+      ...donor,
+      rowId: 900_020,
+      createdAtSeq: 900_020,
+      entityId: "toolCall-900020",
+      turnId: "turn-3",
+      toolCallId: "plugin-call-900020",
+      status: "success",
+      display: {
+        kind: "mcp_tool",
+        serverName: "server-d",
+        toolName: "edit",
+        ui: {
+          pluginId: "plugin-d",
+          resourceUri: "ui://plugin-d/main",
+          surface: "panel",
+          preferredDisplayMode: "fullscreen",
+          showInline: false,
+        },
+      },
+    } as typeof donor;
+    const curated = insertRowBefore(
+      rows,
+      rows.find(
+        (row) => row.kind === "assistantText" && row.turnId === "turn-3" && "actions" in row,
+      )!.rowId,
+      pluginRow,
+    );
+    const cache = createCachedConversationTurnRenderUnitsBuilder();
+    const resolverA: PluginUiRowPinResolver = () => ({
+      disposition: undefined,
+      manualPinned: false,
+    });
+    cache.build(curated, {
+      nowMs: BASE_NOW_MS,
+      pluginUiPinResolver: resolverA,
+      pluginUiDisclosureVersion: 7,
+      scopeKey: "s1",
+    });
+    const warm = cache.build(curated, {
+      nowMs: BASE_NOW_MS,
+      pluginUiPinResolver: resolverA,
+      pluginUiDisclosureVersion: 7,
+      scopeKey: "s1",
+    });
+    const warmByTurn = unitByTurn(warm);
+    const materializedAfterWarm = cache.stats.materialized;
+
+    // Timeline 的真实形态：每个 token 重建 derivation/resolver 身份，版本号不变。
+    const resolverB: PluginUiRowPinResolver = () => ({
+      disposition: undefined,
+      manualPinned: false,
+    });
+    const sameVersion = cache.build(curated, {
+      nowMs: BASE_NOW_MS,
+      pluginUiPinResolver: resolverB,
+      pluginUiDisclosureVersion: 7,
+      scopeKey: "s1",
+    });
+    expect(cache.stats.materialized).toBe(materializedAfterWarm);
+    for (const unit of sameVersion) {
+      expect(warmByTurn.get(unit.turnId)).toBe(unit);
+    }
+
+    // 手动披露版本号变化（manual pin / 收起）→ pin-sensitive 轮失效。
+    const pinned: PluginUiRowPinResolver = () => ({ disposition: undefined, manualPinned: true });
+    const bumped = cache.build(curated, {
+      nowMs: BASE_NOW_MS,
+      pluginUiPinResolver: pinned,
+      pluginUiDisclosureVersion: 8,
+      scopeKey: "s1",
+    });
+    expect(bumped).toEqual(oracle(curated, { nowMs: BASE_NOW_MS, pluginUiPinResolver: pinned }));
+    expect(unitByTurn(bumped).get("turn-3")).not.toBe(warmByTurn.get("turn-3"));
+    expect(unitByTurn(bumped).get("turn-2")).toBe(warmByTurn.get("turn-2"));
+  });
+
+  it("highspeed 跨轮 footer 到期：nowMs 越过 expiresAt 时与 oracle 一致，标记与未标记轮引用恒等（发现 5）", () => {
     const { rows } = generateV4ReplayRows({ turns: 4, seed: 12 });
     const expiresAt = BASE_NOW_MS + 1_000;
     const withCard = replaceRow(
@@ -334,12 +449,98 @@ describe("cached conversation turn render units (Wave C)", () => {
     expect(after).toEqual(oracle(withCard, { nowMs: expiresAt + 5_000 }));
     const marked = after.filter((unit) => unit.showHighspeedOutputFooter === true);
     expect(marked).toHaveLength(1);
-    // 未标记轮保持引用恒等（footer 收尾步骤对无标记单元原样返回）。
-    const beforeByTurn = unitByTurn(before);
-    for (const unit of after) {
-      if (unit.showHighspeedOutputFooter === true) continue;
-      expect(beforeByTurn.get(unit.turnId)).toBe(unit);
+    // 复核 #2 发现 5：已标记单元同样保持引用恒等（标记内容未变时复用上次输出对象），
+    // 不再豁免标记单元；未标记轮照旧原样返回。
+    const settled = cache.build(withCard, { nowMs: expiresAt + 6_000, scopeKey: "s1" });
+    expect(settled).toEqual(after);
+    for (let index = 0; index < after.length; index += 1) {
+      expect(settled[index]).toBe(after[index]);
     }
+  });
+
+  it("复核 #2 发现 5 复现：四个终态轮各持一张已到期卡，相同 rows/options 两次 build → 0 次物化、全部输出引用恒等", () => {
+    const { rows } = generateV4ReplayRows({ turns: 4, seed: 13 });
+    const expiredAt = BASE_NOW_MS - 60_000;
+    let withCards = rows;
+    for (let turnIndex = 1; turnIndex <= 4; turnIndex += 1) {
+      const target = rows.find(
+        (row) => row.kind === "userInput" && row.turnId === `turn-${turnIndex}`,
+      )!;
+      withCards = replaceRow(withCards, target.rowId, (row) =>
+        row.kind === "userInput"
+          ? ({
+              ...row,
+              highspeed: {
+                schemaVersion: 1,
+                cardId: `card-distinct-${turnIndex}`,
+                taskId: "task-1",
+                provider: "zai",
+                model: "glm-5.3",
+                issuedAt: expiredAt - 30_000,
+                expiresAt: expiredAt,
+                regularTps: 10,
+                highspeedTps: 100,
+                outputTokens: 1500 + turnIndex,
+                durationMs: 15_000,
+              },
+            } as typeof row)
+          : row,
+      );
+    }
+    const cache = createCachedConversationTurnRenderUnitsBuilder();
+    const first = cache.build(withCards, { nowMs: BASE_NOW_MS, scopeKey: "s1" });
+    expect(first).toEqual(oracle(withCards, { nowMs: BASE_NOW_MS }));
+    expect(first.filter((unit) => unit.showHighspeedOutputFooter === true)).toHaveLength(4);
+    const materializedAfterFirst = cache.stats.materialized;
+
+    const second = cache.build(withCards, { nowMs: BASE_NOW_MS, scopeKey: "s1" });
+    expect(cache.stats.materialized).toBe(materializedAfterFirst);
+    expect(second.length).toBe(first.length);
+    for (let index = 0; index < first.length; index += 1) {
+      expect(second[index]).toBe(first[index]);
+    }
+  });
+
+  it("highspeed 组尾移动语义保留：同卡新轮加入后 footer 迁移到新组尾", () => {
+    const { rows } = generateV4ReplayRows({ turns: 3, seed: 14 });
+    const expiredAt = BASE_NOW_MS - 60_000;
+    const card = (turnIndex: number) => ({
+      schemaVersion: 1 as const,
+      cardId: "card-move-1",
+      taskId: "task-1",
+      provider: "zai",
+      model: "glm-5.3",
+      issuedAt: expiredAt - 30_000,
+      expiresAt: expiredAt,
+      regularTps: 10,
+      highspeedTps: 100,
+      outputTokens: 900 + turnIndex,
+      durationMs: 12_000,
+    });
+    let withCard = replaceRow(
+      rows,
+      rows.find((row) => row.kind === "userInput" && row.turnId === "turn-2")!.rowId,
+      (row) => (row.kind === "userInput" ? ({ ...row, highspeed: card(2) } as typeof row) : row),
+    );
+    const cache = createCachedConversationTurnRenderUnitsBuilder();
+    const before = cache.build(withCard, { nowMs: BASE_NOW_MS, scopeKey: "s1" });
+    const markedBefore = before.filter((unit) => unit.showHighspeedOutputFooter === true);
+    expect(markedBefore).toHaveLength(1);
+    expect(markedBefore[0]!.turnId).toBe("turn-2");
+
+    // 同一张卡的后续轮到达：footer 组尾必须后移到 turn-3（跨轮语义不被 identity 记忆破坏）。
+    withCard = replaceRow(
+      withCard,
+      withCard.find((row) => row.kind === "userInput" && row.turnId === "turn-3")!.rowId,
+      (row) => (row.kind === "userInput" ? ({ ...row, highspeed: card(3) } as typeof row) : row),
+    );
+    const after = cache.build(withCard, { nowMs: BASE_NOW_MS, scopeKey: "s1" });
+    expect(after).toEqual(oracle(withCard, { nowMs: BASE_NOW_MS }));
+    const markedAfter = after.filter((unit) => unit.showHighspeedOutputFooter === true);
+    expect(markedAfter).toHaveLength(1);
+    expect(markedAfter[0]!.turnId).toBe("turn-3");
+    const afterByTurn = unitByTurn(after);
+    expect(afterByTurn.get("turn-2")!.showHighspeedOutputFooter).toBeUndefined();
   });
 
   it("交错行与对抗性 turnId（__proto__/constructor）：分组与缓存键安全", () => {

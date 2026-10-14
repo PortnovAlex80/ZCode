@@ -1,4 +1,5 @@
 import type { ConversationRow, TurnHeaderRow } from "@zcode/shared/zcode-protocol-v4";
+import { isPluginUiPinSensitiveRow } from "@/plugin-ui/index.js";
 import {
   groupConversationTurnDraftUnits,
   materializeDraftUnit,
@@ -24,22 +25,35 @@ import { markHighspeedOutputFooterUnits } from "@/highspeed/highspeedOutputFoote
  *   回退）覆盖层，不进缓存，token 频率下照常重建；
  * - header 行引用与 orderedRows 逐行引用完全一致（projection 的行池结构性共享保证
  *   未变行保持引用恒等；任何迟到结果/头部变更都会改变该轮引用，精确失效该轮）；
- * - 覆盖层 epoch 未变：resolverSensitive（含 toolCall 行）的轮次在 pluginUiPinResolver
- *   身份变化（手动固定/折叠版本）后失效重物化。
+ * - plugin 覆盖层语义签名未变（见下）。
  *
- * 终态 headered 轮次的物化结果已被证明与 nowMs/sessionPhase/位置无关（时长取
+ * 复核 #2 发现 1 的修复：resolver 失效不再看 resolver 函数身份（Timeline 每次流式
+ * token 都会重建 derivation/resolver 身份，旧实现把全部含工具行轮次逐 token 打穿），
+ * 改为按 resolver 答案的语义输入计算签名：
+ * - 全部行的 turnId 序列（首现顺序）——autoExpand 按最近 N 回合裁决，任何新轮/删轮
+ *   都会移动边界并影响旧轮（含「无插件卡的新轮占位」的情况）；
+ * - pin-sensitive 行（isPluginUiPinSensitiveRow，即真正消费 resolver 裁决的行）的
+ *   引用序列——同资源替代 / 成功-失败翻转 / display.ui 变化都会改变行引用；
+ * - pluginUiDisclosureVersion——手动固定 / 收起版本号；未提供时保守退回 resolver
+ *   身份比较（调用方自管失效）。
+ * 签名不变 ⇒ resolver 语义不变 ⇒ 不失效；签名变化 ⇒ 只重物化含 pin-sensitive 行的
+ * 轮次（普通工具行不消费 resolver，不再视为敏感）。这不是「无视 resolver 依赖」：
+ * 手动披露、资源替代、最近回合自动展开（含对旧轮的影响）全部保留。
+ *
+ * 终态 headered 轮次的物化结果与 nowMs/sessionPhase/位置无关（时长取
  * header.activeMs/endedAt 事实；isLastTurn 只影响 running 分支的默认展开，由每次
- * build 的 normalize 步骤按当前下标重算）。footer（highspeed 到期标记）在每次 build
- * 的收尾步骤统一重算——未标记单元保持引用恒等。
+ * build 的 normalize 步骤按当前下标重算并回填缓存条目）。footer（highspeed 到期标记）
+ * 在每次 build 的收尾步骤统一重算；未标记单元保持引用恒等，已标记单元按
+ * （源单元引用, cardId）记忆上次输出，内容与 footer 元数据未变时复用同一对象
+ * （复核 #2 发现 5 的修复；源单元或 cardId 变化即产出新对象，保留到期与组尾移动语义）。
  *
  * 复杂度披露：每次 build 固定一次 O(rows) 分组行走 + 一次 O(rows) 引用比对 +
- * O(units) keep/normalize/footer 扫描；物化只发生在受影响轮次（流式尾轮、迟到结果、
- * 失效覆盖层）。不承诺 O(changed turns) 的总路径——上述线性扫描按审计要求如实披露。
+ * O(units) keep/normalize/footer 扫描；物化只发生在受影响轮次。不承诺
+ * O(changed turns) 的总路径——上述线性扫描按审计要求如实披露。
  *
  * 生命周期：缓存属于单个挂载（ConversationTimeline useRef），不进任何 app-global
  * map；scopeKey（sessionKey+logEpoch）变化即整缓存清空；每轮 build 后逐出不在当前
- * 窗口的 turn（截断/回退/快照替换/会话消失即修剪）。条目只持行引用（与投影窗口同一
- * 批对象），不在长生命周期闭包里捕获整份历史快照。
+ * 窗口的 turn。条目只持行引用（与投影窗口同一批对象）。
  */
 
 interface CacheEntry {
@@ -48,6 +62,12 @@ interface CacheEntry {
   unit: ConversationTurnRenderUnit;
   resolverSensitive: boolean;
   resolverEpoch: number;
+  /** 上一次实际输出的 footer 标记克隆（发现 5：标记不变则保持输出引用恒等）。 */
+  emittedFooterOutput?: {
+    sourceUnit: ConversationTurnRenderUnit;
+    cardId: string | null;
+    emitted: ConversationTurnRenderUnit;
+  };
 }
 
 export interface CachedTurnRenderUnitsStats {
@@ -57,11 +77,17 @@ export interface CachedTurnRenderUnitsStats {
   materialized: number;
   prunedEntries: number;
   scopeEvictions: number;
+  resolverEpochBumps: number;
 }
 
 export interface CachedConversationTurnRenderUnitsOptions extends BuildConversationTurnRenderUnitsOptions {
   /** 会话/epoch 身份键（sessionKey + logEpoch）；变化即整缓存清空。 */
   scopeKey: string;
+  /**
+   * 手动固定 / 收起（disclosure）版本号。Timeline 由 pluginUiDisclosureVersion 提供；
+   * 缺省时回退为把 resolver 函数身份纳入签名（保守：身份变化即失效）。
+   */
+  pluginUiDisclosureVersion?: number;
 }
 
 export interface CachedConversationTurnRenderUnitsBuilder {
@@ -86,8 +112,8 @@ function rowsReferentiallyEqual(
   return true;
 }
 
-function draftHasToolCallRows(draft: ConversationTurnDraftUnit): boolean {
-  return draft.assistantWorkRows.some((row) => row.kind === "toolCall");
+function draftHasPinSensitiveRows(draft: ConversationTurnDraftUnit): boolean {
+  return draft.assistantWorkRows.some(isPluginUiPinSensitiveRow);
 }
 
 function isCacheableDraft(
@@ -107,10 +133,15 @@ export function createCachedConversationTurnRenderUnitsBuilder(): CachedConversa
     materialized: 0,
     prunedEntries: 0,
     scopeEvictions: 0,
+    resolverEpochBumps: 0,
   };
   let scopeKey: string | null = null;
   let resolverEpoch = 0;
-  let lastResolver: unknown = Symbol("initial-resolver");
+  // resolver 语义签名状态（发现 1）：turnId 序列 + pin-sensitive 行引用序列 + 版本号。
+  let signatureTurnIds: string | null = null;
+  let signaturePinRows: readonly ConversationRow[] | null = null;
+  let signatureDisclosureVersion: number | undefined;
+  let signatureResolverIdentity: unknown = null;
   const entries = new Map<string, CacheEntry>();
 
   const build = (
@@ -123,17 +154,44 @@ export function createCachedConversationTurnRenderUnitsBuilder(): CachedConversa
       entries.clear();
       stats.scopeEvictions += 1;
     }
-    if (!Object.is(options.pluginUiPinResolver, lastResolver)) {
-      lastResolver = options.pluginUiPinResolver;
-      resolverEpoch += 1;
-    }
 
     const drafts = groupConversationTurnDraftUnits(rows);
-    const units: ConversationTurnRenderUnit[] = [];
     const seenTurnIds = new Set<string>();
+    const turnIds: string[] = [];
+    const pinSensitiveRows: ConversationRow[] = [];
+    for (const draft of drafts) {
+      if (!seenTurnIds.has(draft.turnId)) {
+        seenTurnIds.add(draft.turnId);
+        turnIds.push(draft.turnId);
+      }
+      for (const row of draft.assistantWorkRows) {
+        if (isPluginUiPinSensitiveRow(row)) pinSensitiveRows.push(row);
+      }
+    }
+
+    // resolver 语义签名（发现 1）：在物化循环之前判定，本 build 新存/复用的条目都登记
+    // 到判定后的 epoch。只在语义输入变化时 bump；首建（signature 尚为 null）bump 一次。
+    const turnIdsSignature = turnIds.join("\u0000");
+    const resolverIdentityChanged =
+      options.pluginUiDisclosureVersion === undefined &&
+      !Object.is(options.pluginUiPinResolver, signatureResolverIdentity);
+    if (
+      turnIdsSignature !== signatureTurnIds ||
+      !rowsReferentiallyEqual(signaturePinRows ?? [], pinSensitiveRows) ||
+      options.pluginUiDisclosureVersion !== signatureDisclosureVersion ||
+      resolverIdentityChanged
+    ) {
+      signatureTurnIds = turnIdsSignature;
+      signaturePinRows = pinSensitiveRows;
+      signatureDisclosureVersion = options.pluginUiDisclosureVersion;
+      signatureResolverIdentity = options.pluginUiPinResolver;
+      resolverEpoch += 1;
+      stats.resolverEpochBumps += 1;
+    }
+
+    const units: ConversationTurnRenderUnit[] = [];
     for (let index = 0; index < drafts.length; index += 1) {
       const draft = drafts[index]!;
-      seenTurnIds.add(draft.turnId);
       const entry = entries.get(draft.turnId);
       let unit: ConversationTurnRenderUnit | null = null;
       if (
@@ -154,7 +212,7 @@ export function createCachedConversationTurnRenderUnitsBuilder(): CachedConversa
             header: draft.header,
             orderedRows: draft.orderedRows,
             unit,
-            resolverSensitive: draftHasToolCallRows(draft),
+            resolverSensitive: draftHasPinSensitiveRows(draft),
             resolverEpoch,
           });
         } else {
@@ -188,7 +246,31 @@ export function createCachedConversationTurnRenderUnitsBuilder(): CachedConversa
         entry.unit = normalized;
       }
     }
-    return markHighspeedOutputFooterUnits(normalizedUnits, options.nowMs ?? Date.now());
+    const footerMarked = markHighspeedOutputFooterUnits(
+      normalizedUnits,
+      options.nowMs ?? Date.now(),
+    );
+    // 发现 5：已标记单元在（源单元引用, cardId）未变时复用上一次输出对象，
+    // 保留到期/组尾移动语义（源单元或 cardId 变化即产生新对象）。
+    for (let index = 0; index < footerMarked.length; index += 1) {
+      const output = footerMarked[index]!;
+      if (output.showHighspeedOutputFooter !== true) continue;
+      const sourceUnit = normalizedUnits[index]!;
+      const entry = entries.get(output.turnId);
+      const cardId = output.highspeedOutputFooterTarget?.cardId ?? null;
+      if (
+        entry?.emittedFooterOutput !== undefined &&
+        entry.emittedFooterOutput.sourceUnit === sourceUnit &&
+        entry.emittedFooterOutput.cardId === cardId
+      ) {
+        footerMarked[index] = entry.emittedFooterOutput.emitted;
+        continue;
+      }
+      if (entry !== undefined) {
+        entry.emittedFooterOutput = { sourceUnit, cardId, emitted: output };
+      }
+    }
+    return footerMarked;
   };
 
   return {

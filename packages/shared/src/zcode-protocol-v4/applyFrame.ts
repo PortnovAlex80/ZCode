@@ -127,20 +127,23 @@ export function applyConversationFrame(
         overlay ??= {};
         Object.assign(overlay, delta.patch);
         const patch = delta.patch as Record<string, unknown>;
-        if (patch.workflowRuns !== undefined) {
+        // 键在场判定（而不是 !== undefined）：公开 schema/type 允许显式 undefined——
+        // 裁判 {...snapshot, ...patch} 会把这样的键整体置 undefined；按值判空会把它
+        // 误读成“键缺席”，让候选保留旧值（review #2 finding 7）。
+        if ("workflowRuns" in patch) {
           workflowRuns = patch.workflowRuns as ConversationSnapshot["workflowRuns"];
           workflowDirty = true;
         }
-        if (patch.rows !== undefined) {
+        if ("rows" in patch) {
           // schema 排除 rows，正常线上不会出现；按逐条语义整体换窗，后续行 op 作用于新窗。
           rows = patch.rows as RowsWindow;
           window = null;
           positions = null;
           rowsDirty = true;
         }
-        // rows / workflowRuns 的最终值由上面按序维护的帧内状态唯一决定；
-        // 若留在 overlay 里，装配时会把 patch 的旧值倒灌到更晚的行/workflow op 之上。
-        delete overlay.workflowRuns;
+        // rows 的终值由帧内工作状态唯一决定（防 patch 旧值倒灌更晚的行 op），从 overlay 摘除。
+        // workflowRuns 的 overlay 槽位保留：初始缺席的键按裁判 {...snapshot, ...patch} 的
+        // 到达顺序追加，槽位即键序，装配时在原槽写入终值。
         delete overlay.rows;
         changed = true;
         break;
@@ -148,11 +151,16 @@ export function applyConversationFrame(
       case "workflowRun.updated":
         workflowRuns = applyWorkflowRunUpdated(workflowRuns, delta);
         workflowDirty = true;
+        // 首次引入 workflowRuns 键时在 overlay 占位：与其它新到状态键的相对顺序 = 到达顺序。
+        overlay ??= {};
+        if (!("workflowRuns" in overlay)) overlay.workflowRuns = workflowRuns;
         changed = true;
         break;
       case "workflowRun.removed":
         workflowRuns = applyWorkflowRunRemoved(workflowRuns, delta);
         workflowDirty = true;
+        overlay ??= {};
+        if (!("workflowRuns" in overlay)) overlay.workflowRuns = workflowRuns;
         changed = true;
         break;
       case "pluginUi.resourceUpdated":
@@ -165,9 +173,15 @@ export function applyConversationFrame(
   }
 
   if (!changed) return snapshot;
+  // workflowRuns 的终值写进 overlay 的既有槽位（键序 = 首次到达顺序），不单独装配——
+  // 单独赋值会把初始缺席的 workflowRuns 排到其它新到状态键之前，违反与逐条裁判的
+  // JSON.stringify 逐字节一致（review #2 finding 7 的键序复现）。
+  if (workflowDirty) {
+    overlay ??= {};
+    overlay.workflowRuns = workflowRuns;
+  }
   const result = { ...snapshot } as ConversationSnapshot & Record<string, unknown>;
   if (rowsDirty) result.rows = rows;
-  if (workflowDirty) result.workflowRuns = workflowRuns;
   if (overlay !== null) Object.assign(result, overlay);
   return result;
 }

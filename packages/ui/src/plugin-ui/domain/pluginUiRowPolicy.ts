@@ -33,3 +33,19 @@ export function isPluginUiPinnedToolRow(
   if (!context.disposition) return true;
   return context.disposition.forcedInline || context.disposition.autoExpand;
 }
+
+/**
+ * 渲染性能 Wave C（独立复核 #2 发现 1）：该行的 pinned 裁决是否可能随 resolver 语义变化翻转。
+ * 与 isPluginUiPinnedToolRow 的前置过滤链（toolCall / 非终态失败 / mcp ui / 非 isError）同源：
+ * 通过前置过滤的行才消费 resolver；其余行无论 resolver 如何都返回 false。
+ * completed-turn 复用缓存据此把 resolver 失效范围收窄到真正消费裁决的轮次，并用
+ * 「哪些行是 pin-sensitive」的引用签名代替 resolver 函数身份判定语义是否变化。
+ * 两处过滤链必须同步修改——由 pluginUiRowPolicy 域内相邻定义约束。
+ */
+export function isPluginUiPinSensitiveRow(row: ConversationRow): boolean {
+  if (row.kind !== "toolCall") return false;
+  if (row.status === "error" || row.status === "cancelled") return false;
+  const display = row.display;
+  if (display?.kind !== "mcp_tool" || display.ui === undefined) return false;
+  return display.ui.isError !== true;
+}

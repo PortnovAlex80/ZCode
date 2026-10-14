@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import { SessionPane } from "@/v4/SessionPane.js";
 import { V4PaneConversationProvider } from "@/v4/V4ConversationContext.js";
+import { useCombinedPresentationVisibility } from "@/v4/usePresentationVisibility.js";
 import { useSpecDiscussion } from "./useSpecDiscussion.js";
 import { documentQuestion, type SpecThread } from "./specThread.js";
 import {
@@ -40,13 +41,18 @@ export function SpecDiscussionPane({
   onActivate?: () => void;
 }) {
   const question = thread.questionDraft || "";
+  // 复核 #2 发现 2/3：讨论可见性 = 宿主（本组件所在文档；popout realm 里即 popout
+  // 文档）∧ 宿主侧 visible 判定。下方所有可见期消费（原生准备、telemetry、
+  // presentation、interactionDialogs）统一使用该值；非激活保留线程由宿主传
+  // visible=false（见 specDiscussionPresentationVisibility.ts 的结构化规则）。
+  const panePresented = useCombinedPresentationVisibility(visible);
   const native = useSpecDiscussion(
     thread,
     update,
     workspacePath,
     workspaceIdentity,
     (expected) => updateQuestionDraft(thread.id, "", expected),
-    visible,
+    panePresented,
   );
   const [nativeOwnerSessionId, setNativeOwnerSessionId] = useState<string | null>(null);
   const [handoffError, setHandoffError] = useState("");
@@ -221,11 +227,11 @@ export function SpecDiscussionPane({
               workspaceIdentity={workspaceIdentity}
               readOnly={!nativeInteractive}
               focused={false}
-              telemetryVisible={visible}
-              /* Markdown 讨论宿主：讨论区不可见（文档 tab 切走）时冻结展示推导；
-                 订阅与 native 讨论所有权保持原样。 */
-              presentationVisible={visible}
-              interactionDialogsVisible={visible && nativeInteractive}
+              telemetryVisible={panePresented}
+              /* Markdown 讨论宿主：讨论区不可见（文档 tab 切走 / 宿主文档隐藏）时冻结
+                 展示推导；订阅与 native 讨论所有权保持原样。 */
+              presentationVisible={panePresented}
+              interactionDialogsVisible={panePresented && nativeInteractive}
               onOpenBrowserUrl={onOpenBrowserUrl}
               onOpenCodeViewer={onOpenCodeViewer}
               onSelectionSideChatUnavailable={() => setUnavailable(true)}

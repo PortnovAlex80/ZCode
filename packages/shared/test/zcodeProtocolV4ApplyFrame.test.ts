@@ -433,6 +433,150 @@ describe("applyConversationFrame equivalence with the per-delta oracle", () => {
     );
   });
 
+  // ── Review #2 finding 7：批量装配对“新引入状态键”的键序与显式 undefined 语义 ──
+
+  it("assembles newly introduced state keys in the oracle arrival order", () => {
+    // 评审复现：两个键在初始快照上都缺席——workspaceHookAdmission 先到、workflowRuns 后到。
+    // 裁判 {...snapshot, ...patch} 链按到达顺序追加新键；候选不得因独立装配 workflowRuns 而换序。
+    const stripped = makeSnapshot() as ConversationSnapshot & Record<string, unknown>;
+    delete stripped.workflowRuns;
+    delete stripped.workspaceHookAdmission;
+    const reviewDeltas: ConversationDelta[] = [
+      { op: "state.updated", patch: { workspaceHookAdmission: null } },
+      { op: "state.updated", patch: { workflowRuns: { revision: 1, runs: [] } } },
+    ];
+    const { frame, oracle } = expectFrameEquivalence(
+      stripped as ConversationSnapshot,
+      reviewDeltas,
+    );
+    const frameKeys = Object.keys(frame as Record<string, unknown>);
+    const oracleKeys = Object.keys(oracle as Record<string, unknown>);
+    expect(frameKeys).toEqual(oracleKeys);
+    expect(frameKeys.indexOf("workspaceHookAdmission")).toBeLessThan(
+      frameKeys.indexOf("workflowRuns"),
+    );
+
+    // 反向到达：workflowRun.updated 先引入 workflowRuns 键，其后到达的新状态键缀在其后。
+    const reverseDeltas: ConversationDelta[] = [
+      runBirth("run-order", 2),
+      { op: "state.updated", patch: { workspaceHookAdmission: null } },
+    ];
+    const reverse = expectFrameEquivalence(stripped as ConversationSnapshot, reverseDeltas);
+    const reverseKeys = Object.keys(reverse.frame as Record<string, unknown>);
+    expect(reverseKeys).toEqual(Object.keys(reverse.oracle as Record<string, unknown>));
+    expect(reverseKeys.indexOf("workflowRuns")).toBeLessThan(
+      reverseKeys.indexOf("workspaceHookAdmission"),
+    );
+  });
+
+  it("clears workflowRuns on an explicitly present undefined patch value, like the reference", () => {
+    // 公开 schema/type 允许显式 undefined：裁判 {...snapshot, ...patch} 会把该键整体置 undefined
+    // （键仍在、值被清）；候选的 !== undefined 检查不得把它当成“键缺席”而保留旧值。
+    const base = {
+      ...makeSnapshot(),
+      workflowRuns: { revision: 5, runs: [] },
+    } as ConversationSnapshot;
+    const clearingDelta = {
+      op: "state.updated",
+      patch: { workflowRuns: undefined },
+    } as unknown as ConversationDelta;
+    // 前提自检：线上 schema 确实放行显式 undefined（评审断言的公开契约）。
+    expect(conversationDeltaSchema.safeParse(clearingDelta).success).toBe(true);
+
+    const { frame, oracle } = expectFrameEquivalence(base, [clearingDelta]);
+    expect(oracle.workflowRuns).toBeUndefined();
+    expect(frame.workflowRuns).toBeUndefined();
+
+    // 清除后同帧/后续 workflowRun.updated 在 undefined 上重新出生（与裁判一致）。
+    expectFrameEquivalence(base, [clearingDelta, runBirth("run-reborn", 6)]);
+    expectFrameEquivalence(base, [runBirth("run-keep", 6), clearingDelta]);
+  });
+
+  it("retains and freezes nested toolCall.output across consecutive output.text updates", () => {
+    const window = makeWindow();
+    const tools = window.filter((row) => row.kind === "toolCall") as Extract<
+      ConversationRow,
+      { kind: "toolCall" }
+    >[];
+    // tools[0] 已带 output {text:"已有输出"}；tools[1] 带 display，用于嵌套引用保留断言。
+    tools[1]!.output = {
+      text: "B0",
+      display: {
+        kind: "file_diff",
+        filePath: "x.ts",
+        additions: 1,
+        deletions: 0,
+        structuredPatch: [],
+      },
+    };
+    const snapshot = makeSnapshot(window);
+    const outputText = (rowId: number, append: string): ConversationDelta => ({
+      op: "row.delta",
+      rowId,
+      path: "output.text",
+      append,
+    });
+
+    // 连续两次发布都命中同一 tool 行的 output.text。
+    const first = applyConversationFrame(snapshot, [outputText(tools[0]!.rowId, "+1")]);
+    expect(JSON.stringify(first)).toBe(
+      JSON.stringify(applyConversationDeltas(snapshot, [outputText(tools[0]!.rowId, "+1")])),
+    );
+    const second = applyConversationFrame(first, [
+      outputText(tools[0]!.rowId, "+2"),
+      outputText(tools[1]!.rowId, "+B"),
+    ]);
+    expect(JSON.stringify(second)).toBe(
+      JSON.stringify(
+        applyConversationDeltas(first, [
+          outputText(tools[0]!.rowId, "+2"),
+          outputText(tools[1]!.rowId, "+B"),
+        ]),
+      ),
+    );
+
+    // 入参与已发布快照的嵌套 output 不被后续帧修改。
+    expect(tools[0]!.output?.text).toBe("已有输出");
+    const firstRowAfterSecond = second.rows.window.find(
+      (row) => row.rowId === tools[0]!.rowId,
+    ) as Extract<ConversationRow, { kind: "toolCall" }>;
+    expect(firstRowAfterSecond.output?.text).toBe("已有输出+1+2");
+    expect(
+      (
+        first.rows.window.find((row) => row.rowId === tools[0]!.rowId) as Extract<
+          ConversationRow,
+          { kind: "toolCall" }
+        >
+      ).output?.text,
+    ).toBe("已有输出+1");
+
+    // 未触及的 tool 行整行（含嵌套 output）保持 Object.is。
+    expect(second.rows.window.find((row) => row.rowId === tools[2]!.rowId)).toBe(tools[2]);
+
+    // 被更新行的 output 外壳换新，但未变的嵌套子值（display）保留引用——与
+    // {...row.output, text} 的裁判语义一致。
+    const secondToolB = second.rows.window.find((row) => row.rowId === tools[1]!.rowId) as Extract<
+      ConversationRow,
+      { kind: "toolCall" }
+    >;
+    expect(secondToolB.output).not.toBe(tools[1]!.output);
+    expect(secondToolB.output?.display).toBe(tools[1]!.output?.display);
+
+    // 深冻结输入上的连续 output.text 更新（多 op 单帧 + 跨帧）不抛错、结果与裁判一致。
+    const frozen = JSON.parse(JSON.stringify(snapshot)) as ConversationSnapshot;
+    const frozenDeltas = JSON.parse(
+      JSON.stringify([
+        outputText(tools[0]!.rowId, "+f1"),
+        outputText(tools[0]!.rowId, "+f2"),
+        outputText(tools[1]!.rowId, "+fB"),
+      ]),
+    ) as ConversationDelta[];
+    deepFreeze(frozen);
+    for (const delta of frozenDeltas) deepFreeze(delta);
+    const frozenResult = applyConversationFrame(frozen, frozenDeltas);
+    expect(frozenResult).toEqual(applyConversationDeltas(snapshot, frozenDeltas));
+  });
+
   it("rebuilds the lookup index after removals, appends and defensive window replacement", () => {
     const snapshot = makeSnapshot();
     const window = snapshot.rows.window;

@@ -7,6 +7,7 @@ export { PluginUiToolCallBlock, shouldRenderPluginUi } from "./PluginUiToolCallB
 export { formatPluginDisplayName } from "./domain/pluginDisplayName.js";
 export {
   isPluginUiPinnedToolRow,
+  isPluginUiPinSensitiveRow,
   type PluginUiRowPinContext,
   type PluginUiRowPinResolver,
 } from "./domain/pluginUiRowPolicy.js";

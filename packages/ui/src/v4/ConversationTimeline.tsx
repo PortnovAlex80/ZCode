@@ -509,6 +509,21 @@ function ConversationTimelineImpl({
   // 展示可见性 = 宿主展示 ∧ 文档可见。隐藏期间仅冻结展示推导输入；本组件不持有
   // 订阅（rows 由宿主继续实时下发），控制面（rowsRef/回调）始终读最新值。
   const presented = useCombinedPresentationVisibility(presentationVisible);
+  // 复核 #2 发现 6：隐藏期间挂起所有展示几何回调（宽度/测高/吸底的同步测量路径）；
+  // 恢复展示时若隐藏期间发生过几何变化，按同一处理函数补一次重测（不移除 flushSync，
+  // 不改 resize 语义——只是把隐藏期的测量推迟到 reveal 边界）。display:none →
+  // shown 的 ResizeObserver 重新派发也会走同一恢复路径。
+  const presentedRef = useRef(presented);
+  presentedRef.current = presented;
+  const pendingRevealRemeasureRef = useRef(false);
+  const widthChangeHandlerRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!presented) return;
+    if (pendingRevealRemeasureRef.current) {
+      pendingRevealRemeasureRef.current = false;
+      widthChangeHandlerRef.current?.();
+    }
+  }, [presented]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headerSlotRef = useRef<HTMLDivElement>(null);
   // headerSlot 高度参与虚拟窗口换算（scrollMargin），必须随内容与宽度变化实时跟进，
@@ -525,6 +540,9 @@ function ConversationTimelineImpl({
       return;
     }
     const sync = () => {
+      // 发现 6：隐藏（display:none）下量高只会得到 0 并抖动 state；跳过，reveal 时
+      // ResizeObserver 随真实尺寸重新派发（opacity 类隐藏尺寸不变、本就无需同步）。
+      if (!presentedRef.current) return;
       const next = element.getBoundingClientRect().height;
       setHeaderSlotHeight((current) => (Math.abs(current - next) < 0.5 ? current : next));
     };
@@ -574,6 +592,15 @@ function ConversationTimelineImpl({
   if (renderUnitsBuilderRef.current === null) {
     renderUnitsBuilderRef.current = createCachedConversationTurnRenderUnitsBuilder();
   }
+  // 复核 #2 发现 6：expiry 扫描提前到 renderUnits memo 之前——reveal 提交必须用新鲜
+  // 时钟解析错过的到期边界（隐藏期间 rows/options 可以完全不变，memo 若不感知
+  // presented 就不会重算）。revealResolvesExpiry 只在「确有未到期 Highspeed 卡」时随
+  // presented 翻转：无待决到期时聚焦/可见性抖动不触发任何历史重建（不新增全历史定时器）。
+  const nextHighspeedExpiryMs = useMemo(
+    () => resolveNextHighspeedExpiryMs(presentedRows, liveNowMs),
+    [liveNowMs, presentedRows],
+  );
+  const revealResolvesExpiry = presented && nextHighspeedExpiryMs !== undefined;
   const { renderUnits, snapshotNowMs } = useMemo(() => {
     const nowMs = Math.max(liveNowMs, Date.now());
     return {
@@ -583,6 +610,9 @@ function ConversationTimelineImpl({
           nowMs,
           sessionPhase,
           pluginUiPinResolver,
+          // 复核 #2 发现 1：resolver 失效按语义签名（turnId 序列 + pin-sensitive 行引用
+          // + 手动披露版本号）判定，而不是随流式 token 变化的 resolver 函数身份。
+          pluginUiDisclosureVersion,
           scopeKey: `${sessionKey}:${rowContext.logEpoch ?? ""}`,
         }),
         presentedRows,
@@ -593,6 +623,7 @@ function ConversationTimelineImpl({
     liveNowMs,
     pluginUiPinResolver,
     presentedRows,
+    revealResolvesExpiry,
     rowContext.logEpoch,
     sessionKey,
     sessionPhase,
@@ -602,10 +633,6 @@ function ConversationTimelineImpl({
   const { virtualizedUnits, liveUnit, liveUnitIndex } = useMemo(
     () => splitConversationTimelineLiveTail(renderUnits),
     [renderUnits],
-  );
-  const nextHighspeedExpiryMs = useMemo(
-    () => resolveNextHighspeedExpiryMs(presentedRows, liveNowMs),
-    [liveNowMs, presentedRows],
   );
   const clockRowsByTurnId = useMemo(() => {
     const byTurnId = new Map<string, ConversationRow[]>();
@@ -1153,7 +1180,13 @@ function ConversationTimelineImpl({
     const messageLayer = messageLayerRef.current;
     if (!scrollElement || !messageLayer) return;
 
-    const sync = () => syncMessageLayerMask(scrollElement);
+    // 发现 6：mask 同步要读 scrollTop/clientHeight/scrollHeight（几何读）。隐藏期间
+    // 跳过；display:none → shown 时 ResizeObserver 以真实尺寸重新派发，opacity 类
+    // 隐藏几何本就不变。
+    const sync = () => {
+      if (!presentedRef.current) return;
+      syncMessageLayerMask(scrollElement);
+    };
     sync();
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver(sync);
@@ -1269,7 +1302,14 @@ function ConversationTimelineImpl({
     let observedViewportHeight = scrollRef.current?.clientHeight ?? 0;
     let observeContentFrame: number | null = null;
     let disposed = false;
-    const observer = new ResizeObserver(() => {
+    // 发现 6：隐藏期间挂起同步测量/吸底批次（display:none 只会量到 0），只登记
+    // 「reveal 需要补测」；恢复展示由 presented 翻转的 effect 调用同一处理函数补测。
+    // flushSync / unobserve-remeasure 语义保持不变——推迟的只是执行时机。
+    const handleWidthChange = () => {
+      if (!presentedRef.current) {
+        pendingRevealRemeasureRef.current = true;
+        return;
+      }
       const nextWidth = contentColumn.clientWidth;
       const element = scrollRef.current;
       if (!element) return;
@@ -1355,17 +1395,24 @@ function ConversationTimelineImpl({
         stableContentWidthRef.current = contentColumn.clientWidth;
         contentWidthResizeActiveRef.current = false;
         contentWidthResizeSettleTimerRef.current = null;
-        if (followingRef.current) {
+        // 发现 6：settle 时已隐藏则不写 scrollTop；display:none 的 clientWidth=0 会
+        // 让 reveal 时 ResizeObserver 以真实宽度重新派发并走完整重测路径。
+        if (followingRef.current && presentedRef.current) {
           scrollToBottom();
         }
       }, CONTENT_WIDTH_RESIZE_SETTLE_MS);
-    });
+    };
+    const observer = new ResizeObserver(handleWidthChange);
+    widthChangeHandlerRef.current = handleWidthChange;
     observer.observe(contentColumn);
     if (scrollRef.current) observer.observe(scrollRef.current);
 
     return () => {
       disposed = true;
       observer.disconnect();
+      if (widthChangeHandlerRef.current === handleWidthChange) {
+        widthChangeHandlerRef.current = null;
+      }
       if (observeContentFrame !== null) window.cancelAnimationFrame(observeContentFrame);
       if (contentWidthResizeSettleTimerRef.current !== null) {
         window.clearTimeout(contentWidthResizeSettleTimerRef.current);
@@ -1400,7 +1447,10 @@ function ConversationTimelineImpl({
     // 旧 observer 只缓存高度，正文会先把 loading 槽顶下去，后续 commit 才补 scrollTop。
     // ResizeObserver 在绘制前拿到真实高度，这里仅在仍拥有 following 滚动权时同步吸底；
     // 用户已经上滚（包括 scroll event 尚未入账的竞态）则只缓存，不夺回阅读位置。
+    // 发现 6：隐藏期间挂起（测高/对账/吸底都是展示几何工作）；display:none → shown
+    // 的 ResizeObserver 重新派发会补测并重新对账。
     const observer = new ResizeObserver((entries) => {
+      if (!presentedRef.current) return;
       const nextHeight = cacheHeight(entries[0]);
       if (nextHeight === observedHeight) return;
       observedHeight = nextHeight;
@@ -1912,7 +1962,10 @@ function ConversationTimelineImpl({
   // terminal 会同时迁移 live tail、自动折叠历史并
   // 触发 virtualizer 多阶段测高；这些 scrollTop 回退属于布局，必须保持 following。
   // 若同帧有用户向上滚动，capture handler 会先登记 awayFromBottom，本 effect 必须让位。
+  // 发现 6：本 effect 依赖 presented——隐藏期间跳过几何对账/贴底；reveal 提交
+  // （presented 翻转）按隐藏期间累计的最新内容一次性重新锚定。
   useLayoutEffect(() => {
+    if (!presented) return;
     const element = scrollRef.current;
     markLayoutScrollGuard();
     if (element) {
