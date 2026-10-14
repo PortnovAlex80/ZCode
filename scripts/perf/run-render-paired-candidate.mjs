@@ -181,7 +181,7 @@ function assertDeepEqual(actual, expected, label) {
   }
 }
 
-function buildScenarioSuite({ modules, args, turns, environment }) {
+function buildScenarioSuite({ modules, args, turns }) {
   const { fixtures, applyConversationDeltas, applyConversationFrame, coalesceConversationDeltas } =
     modules;
   const { buildConversationTurnRenderUnits, createCachedConversationTurnRenderUnitsBuilder } =
@@ -578,7 +578,7 @@ async function main() {
   const suites = [];
   const trialsLog = [];
   for (const turns of args.turns) {
-    const suite = buildScenarioSuite({ modules, args, turns, environment });
+    const suite = buildScenarioSuite({ modules, args, turns });
     const rows = [];
     const perTrial = [];
     for (const scenario of suite.scenarios) {
