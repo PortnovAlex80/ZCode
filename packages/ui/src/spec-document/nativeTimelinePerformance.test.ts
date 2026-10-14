@@ -183,10 +183,17 @@ test("mounted turn clock pauses hidden documents, catches up on show and dispose
   let clockComputations = 0;
   const intervals = new Map<number, () => void>();
   const listeners = new Map<string, () => void>();
+  // Wave A × U-06/U-07 集成：时钟可见性改读展示宿主文档的 visibilityState（不再读
+  // 全局 document.hidden）。主文档语义 = usePresentationDocument 返回主文档本身。
   const document = {
     hidden: false,
+    visibilityState: "visible",
     addEventListener: (name: string, handler: () => void) => listeners.set(name, handler),
     removeEventListener: (name: string) => listeners.delete(name),
+  };
+  const setHidden = (hidden: boolean) => {
+    document.hidden = hidden;
+    document.visibilityState = hidden ? "hidden" : "visible";
   };
   const component = runInNewContext(executable("ConversationClockedTurnGroup"), {
     memo: (fn: unknown) => fn,
@@ -200,6 +207,7 @@ test("mounted turn clock pauses hidden documents, catches up on show and dispose
       effect = fn;
     },
     useMemo: (fn: () => unknown) => fn(),
+    usePresentationDocument: () => document,
     refreshConversationTurnClock: (unit: unknown) => {
       clockComputations++;
       return unit;
@@ -227,11 +235,11 @@ test("mounted turn clock pauses hidden documents, catches up on show and dispose
   assert.equal(clockComputations, 1, "clock advances only after its structural snapshot");
   const dispose = effect()!;
   assert.equal(intervals.size, 1);
-  document.hidden = true;
+  setHidden(true);
   listeners.get("visibilitychange")!();
   assert.equal(intervals.size, 0);
   const beforeShow = stateUpdates;
-  document.hidden = false;
+  setHidden(false);
   listeners.get("visibilitychange")!();
   assert.equal(stateUpdates, beforeShow + 1, "show catches up immediately");
   assert.equal(intervals.size, 1);
@@ -241,12 +249,74 @@ test("mounted turn clock pauses hidden documents, catches up on show and dispose
   component({ unit: { isRunning: false } });
   assert.equal(effect(), undefined);
   assert.equal(intervals.size, 0);
-  document.hidden = true;
+  setHidden(true);
   component({ unit: { isRunning: true } });
   const disposeHidden = effect()!;
   assert.equal(intervals.size, 0, "initially hidden documents schedule no duration work");
   disposeHidden();
   assert.equal(listeners.size, 0);
+});
+
+test("mounted turn clock follows the presentation host document (PiP), not the main document", () => {
+  let effect!: () => (() => void) | undefined;
+  let intervalStarts = 0;
+  const intervals = new Map<number, () => void>();
+  const mainListeners = new Map<string, () => void>();
+  const pipListeners = new Map<string, () => void>();
+  const mainDocument = {
+    hidden: false,
+    visibilityState: "visible",
+    addEventListener: (name: string, handler: () => void) => mainListeners.set(name, handler),
+    removeEventListener: (name: string) => mainListeners.delete(name),
+  };
+  // PiP 宿主文档：聊天被弹出为独立 OS 窗口后 usePresentationDocument 返回它。
+  const pipDocument = {
+    visibilityState: "visible",
+    addEventListener: (name: string, handler: () => void) => pipListeners.set(name, handler),
+    removeEventListener: (name: string) => pipListeners.delete(name),
+  };
+  const component = runInNewContext(executable("ConversationClockedTurnGroup"), {
+    memo: (fn: unknown) => fn,
+    useState: () => [4000, () => {}],
+    useEffect: (fn: typeof effect) => {
+      effect = fn;
+    },
+    useMemo: (fn: () => unknown) => fn(),
+    usePresentationDocument: () => pipDocument,
+    refreshConversationTurnClock: (unit: unknown) => unit,
+    ConversationTurnGroup: () => null,
+    React: { createElement: () => null },
+    RUNNING_WORK_DURATION_TICK_MS: 1000,
+    document: mainDocument,
+    window: {
+      setInterval: (fn: () => void) => {
+        intervalStarts++;
+        intervals.set(intervalStarts, fn);
+        return intervalStarts;
+      },
+      clearInterval: (id: number) => intervals.delete(id),
+    },
+  }) as (props: object) => unknown;
+  component({ unit: { isRunning: true }, snapshotNowMs: 5000, clockRows: [] });
+  const dispose = effect()!;
+  assert.equal(intervals.size, 1, "running clock ticks while the PiP document is visible");
+  assert.equal(pipListeners.size, 1, "visibility listener attaches to the PiP document");
+  assert.equal(mainListeners.size, 0, "main document gets no listener while popped out");
+  // 主文档最小化（隐藏）不得冻结 PiP 里仍展示的会话时钟。
+  mainDocument.hidden = true;
+  mainDocument.visibilityState = "hidden";
+  mainListeners.get("visibilitychange")?.();
+  assert.equal(intervals.size, 1, "main-document hide does not pause the PiP-hosted clock");
+  // PiP 文档隐藏 → 停表；恢复 → 重新起表。
+  pipDocument.visibilityState = "hidden";
+  pipListeners.get("visibilitychange")!();
+  assert.equal(intervals.size, 0, "PiP document hide pauses the clock");
+  pipDocument.visibilityState = "visible";
+  pipListeners.get("visibilitychange")!();
+  assert.equal(intervals.size, 1, "PiP document show restarts the clock");
+  dispose();
+  assert.equal(intervals.size, 0);
+  assert.equal(pipListeners.size, 0, "dispose removes the PiP listener");
 });
 
 test("duration ticks stay inside mounted turns while upstream plugin and expiry boundaries remain", () => {
