@@ -142,6 +142,10 @@ async function loadRepositoryModules() {
     asUrl("packages/ui/test/support/pluginUiInstancePolicyFrozenBaseline.ts"),
     import.meta.url,
   );
+  const storeModule = await tsImport(
+    asUrl("packages/ui/src/v4/conversationProjectionStore.ts"),
+    import.meta.url,
+  );
   return {
     fixtures,
     applyConversationDeltas: applyModule.applyConversationDeltas,
@@ -152,6 +156,7 @@ async function loadRepositoryModules() {
       cacheModule.createCachedConversationTurnRenderUnitsBuilder,
     deriveLogicalUiInstances: policyModule.deriveLogicalUiInstances,
     deriveLogicalUiInstancesBaseline: policyBaselineModule.deriveLogicalUiInstancesBaseline,
+    ConversationProjectionStore: storeModule.ConversationProjectionStore,
   };
 }
 
@@ -294,6 +299,81 @@ function buildScenarioSuite({ modules, args, turns }) {
         `cached render units @${turns}`,
       );
     }
+  }
+
+  // —— 复核 #2 发现 8：真实 Timeline 准备链（推导 → resolver → render units）——
+  // 与 ConversationTimeline 的实际接线同构：每次 build 新建 resolver 闭包（身份每次都变，
+  // 复核 #2 发现 1 的触发形态），缓存臂额外携带 pluginUiDisclosureVersion（稳态常量）。
+  const buildChainResolver = (derivation) => (toolCallId) => ({
+    disposition: derivation.byToolCallId[toolCallId],
+  });
+  {
+    const beforeUnits = buildConversationTurnRenderUnits(streamingWindows[0], {
+      ...BUILD_OPTIONS,
+      pluginUiPinResolver: buildChainResolver(
+        deriveLogicalUiInstancesBaseline(streamingWindows[0]),
+      ),
+    });
+    const chainCache = createCachedConversationTurnRenderUnitsBuilder();
+    chainCache.build(streamingWindows[0], {
+      ...CACHE_OPTIONS,
+      pluginUiPinResolver: buildChainResolver(deriveLogicalUiInstances(streamingWindows[0])),
+      pluginUiDisclosureVersion: 7,
+    });
+    const afterUnits = chainCache.build(streamingWindows[0], {
+      ...CACHE_OPTIONS,
+      pluginUiPinResolver: buildChainResolver(deriveLogicalUiInstances(streamingWindows[0])),
+      pluginUiDisclosureVersion: 7,
+    });
+    assertDeepEqual(afterUnits, beforeUnits, `timeline real chain @${turns}`);
+  }
+
+  // —— 复核 #2 发现 8：终态 Highspeed 标记输出（卡片已过期，footer 已挂）——
+  // 形状取自 v4ConversationTurnRenderUnitsCache.test.ts 的卡片 fixture；nowMs 取过期后
+  // （marked 路径活跃：markHighspeedOutputFooterUnits + 发现 5 的输出记忆化都在计时区内）。
+  const HIGH_NOW_MS = 1_750_090_000_000;
+  let highspeedCardSeq = 0;
+  const highspeedCard = () => {
+    highspeedCardSeq += 1;
+    return {
+      schemaVersion: 1,
+      cardId: `card-${turns}-${highspeedCardSeq}`,
+      taskId: `task-${turns}`,
+      provider: "zai",
+      model: "glm-5.3",
+      issuedAt: HIGH_NOW_MS - 60_000,
+      expiresAt: HIGH_NOW_MS - 10_000,
+      regularTps: 10,
+      highspeedTps: 100,
+      outputTokens: 2000,
+      durationMs: 20_000,
+    };
+  };
+  let highspeedInputSeq = 0;
+  const highspeedRows = generated.rows.map((row) => {
+    if (row.kind !== "userInput") return row;
+    highspeedInputSeq += 1;
+    return highspeedInputSeq % 8 === 0 ? { ...row, highspeed: highspeedCard() } : row;
+  });
+  let highspeedMarkedCount = 0;
+  {
+    const markedBefore = buildConversationTurnRenderUnits(highspeedRows, {
+      nowMs: HIGH_NOW_MS,
+      sessionPhase: "running",
+    });
+    highspeedMarkedCount = markedBefore.filter(
+      (unit) => unit.showHighspeedOutputFooter === true,
+    ).length;
+    if (highspeedMarkedCount === 0) {
+      throw new Error(`highspeed fixture produced no marked outputs @${turns}`);
+    }
+    const markedCache = createCachedConversationTurnRenderUnitsBuilder();
+    markedCache.build(highspeedRows, { nowMs: HIGH_NOW_MS, scopeKey: `hs:${turns}` });
+    const markedAfter = markedCache.build(highspeedRows, {
+      nowMs: HIGH_NOW_MS,
+      scopeKey: `hs:${turns}`,
+    });
+    assertDeepEqual(markedAfter, markedBefore, `highspeed marked outputs @${turns}`);
   }
 
   const unitCount = (units) => units.length;
@@ -517,6 +597,65 @@ function buildScenarioSuite({ modules, args, turns }) {
       },
     },
     {
+      id: "timeline-real-chain-streaming",
+      boundary: "actual Timeline preparation (derivation -> resolver -> render units)",
+      note: "复核 #2 发现 8：真实链路——每 build 新建 resolver 闭包（发现 1 触发形态）；after=推导(现实现)+缓存 build(带 disclosure version)",
+      before: {
+        setup: () => ({}),
+        run: (context, index) => {
+          const window = streamingWindows[index % streamingWindows.length];
+          const derivation = deriveLogicalUiInstancesBaseline(window);
+          return unitCount(
+            buildConversationTurnRenderUnits(window, {
+              ...BUILD_OPTIONS,
+              pluginUiPinResolver: buildChainResolver(derivation),
+            }),
+          );
+        },
+      },
+      after: {
+        setup: () => ({ builder: createCachedConversationTurnRenderUnitsBuilder() }),
+        run: (context, index) => {
+          const window = streamingWindows[index % streamingWindows.length];
+          const derivation = deriveLogicalUiInstances(window);
+          return unitCount(
+            context.builder.build(window, {
+              ...CACHE_OPTIONS,
+              pluginUiPinResolver: buildChainResolver(derivation),
+              pluginUiDisclosureVersion: 7,
+            }),
+          );
+        },
+      },
+    },
+    {
+      id: "highspeed-marked-outputs",
+      boundary: "complete pure presentation preparation (Highspeed footer marked)",
+      note: `终态过期卡片 ${highspeedMarkedCount} 个已标记输出在计时区内（markHighspeedOutputFooterUnits + 发现 5 输出记忆化）；after=暖缓存稳态`,
+      before: {
+        setup: () => ({}),
+        run: () =>
+          unitCount(
+            buildConversationTurnRenderUnits(highspeedRows, {
+              nowMs: HIGH_NOW_MS,
+              sessionPhase: "running",
+            }),
+          ),
+      },
+      after: {
+        setup: () => ({
+          builder: createCachedConversationTurnRenderUnitsBuilder(),
+        }),
+        run: (context) =>
+          unitCount(
+            context.builder.build(highspeedRows, {
+              nowMs: HIGH_NOW_MS,
+              scopeKey: `hs:${turns}`,
+            }),
+          ),
+      },
+    },
+    {
       id: "noise-full-builder-selfpair",
       boundary: "noise reference (baseline/baseline)",
       before: {
@@ -539,7 +678,7 @@ function buildScenarioSuite({ modules, args, turns }) {
   };
 }
 
-function renderReport({ args, environment, suites, trialsLog }) {
+function renderReport({ args, environment, suites, trialsLog, storeResults }) {
   const lines = [];
   lines.push(`# 渲染性能候选：配对测量报告（Wave 3）`);
   lines.push("");
@@ -567,8 +706,136 @@ function renderReport({ args, environment, suites, trialsLog }) {
   lines.push("| --- | --- |");
   for (const entry of trialsLog) lines.push(`| ${entry.trial} | ${entry.order} |`);
   lines.push("");
+  if (storeResults.length > 0) {
+    lines.push(`## 完整 store 边界（复核 #2 发现 8；候选绝对值，非配对臂）`);
+    lines.push("");
+    lines.push(
+      "真实 ConversationProjectionStore（fake transport + 直驱 handleFrame）：冷订阅 → 快照帧 → " +
+        "逐帧投递 1-op row.delta 逻辑帧（累积流式，seq 连续）。计时覆盖 store 的完整帧路径" +
+        "（applyConversationFrame + shareDeltaRows 共享扫描 + 发布）；连接/快照 setup 在计时区外。" +
+        "同树内不存在改造前 store 实现，此边界为候选绝对成本；before/after 归因见 helper-only apply 配对臂。",
+    );
+    lines.push("");
+    lines.push("| 轮数 | store 已加载 rows | 帧 p50 | 帧 p95 | 帧 min | 帧 max |");
+    lines.push("| --- | ---: | ---: | ---: | ---: | ---: |");
+    for (const result of storeResults) {
+      lines.push(
+        `| ${result.turns} | ${result.loadedRows} | ${formatMs(result.p50)} | ${formatMs(result.p95)} | ${formatMs(result.min)} | ${formatMs(result.max)} |`,
+      );
+    }
+    lines.push("");
+  }
   lines.push(`详细逐 trial p50/p95 与 spread 见同目录 JSON（报告文件旁 \`.json\` 后缀）。`);
   return lines.join("\n");
+}
+
+/**
+ * 复核 #2 发现 8：完整 store 边界（候选绝对值）。
+ * fake transport 实现 store.connect 实际触达的最小方法面（subscribe/activate/unsubscribe/
+ * resync/onFrame/onFault/onRuntimeRestart/sendCommand）；帧经 handleFrame 直投。
+ * 快照带 seq 基座，delta 帧 fromSeq/toSeq 严格连续（gap/dup 过滤不拦截）。
+ */
+async function measureStoreBoundary({ modules, generated, tail, args, turns }) {
+  const { ConversationProjectionStore } = modules;
+  const frameListeners = new Set();
+  const fakeTransport = {
+    async subscribe() {
+      return { ack: { subscriptionId: "bench-sub", mode: "snapshot", logEpoch: "epoch-1" } };
+    },
+    activate() {},
+    async unsubscribe() {},
+    async resync(params) {
+      return {
+        ack: { subscriptionId: params.subscriptionId, mode: "resume", logEpoch: "epoch-1" },
+      };
+    },
+    async sendCommand(envelope) {
+      return { commandId: envelope.commandId, status: "accepted", revisionAtDecision: 1 };
+    },
+    async queryCommands() {
+      return { results: [] };
+    },
+    onFrame(listener) {
+      frameListeners.add(listener);
+      return () => frameListeners.delete(listener);
+    },
+    onFault() {
+      return () => {};
+    },
+    onAssemblyFault() {
+      return () => {};
+    },
+    onRuntimeRestart() {
+      return () => {};
+    },
+  };
+  const topic = "conversation/bench";
+  const store = new ConversationProjectionStore(topic, fakeTransport);
+  const offState = store.subscribe(() => {});
+  const headDeltas = tail.deltas.filter((delta) => delta.op === "row.appended");
+  const baseRows = [...generated.rows];
+  const snapshotSeq = 1000;
+  const snapshotFrame = {
+    topic,
+    subscriptionId: "bench-sub",
+    fromSeq: 0,
+    toSeq: snapshotSeq,
+    sentAt: 1,
+    payload: {
+      kind: "snapshot",
+      snapshot: {
+        protocolVersion: 1,
+        sessionId: "bench-session",
+        logEpoch: "epoch-1",
+        seq: snapshotSeq,
+        revision: 1,
+        control: { phase: "running", sessionEnded: false, canStop: true, stopState: "idle", stopTargetKind: "unknown", activeWorks: [], lastError: null, apiRetry: null },
+        rows: {
+          window: [...baseRows, ...headDeltas.map((delta) => delta.row)],
+          totalCount: baseRows.length + headDeltas.length,
+          firstRowId: baseRows[0]?.rowId ?? null,
+        },
+      },
+    },
+  };
+  await store.connect();
+  store.handleFrame(snapshotFrame);
+  const streamingRowId = tail.streamingRowId;
+  const appendChunk = tail.deltas.find((delta) => delta.op === "row.delta")?.append ?? "x";
+  const deltaFrames = [];
+  for (let index = 0; index < args.warmup + args.ticks; index += 1) {
+    deltaFrames.push({
+      topic,
+      subscriptionId: "bench-sub",
+      fromSeq: snapshotSeq + index,
+      toSeq: snapshotSeq + index + 1,
+      sentAt: 1,
+      payload: {
+        kind: "deltas",
+        deltas: [{ op: "row.delta", rowId: streamingRowId, path: "text", append: appendChunk }],
+      },
+    });
+  }
+  let sink = 0;
+  for (let index = 0; index < args.warmup; index += 1) {
+    store.handleFrame(deltaFrames[index]);
+    sink += store.getState().snapshot?.rows.window.length ?? 0;
+  }
+  const samples = [];
+  for (let index = args.warmup; index < deltaFrames.length; index += 1) {
+    const start = performance.now();
+    store.handleFrame(deltaFrames[index]);
+    samples.push(performance.now() - start);
+    sink += store.getState().snapshot?.rows.window.length ?? 0;
+  }
+  const stats = statsOf(samples);
+  const loadedRows =
+    store.getState().snapshot?.rows.window.length ??
+    snapshotFrame.payload.snapshot.rows.window.length;
+  await store.close();
+  offState();
+  if (sink <= 0) throw new Error(`store boundary sink not consumed @${turns}`);
+  return { turns, loadedRows, ...stats };
 }
 
 async function main() {
@@ -577,6 +844,7 @@ async function main() {
   const modules = await loadRepositoryModules();
   const suites = [];
   const trialsLog = [];
+  const storeResults = [];
   for (const turns of args.turns) {
     const suite = buildScenarioSuite({ modules, args, turns });
     const rows = [];
@@ -632,12 +900,21 @@ async function main() {
     suite.perTrial = perTrial;
     suites.push(suite);
   }
-  const report = renderReport({ args, environment, suites, trialsLog });
+  // 复核 #2 发现 8：完整 store 边界（每尺寸一次；候选绝对值）。
+  for (const turns of args.turns) {
+    const generated = modules.fixtures.generateV4ReplayRows({ turns, seed: args.seed });
+    const tail = modules.fixtures.buildV4ReplayStreamTail({
+      chunks: 48,
+      baseRowId: generated.rows.at(-1).rowId,
+    });
+    storeResults.push(await measureStoreBoundary({ modules, generated, tail, args, turns }));
+  }
+  const report = renderReport({ args, environment, suites, trialsLog, storeResults });
   await mkdir(path.dirname(args.report), { recursive: true });
   await writeFile(args.report, `${report}\n`, "utf8");
   await writeFile(
     `${args.report}.json`,
-    JSON.stringify({ args, environment, suites }, null, 2),
+    JSON.stringify({ args, environment, suites, storeResults }, null, 2),
     "utf8",
   );
   console.log(report);
