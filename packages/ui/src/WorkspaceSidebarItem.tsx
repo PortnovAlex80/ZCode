@@ -1,5 +1,4 @@
 /* eslint-disable max-lines -- workspace 行同时承载折叠、远端状态和快捷操作，先保持同文件收口。 */
-import { useSpecWindowLocation } from "@/spec-document/useSpecWindowLocations.js";
 import {
   memo,
   useCallback,
@@ -89,7 +88,6 @@ import {
   scanWindowsReservedDeviceNameFiles,
 } from "@/lib/workspaceRemovalSafety.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
-import { usePlatform } from "@/hooks/usePlatform.js";
 import { toast } from "@/components/ui/toast.js";
 
 export type SortableBindings = Pick<ReturnType<typeof useSortable>, "attributes" | "listeners">;
@@ -193,7 +191,6 @@ export const WorkspaceSidebarItem = memo(function WorkspaceSidebarItem({
   isDragging?: boolean;
 }) {
   const { intl } = useZCodeIntl();
-  const specWindowOpen = useSpecWindowLocation(tab.workspacePath);
   const workspaceZCodeState = useZCodeSessionStore((state) =>
     selectWorkspaceZCodeState(state, tab.workspacePath, tab.workspaceIdentity),
   );
@@ -206,7 +203,6 @@ export const WorkspaceSidebarItem = memo(function WorkspaceSidebarItem({
     (state) => state.removeOptimisticTaskListItem,
   );
   const setTaskUnreadIndicator = useZCodeSessionStore((state) => state.setTaskUnreadIndicator);
-  const projectWindowPlatform = usePlatform();
   const services = useWorkspaceServices(
     tab.workspacePath,
     tab.remoteSessionId,
@@ -754,15 +750,6 @@ export const WorkspaceSidebarItem = memo(function WorkspaceSidebarItem({
       <div className="min-w-0 truncate text-ui-base text-foreground-subtle">
         {workspaceSidebarLabel}
       </div>
-      {specWindowOpen ? (
-        <span
-          title="Open in a separate window"
-          aria-label="Open in a separate window"
-          className="shrink-0 text-violet-400"
-        >
-          {"\u2197"}
-        </span>
-      ) : null}
 
       {!isExpanded && taskListHasUnread ? (
         <span
@@ -939,17 +926,6 @@ export const WorkspaceSidebarItem = memo(function WorkspaceSidebarItem({
                           </DropdownMenuTrigger>
                         </ControlHintTooltip>
                         <DropdownMenuContent align="end" onClick={handleActionMenuClick}>
-                          {projectWindowPlatform.openProjectWindow && !isRemoteWorkspace && (
-                            <DropdownMenuItem
-                              onSelect={() => {
-                                void projectWindowPlatform.openProjectWindow!({
-                                  workspacePath: tab.workspacePath,
-                                }).catch((error) => toast(String(error)));
-                              }}
-                            >
-                              Open project in window
-                            </DropdownMenuItem>
-                          )}
                           <RemoteSyncMenuItems
                             canSyncSkills={showRemoteSkillSyncAction}
                             canSyncMcp={showRemoteSkillSyncAction}

@@ -112,13 +112,6 @@ if (shouldEnableE2ETestBridge(process.env)) {
 const updateReadyCallbacks = new Set<(version: string) => void>();
 const updateStateCallbacks = new Set<(payload: UpdateStatePayload) => void>();
 const postUpdateReleaseNotesCallbacks = new Set<(payload: PostUpdateReleaseNotesPayload) => void>();
-let projectWindowReadyRequested = false;
-const projectWindowCallbacks = new Set<
-  (target: { workspacePath: string; taskId?: string; transactionId?: string }) => void
->();
-ipcRenderer.on("spec-harness:project-window-target", (_event, target) => {
-  for (const callback of projectWindowCallbacks) callback(target);
-});
 const openWorkspacePathCallbacks = new Set<(path: string) => void>();
 let latestReadyUpdateVersion: string | null = null;
 let latestUpdateState: UpdateStatePayload | null = null;
@@ -265,7 +258,6 @@ window.addEventListener("DOMContentLoaded", updateRendererProcessTitle, {
  * 通过 MessagePort RPC 访问，不再经过此 bridge。
  */
 contextBridge.exposeInMainWorld("zcode", {
-  specWindowsEnabled: process.argv.includes("--spec-harness-windows"),
   connectRemote: (
     options: RemoteTarget,
     requestId?: string,
@@ -599,69 +591,6 @@ contextBridge.exposeInMainWorld("zcode", {
     const handler = () => callback();
     ipcRenderer.on(PlatformChannels.OpenWorkspace, handler);
     return () => ipcRenderer.removeListener(PlatformChannels.OpenWorkspace, handler);
-  },
-  /** 注册 deep link 直接打开本地工作区目录回调，返回 disposer */
-  onProjectWindowsChanged: (callback: () => void) => {
-    const listener = () => callback();
-    ipcRenderer.on("spec-harness:project-windows-changed", listener);
-    return () => ipcRenderer.removeListener("spec-harness:project-windows-changed", listener);
-  },
-  projectWindowState: () => ipcRenderer.invoke("spec-harness:project-window-state"),
-  labelProjectWindow: (labels: unknown) =>
-    ipcRenderer.invoke("spec-harness:project-window-label", labels),
-  returnToMainWindow: () => ipcRenderer.invoke("spec-harness:return-to-main"),
-  acknowledgeProjectWindowTarget: (payload: unknown) =>
-    ipcRenderer.send("spec-harness:project-window-target-ack", payload),
-  specPanelAction: (action: string, payload?: unknown) => {
-    const channels: Record<string, string> = {
-      detach: "detach-panel",
-      state: "panel-detached-state",
-      reattach: "panel-reattach",
-    };
-    if (!channels[action]) return Promise.reject(new Error("Unsupported panel action"));
-    return ipcRenderer.invoke("spec-harness:" + channels[action], payload);
-  },
-  specPanelAck: (action: string, payload: unknown) => {
-    const channels: Record<string, string> = {
-      "detach-prepared": "panel-detach-prepared",
-      ready: "panel-detached-ready",
-      "reattach-quiesced": "panel-reattach-quiesced",
-      "reattach-prepared": "panel-reattach-prepared",
-      failed: "panel-transfer-failed",
-    };
-    if (!channels[action]) throw new Error("Unsupported panel acknowledgement");
-    ipcRenderer.send("spec-harness:" + channels[action], payload);
-  },
-  onSpecPanelEvent: (action: string, callback: (payload: unknown) => void) => {
-    if (
-      ![
-        "detach-prepare",
-        "detached",
-        "detach-rollback",
-        "reattach-prepare",
-        "reattach-rollback",
-        "reattached",
-      ].includes(action)
-    )
-      throw new Error("Unsupported panel event");
-    const channel = "spec-harness:panel-" + action;
-    const listener = (_event: unknown, payload: unknown) => callback(payload);
-    ipcRenderer.on(channel, listener);
-    return () => ipcRenderer.removeListener(channel, listener);
-  },
-  openProjectWindow: (target: { workspacePath: string; taskId?: string; transactionId?: string }) =>
-    ipcRenderer.invoke("spec-harness:open-project-window", target),
-  onProjectWindowTarget: (
-    callback: (target: { workspacePath: string; taskId?: string; transactionId?: string }) => void,
-  ) => {
-    projectWindowCallbacks.add(callback);
-    if (!projectWindowReadyRequested) {
-      projectWindowReadyRequested = true;
-      ipcRenderer.send("spec-harness:project-window-ready");
-    }
-    return () => {
-      projectWindowCallbacks.delete(callback);
-    };
   },
   onOpenWorkspacePath: (callback: (path: string) => void): (() => void) => {
     openWorkspacePathCallbacks.add(callback);

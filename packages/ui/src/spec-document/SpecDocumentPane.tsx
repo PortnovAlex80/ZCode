@@ -76,19 +76,6 @@ import {
   retireDocumentPaneWrites,
   type DocumentPresentationState,
 } from "./specDocumentPresentationState.js";
-import { specDocumentCleanupKey, usePanelCleanupSignal } from "./specWindowBridge.js";
-
-/**
- * 文档面板清理哨兵：作为面板根节点的最后一个 child 渲染。React 对被删除子树
- * 的被动清理按父先子后的深度优先顺序执行，最后才会访问到该哨兵；哨兵完成
- * 清理完成信号即代表整个文档面板子树（讨论面板、预览等）的被动清理已执行。
- * detach/return 的 ACK 等待该信号；源窗口面板不知道自己的 panelKey，
- * 因此按 workspace+path 作为信号键（useSpecDetachedPanels 用同一函数计算等待键）。
- */
-function DocumentCleanupSentinel({ scopeKey }: { scopeKey: string }) {
-  usePanelCleanupSignal(scopeKey);
-  return null;
-}
 
 export interface SpecDocumentPaneProps {
   workspacePath: string;
@@ -1163,14 +1150,6 @@ function Documents({
         ) : null}
         {writable && writers ? <p>Save waits for active conversations to finish.</p> : null}
       </div>
-      {document ? (
-        <DocumentCleanupSentinel
-          scopeKey={specDocumentCleanupKey(
-            workspaceIdentity?.trim() || workspacePath,
-            document.path,
-          )}
-        />
-      ) : null}
     </div>
   );
 }

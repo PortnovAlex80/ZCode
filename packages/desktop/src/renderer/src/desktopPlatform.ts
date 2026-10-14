@@ -8,25 +8,6 @@ export function createDesktopPlatform(options: {
   isLocalDevelopmentRuntime: boolean;
 }): IPlatformService {
   return {
-    specWindows: window.zcode.specWindowsEnabled
-      ? {
-          specPanelAction: (action, payload) => window.zcode.specPanelAction(action, payload),
-          specPanelAck: (action, payload) => window.zcode.specPanelAck(action, payload),
-          onSpecPanelEvent: (action, listener) => window.zcode.onSpecPanelEvent(action, listener),
-          projectWindowState: () => window.zcode.projectWindowState(),
-          onProjectWindowsChanged: (listener) => window.zcode.onProjectWindowsChanged(listener),
-          labelProjectWindow: (labels) => window.zcode.labelProjectWindow(labels),
-          returnToMainWindow: () => window.zcode.returnToMainWindow(),
-          acknowledgeProjectWindowTarget: (payload) =>
-            window.zcode.acknowledgeProjectWindowTarget(payload),
-        }
-      : undefined,
-    openProjectWindow: window.zcode.specWindowsEnabled
-      ? (target) => window.zcode.openProjectWindow(target)
-      : undefined,
-    onProjectWindowTarget: window.zcode.specWindowsEnabled
-      ? (handler) => window.zcode.onProjectWindowTarget(handler)
-      : undefined,
     canSelectFilePath: true,
     pluginSandbox: createDesktopPluginSandboxPlatform(),
     createLocalMediaPreviewUrl: buildLocalMediaPreviewUrl,

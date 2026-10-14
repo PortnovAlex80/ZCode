@@ -14,7 +14,6 @@
  * 3. 后续远端 connect / scoped attachment 都由同一 Host 处理
  */
 import { createHostDatabaseStartup } from "./hostDatabaseStartup.js";
-import { startDocumentGateway } from "./documentGateway.js";
 import { createHostNetworkCapture } from "./hostNetworkCapture.js";
 import { randomUUID } from "node:crypto";
 import { createPluginSandboxRegistrationBridge } from "./pluginSandbox/index.js";
@@ -194,8 +193,6 @@ type RemoteAssetDirs = Pick<
 >;
 
 const { parentPort } = process;
-let documentGateway: Awaited<ReturnType<typeof startDocumentGateway>> | undefined;
-let documentGatewayStart: Promise<Awaited<ReturnType<typeof startDocumentGateway>>> | undefined;
 const hostNetworkCapture = createHostNetworkCapture(parentPort);
 
 // 进程检索体验优化：host 由 utilityProcess 拉起时外壳仍是 Electron Helper，
@@ -2266,18 +2263,8 @@ async function disposeHostResources(reason: string): Promise<HostShutdownResult>
     const servicesToDispose = activeServices;
     activeServices = null;
     // Registry 是全部远端 connection 的唯一 owner；释放失败不能阻塞本地服务继续收口。
-    const shutdownResult = await runHostShutdownPhases(
+      const shutdownResult = await runHostShutdownPhases(
       [
-        {
-          name: "document-gateway-dispose",
-          run: async () => {
-            const gateway = documentGateway ?? (await documentGatewayStart);
-            documentGateway = undefined;
-            documentGatewayStart = undefined;
-            await gateway?.dispose();
-          },
-          timeoutMs: 4_000,
-        },
         {
           name: "remote-registry-dispose",
           run: () => windowRemoteConnectionRegistry.dispose(),
@@ -2321,13 +2308,6 @@ function disposeHostResourcesBestEffort(reason: string): void {
     return;
   }
   hasDisposedHostResources = true;
-
-  const gatewayToDispose = documentGatewayStart;
-  documentGateway = undefined;
-  documentGatewayStart = undefined;
-  void gatewayToDispose
-    ?.then((gateway) => gateway.dispose())
-    .catch((error) => logger.warn("document gateway cleanup failed", error));
 
   logger.info(`disposing host resources, reason=${reason}`);
   pluginSandboxRegistrationBridge.dispose();
@@ -3030,25 +3010,6 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
             });
             activeServices = initializedServices;
             activeHostApiNetworkTransport = hostApiNetworkTransport;
-            const documentGatewayConfig = process.env["ZCODE_DOCUMENT_GATEWAY_CONFIG"];
-            if (documentGatewayConfig && !documentGatewayStart) {
-              documentGatewayStart = startDocumentGateway(
-                initializedServices,
-                documentGatewayConfig,
-              );
-              void documentGatewayStart
-                .then(async (gateway) => {
-                  if (hasDisposedHostResources) {
-                    await gateway.dispose();
-                    return;
-                  }
-                  documentGateway = gateway;
-                  logger.info("document gateway ready on configured loopback endpoint");
-                })
-                .catch((error) => {
-                  logger.warn("document gateway unavailable; desktop continues normally", error);
-                });
-            }
             return initializedServices;
           },
         });

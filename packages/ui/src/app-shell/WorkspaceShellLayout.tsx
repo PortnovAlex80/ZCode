@@ -15,16 +15,6 @@ import { sidePaneTerminalSessionRegistry } from "@/terminal/sidePaneTerminalSess
 import { V4ChatPane } from "@/v4/V4ChatPane.js";
 import { V4WorkspaceChatArea } from "@/v4/V4WorkspaceChatArea.js";
 import {
-  getNativeExecutionSource,
-  resolveSpecExecutionSessionId,
-} from "@/spec-document/nativeExecutionSource.js";
-import { useSpecDetachedPanels } from "@/spec-document/useSpecDetachedPanels.js";
-import { specWindowBridge, type DetachedPanelTarget } from "@/spec-document/specWindowBridge.js";
-import {
-  documentPresentationKey,
-  readDocumentPresentation,
-} from "@/spec-document/specDocumentPresentationState.js";
-import {
   applySpecGeneralChatColumn,
   resolveSpecGeneralChatCollapsed,
   specGeneralChatLayoutId,
@@ -493,146 +483,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   const webRemoteControlNavigationDragRef = useRef<WebRemoteNavigationDragSession | null>(null);
   const suppressWebRemoteControlNavigationClickRef = useRef(false);
   const workspaceKey = workspaceIdentity?.trim() || workspaceAbsPath;
-  const detachedPanels = useSpecDetachedPanels(workspaceAbsPath, (target) => {
-    if (target.kind === "chat") return;
-    const tab = sidePaneState?.tabs.find(
-      (candidate) => `side:${workspaceKey}:${candidate.id}` === target.panelKey,
-    );
-    if (!tab)
-      throw new Error(
-        "Reopen the original document/side-chat tab before returning its detached panel.",
-      );
-    handleActivateSidePaneTab(tab.id);
-  });
-  const [windowRole, setWindowRole] = useState("main");
-  const [windowActionError, setWindowActionError] = useState("");
-  const [returningToMain, setReturningToMain] = useState(false);
-  const mainChatPanelKey = `chat:${workspaceKey}:${activeTaskId || "draft"}`;
-  const detachedMainChat = detachedPanels.transfers[mainChatPanelKey];
-  const activeDetachableTab = sidePaneState?.tabs.find(
-    (tab) => tab.id === sidePaneState.activeTabId,
-  );
-  const sidePanelKey = (tabId: string) => `side:${workspaceKey}:${tabId}`;
-  const presentedSidePaneState = useMemo(
-    () =>
-      sidePaneState
-        ? {
-            ...sidePaneState,
-            // Remove only transferred surfaces. Browser guests and terminal owners keep their keys and mounts.
-            tabs: sidePaneState.tabs.filter(
-              (tab) =>
-                !detachedPanels.transfers[`side:${workspaceKey}:${tab.id}`] &&
-                !(
-                  Object.values(detachedPanels.transfers).some(
-                    (transfer) => transfer.target.kind === "document",
-                  ) &&
-                  tab.type === "code-viewer" &&
-                  tab.source.type === "file" &&
-                  (tab.source.specDocument || /\.(md|markdown|txt)$/i.test(tab.source.path))
-                ),
-            ),
-          }
-        : sidePaneState,
-    [sidePaneState, detachedPanels.transfers, workspaceKey],
-  );
-  useEffect(() => {
-    if (!isWorkspaceVisible || !isDesktop) return;
-    const bridge = specWindowBridge(platform);
-    if (!bridge) return;
-    let live = true;
-    void bridge
-      .projectWindowState()
-      .then((state) => {
-        if (live) setWindowRole(state.role);
-      })
-      .catch((cause) => {
-        if (live) setWindowActionError(String(cause));
-      });
-    void bridge
-      .labelProjectWindow({
-        projectLabel: projectName || getPathLeaf(workspaceAbsPath),
-        sessionLabel: activeTaskTitle || activeTaskId || undefined,
-      })
-      .catch((cause) => {
-        if (live) setWindowActionError(String(cause));
-      });
-    return () => {
-      live = false;
-    };
-  }, [isWorkspaceVisible, isDesktop, projectName, workspaceAbsPath, activeTaskTitle, activeTaskId]);
-  const detachMainChat = () => {
-    if (!activeTaskId || workspaceRemoteSessionId) {
-      setWindowActionError("Choose an existing local conversation before moving it.");
-      return;
-    }
-    void detachedPanels.detach({
-      kind: "chat",
-      workspacePath: workspaceAbsPath,
-      workspaceIdentity,
-      sessionId: activeTaskId,
-      panelKey: mainChatPanelKey,
-    });
-  };
-  const detachActiveSidePanel = () => {
-    const tab = activeDetachableTab;
-    if (!tab || workspaceRemoteSessionId) {
-      setWindowActionError("Choose a local document or ordinary side chat to move.");
-      return;
-    }
-    let target: DetachedPanelTarget;
-    if (tab.type === "selection-side-chat" && !tab.remoteSessionId) {
-      target = {
-        kind: "side-chat",
-        workspacePath: tab.workspacePath,
-        workspaceIdentity: tab.workspaceIdentity,
-        sessionId: tab.childSessionId,
-        panelKey: sidePanelKey(tab.id),
-        state: { parentSessionId: activeTaskId, paneId: tab.id },
-      };
-    } else if (tab.type === "code-viewer" && tab.source.type === "file" && isSpecDocumentActive) {
-      const state = readDocumentPresentation(
-        documentPresentationKey(workspaceAbsPath, workspaceIdentity),
-      );
-      if (!state.path) {
-        setWindowActionError("Choose a document before moving this panel.");
-        return;
-      }
-      const sessionId = resolveSpecExecutionSessionId(
-        activeTaskId,
-        getNativeExecutionSource(workspaceKey),
-      );
-      if (!sessionId) {
-        setWindowActionError("Wait for the native model configuration before moving the document.");
-        return;
-      }
-      target = {
-        kind: "document",
-        workspacePath: workspaceAbsPath,
-        workspaceIdentity,
-        sessionId,
-        path: state.path,
-        panelKey: sidePanelKey(tab.id),
-        state: { ...state, parentTaskId: activeTaskId },
-      };
-    } else {
-      setWindowActionError(
-        "This panel cannot move to a separate window. Choose a document or ordinary side chat.",
-      );
-      return;
-    }
-    void detachedPanels.detach(target);
-  };
-  const returnToMain = async () => {
-    setWindowActionError("");
-    setReturningToMain(true);
-    try {
-      await specWindowBridge(platform)?.returnToMainWindow();
-    } catch (cause) {
-      setWindowActionError(String(cause));
-    } finally {
-      setReturningToMain(false);
-    }
-  };
   const screenshotSurfaceRequest = useBrowserScreenshotSurfaceRequest(sidePaneState?.tabs ?? []);
   const screenshotSurfaceTab = screenshotSurfaceRequest
     ? findScreenshotSurfaceTabForRender(sidePaneState?.tabs ?? [], screenshotSurfaceRequest)
@@ -764,23 +614,22 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   // U-01 «Документ в центре»：渲染期同步三个 flex item 的 order（聊天列/分隔条/tabs 容器
   // = 1/2/3，交换排列对调两端）。不能放到 effect 里——RRP 面板重注册（约束随排列切换）
   // 会在 layout effect 里读 offsetLeft（浏览器中反映 flex order）重排面板，order 必须先于
-  // 它生效，拖拽/键盘方向才能跟随实际视觉位置。写入幂等，DOM 顺序与组件树保持稳定：
+  // 它生效，拖拽/键盘方向才能跟随实际视觉位置。DOM 顺序与组件树保持稳定：
   // chat/timeline 零重挂载、browser <webview> guest 不被移动。
-  const shellLayoutSwapOrderStateRef = useRef<string | null>(null);
-  const shellLayoutSwapOrderState = `${shellLayoutSwapStorageKey}:${
-    isDocumentCenterLayout ? "document-center" : "chat-center"
-  }`;
-  if (shellLayoutSwapOrderStateRef.current !== shellLayoutSwapOrderState) {
-    if (
-      applySpecShellLayoutSwapOrders(
-        conversationColumnOuterElementRef.current,
-        sidePanePanelElementRef.current,
-        isDocumentCenterLayout,
-      )
-    ) {
-      shellLayoutSwapOrderStateRef.current = shellLayoutSwapOrderState;
-    }
-  }
+  //
+  // U-03 修复（窗口 resize 后拖拽方向颠倒）：之前这里按「排列模式字符串」锁存，只有
+  // 模式切换才重写 order。但窗口 resize 会触发自动收起/展开（conversation 过窄策略），
+  // RRP 面板随 collapsible/disabled/defaultSize 翻转而重注册；若某个外层元素在该
+  // 时刻携带重置后的 order（元素重建、样式被清而模式未变），注册期按 offsetLeft 的
+  // 排序会把面板排回换位前的顺序，分隔条随之绑定到换位前的一侧——用户拖右、聊天
+  // 反而变宽。改为每次渲染都重申 order：写入在 applySpecShellLayoutSwapOrders 内部
+  // 做差量（值相同不触碰 style），稳态零样式突变；任何重注册前 order 必然与当前
+  // 模式一致，拖拽/键盘方向跟随实际视觉位置。
+  applySpecShellLayoutSwapOrders(
+    conversationColumnOuterElementRef.current,
+    sidePanePanelElementRef.current,
+    isDocumentCenterLayout,
+  );
   const workspaceSessionActionDisabled =
     Boolean(workspaceReadOnlyReason) || reloadSessionDisabled || reloadSessionPending;
   const isSpecDocumentActive =
@@ -2083,7 +1932,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
       isVisible={options.mobileOverlay ? isSidePaneOpen : isSidePaneVisible}
       onCloseSidePane={handleToggleSidePane}
       toggleSidePaneShortcutLabel={toggleSidePaneShortcutLabel}
-      sidePaneState={presentedSidePaneState}
+      sidePaneState={sidePaneState}
       generalChatCollapsed={generalChatCollapsed}
       onToggleGeneralChat={handleToggleGeneralChat}
       documentCenter={isDocumentCenterLayout}
@@ -2653,68 +2502,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                           "max-md:rounded-none max-md:border-x-0 max-md:border-b-0",
                       )}
                     >
-                      {isDesktop && specWindowBridge(platform) ? (
-                        <div
-                          className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-1 text-ui-sm"
-                          data-spec-window-actions
-                        >
-                          <span className="text-muted-foreground">
-                            {windowRole === "main"
-                              ? "Main"
-                              : windowRole === "session"
-                                ? "Session window"
-                                : "Project window"}
-                          </span>
-                          {windowRole !== "main" ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={returningToMain}
-                              onClick={() => void returnToMain()}
-                            >
-                              Return to Main
-                            </Button>
-                          ) : null}
-                          {!detachedMainChat ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={!activeTaskId || Boolean(workspaceRemoteSessionId)}
-                              onClick={detachMainChat}
-                            >
-                              Move chat to window
-                            </Button>
-                          ) : null}
-                          {activeDetachableTab &&
-                          !detachedPanels.transfers[sidePanelKey(activeDetachableTab.id)] ? (
-                            <Button variant="ghost" size="sm" onClick={detachActiveSidePanel}>
-                              Move active panel to window
-                            </Button>
-                          ) : null}
-                          {Object.values(detachedPanels.transfers)
-                            .filter(
-                              (transfer) =>
-                                transfer.target.panelKey.startsWith(`side:${workspaceKey}:`) &&
-                                transfer.target.kind !== "chat",
-                            )
-                            .map((transfer) => (
-                              <Button
-                                key={transfer.transferId}
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => void detachedPanels.restore(transfer)}
-                              >
-                                Restore{" "}
-                                {transfer.target.kind === "document" ? "document" : "side chat"}
-                              </Button>
-                            ))}
-                          {detachedPanels.error || windowActionError ? (
-                            <span role="alert" className="text-destructive">
-                              {detachedPanels.error || windowActionError}
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
                       {shouldRenderWorkspaceHeader ? (
                         <ScopedErrorBoundary
                           scope="workspace-header"
@@ -2911,21 +2698,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                                   永远停在 draft。v4 语义下 sessionId ≡ taskId，meta 只服务 Header 显示。
                                   M5⑤：桌面主区升级为分屏宿主（Layout/Focus 两层）；primary pane
                                   绑定语义与 testid 契约（paneId=workspace-main）不变。 */}
-                              {detachedMainChat ? (
-                                <div
-                                  className="flex h-full flex-col items-center justify-center gap-3"
-                                  data-spec-detached-placeholder="chat"
-                                >
-                                  <p>This conversation is in a separate window.</p>
-                                  <Button
-                                    variant="outline"
-                                    onClick={() => void detachedPanels.restore(detachedMainChat)}
-                                  >
-                                    Restore chat here
-                                  </Button>
-                                </div>
-                              ) : (
-                                <V4WorkspaceChatArea
+                              <V4WorkspaceChatArea
                                   readOnly={Boolean(workspaceReadOnlyReason)}
                                   foregroundEnabled={isWorkspaceVisible && !generalChatCollapsed}
                                   interactionDialogsVisible={!generalChatCollapsed}
@@ -2990,8 +2763,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                                   }
                                   searchResultHighlightRequest={activeSearchResultHighlightRequest}
                                   onSearchResultHighlightDone={onSearchResultHighlightDone}
-                                />
-                              )}
+                              />
                             </ScopedErrorBoundary>
                           </main>
                         )}

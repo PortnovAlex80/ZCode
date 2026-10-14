@@ -1,11 +1,5 @@
 import "./desktopEarlyDataBaseDirBootstrap.js";
 import { installRequestSecurityDiagnostics } from "./request-security-edition/index.js";
-import { registerNativeWindowFrame } from "./desktopWindowButtonPosition.js";
-import { registerSpecDetachedPanels } from "./specDetachedPanels.js";
-import { getDatabaseStartupPortPayload } from "./databaseStartupRelay.js";
-import { randomUUID } from "node:crypto";
-import { InternalChannels } from "@zcode/shared";
-import { registerSpecProjectWindows } from "./specProjectWindows.js";
 
 import { createLocalTtftExporter } from "./localTtftExporter.js";
 /* eslint-disable max-lines */
@@ -44,7 +38,6 @@ import {
 import {
   app,
   BrowserWindow,
-  MessageChannelMain,
   dialog,
   ipcMain,
   nativeImage,
@@ -315,7 +308,10 @@ process.on("unhandledRejection", (reason) => {
 const iconPath =
   process.platform === "win32"
     ? app.isPackaged
-      ? join(process.resourcesPath, "icon_windows.png")
+      ? // Bug 修复（R-05 活体反馈 2026-10-13）：Windows 窗口 HICON 上限 256x256，
+        // 1024px 的 icon_windows.png 作为 BrowserWindow icon 会静默回退到 Electron
+        // 默认图标——任务栏在应用运行时显示 Electron 而非 Z。打包态改用 256px 帧。
+        join(process.resourcesPath, "icon_windows_256.png")
       : join(import.meta.dirname, "../../build/icon_windows.png")
     : app.isPackaged
       ? join(process.resourcesPath, "icon.png")
@@ -1609,11 +1605,9 @@ function getApplicationWindowsExcludingCuaIndicator(): BrowserWindow[] {
   );
 }
 
-const specAuxiliaryWindows = new Set<BrowserWindow>();
-let specPrimaryApplicationWindow: BrowserWindow | undefined;
 function getMainApplicationWindows(): BrowserWindow[] {
   return getApplicationWindowsExcludingCuaIndicator().filter(
-    (win) => win !== updateStatusWindow && !specAuxiliaryWindows.has(win),
+    (win) => win !== updateStatusWindow,
   );
 }
 
@@ -1827,24 +1821,6 @@ function openUpdateStatusWindow() {
   });
 }
 
-// 原因：spec-harness 的 close-view 判定（关闭视图=隐藏保活，显式退出=走真实关闭）原先内联在
-// handleBeforeClose 闭包里，协调器套件无法驱动生产代码，只能复述逻辑（Wave 1 Impl E 标记的缺口）。
-// 修复：提取为顶层导出的纯判定 seam，由 specProjectWindows.test.mjs 从本文件源码提取执行；
-// forceQuitRef/explicitQuitRef 等窗口状态所有权仍在 Main，隐藏与退出的行为保持不变。
-// A view may hide while native Hosts keep running; only explicit Quit owns shutdown.
-export function handleSpecHarnessViewCloseRequest(options: {
-  specHarnessWindowsEnabled: boolean;
-  forceQuit: boolean;
-  explicitQuit: boolean;
-  hideView: () => void;
-}): boolean {
-  if (options.specHarnessWindowsEnabled && !options.forceQuit && !options.explicitQuit) {
-    options.hideView();
-    return true;
-  }
-  return false;
-}
-
 function createWindowInstance(
   startupBootstrap: StartupWindowBootstrap = {},
   persistSession = true,
@@ -1856,16 +1832,6 @@ function createWindowInstance(
     logger,
     forceQuitRef,
     handleBeforeClose: (win, label) => {
-      if (
-        handleSpecHarnessViewCloseRequest({
-          specHarnessWindowsEnabled: process.env.ZCODE_SPEC_HARNESS_WINDOWS === "1",
-          forceQuit: forceQuitRef.current,
-          explicitQuit: explicitQuitRef.current,
-          hideView: () => win.hide(),
-        })
-      ) {
-        return true;
-      }
       return handleDesktopWindowCloseRequest({
         platform: process.platform,
         forceQuit: forceQuitRef.current,
@@ -2059,128 +2025,9 @@ function createWindowInstance(
       await mainSettingService.update({ desktopWindowSize: state });
     },
   });
-  if (!specPrimaryApplicationWindow || specPrimaryApplicationWindow.isDestroyed())
-    specPrimaryApplicationWindow = win;
   registerStabilityMainWindow(win);
   return win;
 }
-
-if (process.env.ZCODE_SPEC_HARNESS_WINDOWS === "1")
-  registerSpecProjectWindows({
-    getMainWindow: () =>
-      specPrimaryApplicationWindow && !specPrimaryApplicationWindow.isDestroyed()
-        ? specPrimaryApplicationWindow
-        : null,
-    stateDirectory: app.getPath("userData"),
-    create: (workspacePath) =>
-      createWindowInstance({ restoreSession: true, initialWorkspacePath: workspacePath }, false),
-    isApplicationWindow: (win) => getMainApplicationWindows().includes(win),
-  });
-
-if (process.env.ZCODE_SPEC_HARNESS_WINDOWS === "1")
-  registerSpecDetachedPanels({
-    restoreSource: (source, target) => {
-      const state = target.state as
-        | { parentSessionId?: unknown; parentTaskId?: unknown }
-        | undefined;
-      const taskId =
-        target.kind === "side-chat"
-          ? state?.parentSessionId
-          : target.kind === "document" && state && "parentTaskId" in state
-            ? state.parentTaskId
-            : target.sessionId;
-      source.webContents.send("spec-harness:project-window-target", {
-        workspacePath: target.workspacePath,
-        ...(typeof taskId === "string" ? { taskId } : {}),
-      });
-    },
-    getOwnerAllowed: (win) => getMainApplicationWindows().includes(win),
-    isQuitting: () => forceQuitRef.current || hasPreparedAppQuit,
-    create: (source, target) => {
-      const child = new BrowserWindow({
-        width: 1000,
-        height: 800,
-        minWidth: 480,
-        minHeight: 400,
-        show: false,
-        title: "Spec Harness · " + target.kind,
-        icon: iconPath,
-        backgroundColor: "#171717",
-        webPreferences: {
-          preload: preloadPath,
-          contextIsolation: true,
-          nodeIntegration: false,
-          webviewTag: false,
-          additionalArguments: ["--device-id=" + deviceMid, "--spec-harness-windows"],
-        },
-      });
-      registerNativeWindowFrame(child);
-      specAuxiliaryWindows.add(child);
-      child.once("closed", () => specAuxiliaryWindows.delete(child));
-      child.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-      void loadWindow(child, "index", {
-        windowKind: "spec-detached",
-        restoreSession: false,
-        persistSession: false,
-      });
-      return child;
-    },
-    attach: (source, child) => {
-      const host = windowHostProcessMap.get(source.webContents.id);
-      if (!host || !host.pid)
-        throw new Error("Original Host is unavailable; no replacement is started.");
-      const startup = getDatabaseStartupPortPayload(host);
-      if (!startup) throw new Error("Original Host startup was not admitted.");
-      const attachmentId = randomUUID();
-      let retainedPort: Electron.MessagePortMain | undefined;
-      child.once("closed", () => {
-        retainedPort?.close();
-        if (host.pid) {
-          try {
-            host.postMessage({ type: HostMessageTypes.DetachServicePort, attachmentId });
-          } catch {
-            /* Host already exited. */
-          }
-        }
-      });
-      const readyChannel = InternalChannels.DatabaseStartupControl;
-      let delivered = false;
-      const deliverPort = (
-        event: Electron.IpcMainEvent,
-        control: { action?: string } | undefined,
-      ) => {
-        // The native snapshot request is emitted after the renderer installs its MessagePort listener.
-        if (
-          child.isDestroyed() ||
-          event.sender !== child.webContents ||
-          control?.action !== "snapshot" ||
-          delivered
-        )
-          return;
-        delivered = true;
-        try {
-          const { port1, port2 } = new MessageChannelMain();
-          retainedPort = port1;
-          host.postMessage(
-            {
-              type: HostMessageTypes.AttachServicePort,
-              requestId: randomUUID(),
-              attachmentId,
-              clientMode: "desktop-continuous",
-              scope: { kind: "local" },
-            },
-            [port2],
-          );
-          child.webContents.postMessage(InternalChannels.ServicePort, startup, [port1]);
-        } catch (error) {
-          logger.warn("Detached panel could not attach to its original Host", error);
-          child.destroy();
-        }
-      };
-      ipcMain.on(readyChannel, deliverPort);
-      child.once("closed", () => ipcMain.removeListener(readyChannel, deliverPort));
-    },
-  });
 
 registerDeepLinkProtocol(logger, { iconPath: linuxDesktopIntegrationIconPath });
 app.on("open-url", (event, url) => {
@@ -2347,26 +2194,10 @@ app.whenReady().then(async () => {
     // 打包态必须与 NSIS 快捷方式使用同一 AUMID，否则 Shell 把它们当成不同应用。
     // 使用构建期产品身份，不依赖用户机器环境；开发态继续保持独立身份。
     app.setAppUserModelId(
-      process.env.ZCODE_SPEC_HARNESS_WINDOWS === "1"
-        ? "dev.specharness.zcode"
-        : resolveWindowsAppUserModelIdForFlavor(ZCODE_PRODUCT_FLAVOR, {
-            isPackaged: app.isPackaged,
-          }),
+      resolveWindowsAppUserModelIdForFlavor(ZCODE_PRODUCT_FLAVOR, {
+        isPackaged: app.isPackaged,
+      }),
     );
-  }
-
-  // Unpackaged Electron otherwise keeps its executable's Shell identity/icon.
-  if (process.platform === "win32" && process.env.ZCODE_SPEC_HARNESS_WINDOWS === "1") {
-    const shellIcon = nativeImage.createFromPath(iconPath.replace(/\.ico$/i, ".png"));
-    app.on("browser-window-created", (_event, window) => {
-      if (!shellIcon.isEmpty()) window.setIcon(shellIcon);
-      window.setAppDetails({
-        appId: "dev.specharness.zcode",
-        appIconPath: iconPath,
-        appIconIndex: 0,
-        relaunchDisplayName: "Spec Harness ZCODE",
-      });
-    });
   }
 
   applyAppIcon(iconPath);

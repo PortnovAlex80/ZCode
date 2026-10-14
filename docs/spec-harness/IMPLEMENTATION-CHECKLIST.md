@@ -143,7 +143,7 @@ items plus parked N-01.
 
 ## U (continued)
 
-- [ ] **U-03** Thorough window/panel composition разведка: every pane (navigator, chat, tabs container, detached/project windows), its owner, sizing/divider math, persistence and interactions (swap, expand/collapse, detach/return, project windows) documented in docs/spec-harness/WINDOW-LAYOUT.md; the user-reported inverted drag direction after window resize in swapped mode is traced to its cause and fixed with focused tests. Concept: user request 2026-10-13 («проведи более тщательную разведку работы с окнами… как они между собой компонуются»).
+- [ ] **U-03** (implemented 2026-10-13, live GUI acceptance pending user) Thorough window/panel composition разведка: every pane (navigator, chat, tabs container, detached/project windows), its owner, sizing/divider math, persistence and interactions (swap, expand/collapse, detach/return, project windows) documented in docs/spec-harness/WINDOW-LAYOUT.md; the user-reported inverted drag direction after window resize in swapped mode is traced to its cause and fixed with focused tests. Concept: user request 2026-10-13 («проведи более тщательную разведку работы с окнами… как они между собой компонуются»).
 - [x] **RETIREMENT-2 (user decision 2026-10-13)** The move-to-separate-OS-windows feature is rolled back for now («никаких Move chat to window etc.»): detach chat/panel to window, Return to Main, Open project/conversation in window, the window-role toolbar, specProjectWindows/specDetachedPanels machinery and the ZCODE_SPEC_HARNESS_WINDOWS gate are removed. Not a single-commit revert — the feature predates the wave history; removed as a feature with history preserved. W-01..W-05 items retire open; the in-app layout (swap, expand, tabs) is unaffected and stays.
 - [x] **RETIREMENT (user decision 2026-10-13)** All AutoCAD and Office integration code is removed from the product for now («убери весь код который связан с автокадом и офисом — пока работаем только над функционалом ZCode»): prototypes/autocad-preview, word-preview, excel-preview, the office adapters/Test-Office-Adapters.ps1 in prototypes/document-host, and with them their only consumers — the document gateway/SDK/pane stack (packages/desktop/src/host/documentGateway*, packages/ui/src/document-host) and their tests/docs references. Everything stays recoverable in git history. O-*/C-* items and N-01 are retired-open; the in-app Markdown document workflow (D-*/U-*) is NOT office-related and stays.
 
@@ -416,3 +416,31 @@ Remaining limits / runtime gate: U-01 closes only on the user's live run of the 
        U-02 UI half (row menu/badge/dialog, i18n, renderer-to-host wiring) not implemented —
        blocked by exclusive-path boundaries, next wave or root
 ```
+
+2026-10-13 Wave 6 v2 integration (workflow `dwfrun-8b692e86-cd68-4a9e-a9f5-a3c3c79bdf1f`,
+base `979e8d45`; implementation agents never committed intentionally — the Purge agent's
+`git rm` staged deletions were swept into the amended icon commit `5f896e7e`, message
+corrected to describe both; remainder committed below):
+
+```text
+ID(s): RETIREMENT (Office/AutoCAD purge), RETIREMENT-2 (move-to-windows rollback),
+       U-03 (composition doc + inverted-resize fix)
+Revision / affected files: 69 tracked deletions (-9 644 lines: prototypes + gateway +
+       detach machinery) via 5f896e7e; 27 further files via the integration commit
+       (renderer detach UI removal, WINDOW-LAYOUT.md, divider-direction regression
+       suite, host/preload/renderer reference cleanup, vitest includes)
+Check command or manual scenario: wave gates typecheck exit 0 / lint 0 errors (64
+       warnings) / architecture:check --changed 0 violations; agent suites: spec-document
+       96 passed, workspaceShell* 62 passed, projectMetadata 10 passed; root spot-check
+       31 passed (divider-direction, layout swap, presentation state)
+Result: grep shows no orphan references (documentGateway, document-host, office-adapter,
+       SpecHarness.AutoCAD, specDetachedPanels, specProjectWindows, detach/returnToMain
+       affordances); runtime window icon switched to the 256px frame (index.ts iconPath)
+Remaining limits / runtime gate: U-03 closes on the user's live check; DOCUMENT-HOSTS.md
+       and the ADR remain as historical references to the retired integrations; W-01..W-05,
+       O-*, C-* and N-01 items retire open with the removed features
+```
+
+Root note: `docs/spec-harness/WINDOW-LAYOUT.md` now documents the in-app composition
+(navigator / chat / tabs container, swap mode, expand/collapse, dividers, persistence)
+with a short "Removed 2026-10-13" list of the retired OS-window features.

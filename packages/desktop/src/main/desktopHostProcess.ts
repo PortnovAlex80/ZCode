@@ -68,7 +68,7 @@ export interface WindowBootstrapOptions {
   initialWorkspacePath?: string;
   initialWorkspacePurpose?: WorkspacePurpose;
   unavailableWorkspacePath?: string;
-  windowKind?: "main" | "update-status" | "spec-detached";
+  windowKind?: "main" | "update-status";
   locale?: string;
 }
 

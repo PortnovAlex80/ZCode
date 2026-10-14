@@ -43,9 +43,6 @@ import {
 } from "./remoteWorkspaceServicePortBridge.js";
 
 const Root = lazy(() => import("@zcode/ui/root").then((module) => ({ default: module.Root })));
-const SpecDetachedPanelRoot = lazy(() =>
-  import("@zcode/ui/detached-panel").then((module) => ({ default: module.SpecDetachedPanelRoot })),
-);
 const UpdateStatusWindowRoot = lazy(() =>
   import("@zcode/ui/update-status").then((module) => ({ default: module.UpdateStatusWindowRoot })),
 );
@@ -309,11 +306,6 @@ function handleServicePortMessage(event: MessageEvent): void {
     return;
   const port = event.ports[0];
   if (!port) return;
-  if (windowKind === "spec-detached") {
-    if (firstStartupStateTimer) clearTimeout(firstStartupStateTimer);
-    initializeBusinessRoot(port);
-    return;
-  }
   databaseStartupAdmission.acceptPort({ databaseStartupId: event.data.databaseStartupId }, port);
   enterAppIfPrepared();
 }
@@ -350,26 +342,22 @@ function initializeBusinessRoot(port: MessagePort): void {
       >
         <StartupReadyNotifier />
         <Suspense fallback={<div role="status">Loading workspace?</div>}>
-          {windowKind === "spec-detached" ? (
-            <SpecDetachedPanelRoot services={services} platform={desktopPlatform} />
-          ) : (
-            <Root
-              services={services}
-              platform={desktopPlatform}
-              isDesktop
-              assistantCodeCommentCardsEnabled
-              isMacDesktop={isMacDesktop}
-              isWindowsDesktop={isWindowsDesktop}
-              restoreSession={restoreSession}
-              persistSession={persistSession}
-              supportsSettings={supportsSettings}
-              initialWorkspaceAbsPath={initialWorkspaceAbsPath}
-              initialWorkspacePurpose={
-                initialWorkspacePurpose === "conversation" ? "conversation" : "project"
-              }
-              unavailableWorkspacePath={unavailableWorkspacePath}
-            />
-          )}
+          <Root
+            services={services}
+            platform={desktopPlatform}
+            isDesktop
+            assistantCodeCommentCardsEnabled
+            isMacDesktop={isMacDesktop}
+            isWindowsDesktop={isWindowsDesktop}
+            restoreSession={restoreSession}
+            persistSession={persistSession}
+            supportsSettings={supportsSettings}
+            initialWorkspaceAbsPath={initialWorkspaceAbsPath}
+            initialWorkspacePurpose={
+              initialWorkspacePurpose === "conversation" ? "conversation" : "project"
+            }
+            unavailableWorkspacePath={unavailableWorkspacePath}
+          />
         </Suspense>
       </ZCodeIntlProvider>
     </AppErrorBoundary>,

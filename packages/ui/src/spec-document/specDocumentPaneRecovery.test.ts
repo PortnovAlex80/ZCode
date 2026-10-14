@@ -329,8 +329,5 @@ describe("document pane recovery, handoff writes and delete refusal", () => {
     }
     expect(retireCalls.length).toBe(1);
     expect(retireCalls[0]!.getText(source)).toContain("retireDocumentPaneWrites(presentationKey");
-    // 清理哨兵按 workspace+path 登记，作为最后一个 child 渲染。
-    expect(text).toContain("<DocumentCleanupSentinel");
-    expect(text).toContain("specDocumentCleanupKey(");
   });
 });

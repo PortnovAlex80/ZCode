@@ -89,6 +89,12 @@ export function specShellBodyLayoutId(baseLayoutId: string, documentCenter: bool
  * 调用本函数，而不是放到 effect 里。DOM 顺序与组件树保持稳定：chat/timeline 不重挂载，
  * browser <webview> guest 不被移动，拖拽与键盘方向跟随实际视觉位置。
  *
+ * U-03 修复：写入改为差量式（值未变化时不触碰 style）。宿主现在每次渲染都会重申
+ * order（不再按排列模式字符串锁存）：窗口 resize 触发的自动收起/展开会让 RRP 面板
+ * 重注册（collapsible/disabled/defaultSize 翻转），若此刻外层元素携带的是重置后的
+ * order（元素重建/样式丢失而模式未变），注册期排序会把面板排回换位前的顺序，分隔条
+ * 拖拽方向随之颠倒。差量写入让每次渲染的重申零样式突变，稳态下不产生额外布局失效。
+ *
  * @returns 两个外层元素是否都已就绪（未就绪时保持未同步，等下一次渲染重试）。
  */
 export function applySpecShellLayoutSwapOrders(
@@ -97,7 +103,12 @@ export function applySpecShellLayoutSwapOrders(
   documentCenter: boolean,
 ): boolean {
   if (!conversationColumnElement || !sidePanePanelElement) return false;
-  conversationColumnElement.style.setProperty("order", documentCenter ? "3" : "1");
-  sidePanePanelElement.style.setProperty("order", documentCenter ? "1" : "3");
+  applyElementOrder(conversationColumnElement, documentCenter ? "3" : "1");
+  applyElementOrder(sidePanePanelElement, documentCenter ? "1" : "3");
   return true;
+}
+
+function applyElementOrder(element: HTMLElement, order: string) {
+  if (element.style.order === order) return;
+  element.style.setProperty("order", order);
 }

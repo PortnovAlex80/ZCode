@@ -1,5 +1,4 @@
 /* eslint-disable max-lines -- task item 同时承载默认列表和 timeline 两行布局的共享交互，先保持动作链路集中避免归档/置顶回归。 */
-import { useSpecWindowLocation } from "@/spec-document/useSpecWindowLocations.js";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
@@ -243,7 +242,6 @@ export const MemoTaskItem = memo(function TaskListItem({
           { label: taskAttentionLabel, count: String(taskAttention.count) },
         )
       : taskAttentionLabel;
-  const specWindowOpen = useSpecWindowLocation(workspacePath, task.taskId);
   const taskTitle =
     task.title ||
     intl.formatMessage({
@@ -628,15 +626,6 @@ export const MemoTaskItem = memo(function TaskListItem({
               {/* Bugfix: workspace/timeline task 标题之前使用 truncate，会在长标题末尾显示省略号；
                       grouped task 已改为右侧渐隐。这里统一 task 列表标题溢出策略，避免同一侧栏里出现两种截断语义。 */}
               {taskTitle}
-              {specWindowOpen ? (
-                <span
-                  title="Open in a separate window"
-                  aria-label="Open in a separate window"
-                  className="ml-1 text-violet-400"
-                >
-                  {"\u2197"}
-                </span>
-              ) : null}
             </TaskTitleOverflowText>
             {task.pendingInteraction ? (
               <TaskInteractionBadge
@@ -729,15 +718,6 @@ export const MemoTaskItem = memo(function TaskListItem({
                 {/* Bugfix: 默认 workspace task item 和 timeline item 共享标题溢出规则；
                         使用 mask 渐隐而不是省略号，和 grouped task row 保持一致。 */}
                 {taskTitle}
-                {specWindowOpen ? (
-                  <span
-                    title="Open in a separate window"
-                    aria-label="Open in a separate window"
-                    className="ml-1 text-violet-400"
-                  >
-                    {"\u2197"}
-                  </span>
-                ) : null}
               </TaskTitleOverflowText>
               {changeSummaryNode ? (
                 <span
