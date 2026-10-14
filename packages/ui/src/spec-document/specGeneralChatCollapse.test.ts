@@ -26,7 +26,10 @@ test("general chat collapse is opt-in and restores outside the granted document 
   assert.equal(resolveSpecGeneralChatCollapsed(null, documentContext), false);
   const requested = toggleSpecGeneralChatCollapse(null, documentContext);
   assert.equal(requested, "workspace-a");
-  assert.equal(resolveSpecGeneralChatCollapsed(requested, documentContext), true);
+  assert.equal(
+    resolveSpecGeneralChatCollapsed(requested, documentContext),
+    true,
+  );
   assert.equal(toggleSpecGeneralChatCollapse(requested, documentContext), null);
   for (const change of [
     { workspaceKey: "workspace-b" },
@@ -50,21 +53,30 @@ test("a hidden chat retains only its selected config-source owner, without input
     interactionDialogsVisible: false,
     keepSpecExecutionSource: true,
   };
-  assert.deepEqual(specGeneralChatLeafPresentation({ ...hidden, selected: true }), {
-    focused: false,
-    telemetryVisible: false,
-    interactionDialogsVisible: false,
-    keepSpecExecutionSource: true,
-  });
-  assert.deepEqual(specGeneralChatLeafPresentation({ ...hidden, selected: false }), {
-    focused: false,
-    telemetryVisible: false,
-    interactionDialogsVisible: false,
-    keepSpecExecutionSource: false,
-  });
+  assert.deepEqual(
+    specGeneralChatLeafPresentation({ ...hidden, selected: true }),
+    {
+      focused: false,
+      telemetryVisible: false,
+      interactionDialogsVisible: false,
+      keepSpecExecutionSource: true,
+    },
+  );
+  assert.deepEqual(
+    specGeneralChatLeafPresentation({ ...hidden, selected: false }),
+    {
+      focused: false,
+      telemetryVisible: false,
+      interactionDialogsVisible: false,
+      keepSpecExecutionSource: false,
+    },
+  );
   assert.equal(
-    specGeneralChatLeafPresentation({ ...hidden, selected: true, keepSpecExecutionSource: false })
-      .keepSpecExecutionSource,
+    specGeneralChatLeafPresentation({
+      ...hidden,
+      selected: true,
+      keepSpecExecutionSource: false,
+    }).keepSpecExecutionSource,
     false,
   );
   assert.equal(
@@ -115,8 +127,14 @@ test("collapse and repeated requests preserve the prior native column size for r
 });
 
 test("Spec layout preferences have a separate namespace and ordinary ZCODE remains unchanged", () => {
-  assert.equal(specGeneralChatLayoutId("workspace-a", false), "workspace-body-layout");
-  assert.notEqual(specGeneralChatLayoutId("workspace-a", true), "workspace-body-layout");
+  assert.equal(
+    specGeneralChatLayoutId("workspace-a", false),
+    "workspace-body-layout",
+  );
+  assert.notEqual(
+    specGeneralChatLayoutId("workspace-a", true),
+    "workspace-body-layout",
+  );
   assert.notEqual(
     specGeneralChatLayoutId("workspace-a", true),
     specGeneralChatLayoutId("workspace-b", true),
@@ -151,7 +169,61 @@ test("same-panel Group layouts restore before leaving the Spec persistence names
   assert.deepEqual(current, { "conversation-column": 52, browser: 48 });
 });
 
-function descendants(root: ts.Node, predicate: (node: ts.Node) => boolean): ts.Node[] {
+// U-03 5.2a（用户 2026-10-14 实机回归）：RRP 的 setLayout 按值的位置解释布局，
+// 恢复一个旧排列 key 顺序的 ordinaryLayout 会让槽位错位、此后分隔条拖拽/键盘
+// 方向颠倒。transition 必须先按当前注册表顺序重排（每个 panelId 的值不变）。
+test("layout restore is re-keyed to the group's current panel order (5.2a)", () => {
+  const setLayoutCalls: Array<string[]> = [];
+  let current: Record<string, number> = {
+    browser: 62,
+    "conversation-column": 38,
+  };
+  const group = {
+    getLayout: () => current,
+    setLayout: (layout: Record<string, number>) => {
+      setLayoutCalls.push(Object.keys(layout));
+      current = { ...layout };
+    },
+  };
+  const memory = {
+    workspaceKey: null as string | null,
+    // 在 chat-center（旧排列）下捕获：key 顺序 [conversation-column, browser]。
+    ordinaryLayout: { "conversation-column": 52, browser: 48 } as Record<
+      string,
+      number
+    > | null,
+  };
+  transitionSpecGeneralChatLayout(group, "workspace-a", memory, {
+    expandedSize: null,
+  });
+  // 恢复到 document-center 注册表顺序 [browser, conversation-column]，值按 id 保持。
+  assert.deepEqual(setLayoutCalls, [["browser", "conversation-column"]]);
+  assert.deepEqual(current, { browser: 48, "conversation-column": 52 });
+
+  // 组不可见（defaultLayoutDeferred ⇒ getLayout 为空）时原样传递，不猜顺序。
+  const deferredGroup = {
+    getLayout: () => ({}) as Record<string, number>,
+    setLayout: (layout: Record<string, number>) => {
+      setLayoutCalls.push(Object.keys(layout));
+    },
+  };
+  setLayoutCalls.length = 0;
+  transitionSpecGeneralChatLayout(
+    deferredGroup,
+    "workspace-b",
+    {
+      workspaceKey: null,
+      ordinaryLayout: { "conversation-column": 52, browser: 48 },
+    },
+    { expandedSize: null },
+  );
+  assert.deepEqual(setLayoutCalls, [["conversation-column", "browser"]]);
+});
+
+function descendants(
+  root: ts.Node,
+  predicate: (node: ts.Node) => boolean,
+): ts.Node[] {
   const found: ts.Node[] = [];
   const visit = (node: ts.Node) => {
     if (predicate(node)) found.push(node);
@@ -162,7 +234,13 @@ function descendants(root: ts.Node, predicate: (node: ts.Node) => boolean): ts.N
 }
 async function parse(path: string) {
   const text = await readFile(new URL(path, import.meta.url), "utf8");
-  return ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  return ts.createSourceFile(
+    path,
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
 }
 function prop(
   node: ts.JsxOpeningElement | ts.JsxSelfClosingElement,
@@ -170,7 +248,10 @@ function prop(
   source: ts.SourceFile,
 ) {
   return node.attributes.properties
-    .find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === name)
+    .find(
+      (attribute) =>
+        ts.isJsxAttribute(attribute) && attribute.name.getText(source) === name,
+    )
     ?.getText(source)
     .replace(/\s+/g, " ")
     .replace(/\{ /g, "{")
@@ -181,11 +262,18 @@ test("actual shell keeps conversation controllers mounted, collapses only their 
   const source = await parse("../app-shell/WorkspaceShellLayout.tsx");
   const panels = descendants(
     source,
-    (node) => ts.isJsxOpeningElement(node) && node.tagName.getText(source) === "ResizablePanel",
+    (node) =>
+      ts.isJsxOpeningElement(node) &&
+      node.tagName.getText(source) === "ResizablePanel",
   ) as ts.JsxOpeningElement[];
-  const column = panels.find((node) => prop(node, "id", source) === 'id="conversation-column"');
+  const column = panels.find(
+    (node) => prop(node, "id", source) === 'id="conversation-column"',
+  );
   assert.ok(column);
-  assert.equal(prop(column, "collapsible", source), "collapsible={generalChatCollapsed}");
+  assert.equal(
+    prop(column, "collapsible", source),
+    "collapsible={generalChatCollapsed}",
+  );
   assert.equal(prop(column, "collapsedSize", source), 'collapsedSize="0px"');
   assert.equal(prop(column, "inert", source), "inert={generalChatCollapsed}");
   const parent = column.parent;
@@ -194,7 +282,8 @@ test("actual shell keeps conversation controllers mounted, collapses only their 
     descendants(
       parent,
       (node) =>
-        ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "V4WorkspaceChatArea",
+        ts.isJsxSelfClosingElement(node) &&
+        node.tagName.getText(source) === "V4WorkspaceChatArea",
     ).length,
     1,
   );
@@ -202,7 +291,8 @@ test("actual shell keeps conversation controllers mounted, collapses only their 
     descendants(
       parent,
       (node) =>
-        ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "WorkspaceSidebar",
+        ts.isJsxSelfClosingElement(node) &&
+        node.tagName.getText(source) === "WorkspaceSidebar",
     ).length,
     0,
   );
@@ -222,7 +312,8 @@ test("actual shell keeps conversation controllers mounted, collapses only their 
   const chat = descendants(
     parent,
     (node) =>
-      ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "V4WorkspaceChatArea",
+      ts.isJsxSelfClosingElement(node) &&
+      node.tagName.getText(source) === "V4WorkspaceChatArea",
   )[0] as ts.JsxSelfClosingElement;
   assert.equal(
     prop(chat, "foregroundEnabled", source),
@@ -279,7 +370,16 @@ test("actual native publisher preserves scope exclusions when the selected main 
     "keepSpecExecutionSource",
     `return ${expression}`,
   ) as (...values: unknown[]) => boolean;
-  const hidden: unknown[] = [true, true, null, false, false, false, false, true];
+  const hidden: unknown[] = [
+    true,
+    true,
+    null,
+    false,
+    false,
+    false,
+    false,
+    true,
+  ];
   assert.equal(evaluate(...hidden), true);
   for (const [index, value] of [
     [0, false],
@@ -293,11 +393,16 @@ test("actual native publisher preserves scope exclusions when the selected main 
     blocked[index] = value;
     assert.equal(evaluate(...blocked), false);
   }
-  assert.equal(evaluate(true, true, null, false, false, true, true, false), true);
+  assert.equal(
+    evaluate(true, true, null, false, false, true, true, false),
+    true,
+  );
   const wrapper = await parse("../v4/WorkbenchPane.tsx");
   const native = descendants(
     wrapper,
-    (node) => ts.isJsxSelfClosingElement(node) && node.tagName.getText(wrapper) === "SessionPane",
+    (node) =>
+      ts.isJsxSelfClosingElement(node) &&
+      node.tagName.getText(wrapper) === "SessionPane",
   )[0] as ts.JsxSelfClosingElement;
   assert.equal(
     prop(native, "keepSpecExecutionSource", wrapper),
@@ -305,47 +410,69 @@ test("actual native publisher preserves scope exclusions when the selected main 
   );
 });
 
-test("actual side panel keeps a restore route on the document and relaxes bounds only while collapsed", async () => {
+test("actual side panel keeps a restore route in the caption and relaxes bounds only while collapsed", async () => {
   const source = await parse("../app-shell/AnimatedSidePanePanel.tsx");
-  const document = descendants(
+  const captionSource = await parse(
+    "../app-shell/WorkspaceSidePaneCaptionControls.tsx",
+  );
+  // U-04 迁移：SpecDocumentPane 不再持有聊天显隐 props——⤢ «Развернуть документ» 已并入
+  // tabs caption 的角色开关；文档头不再出现位置相关的聊天控制。
+  const documentPane = descendants(
     source,
     (node) =>
-      ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "SpecDocumentPane",
+      ts.isJsxSelfClosingElement(node) &&
+      node.tagName.getText(source) === "SpecDocumentPane",
   )[0] as ts.JsxSelfClosingElement;
   assert.equal(
-    prop(document, "generalChatCollapsed", source),
-    "generalChatCollapsed={generalChatCollapsed}",
-  );
-  assert.equal(
-    prop(document, "onToggleGeneralChat", source),
-    "onToggleGeneralChat={onToggleGeneralChat}",
-  );
-  assert.equal(
-    prop(document, "onActivate", source),
+    prop(documentPane, "onActivate", source),
     "onActivate={() => onOpenCodeViewer(tab.source)}",
   );
+  assert.equal(prop(documentPane, "generalChatCollapsed", source), undefined);
+  assert.equal(prop(documentPane, "onToggleGeneralChat", source), undefined);
   const panel = descendants(
     source,
-    (node) => ts.isJsxOpeningElement(node) && node.tagName.getText(source) === "ResizablePanel",
+    (node) =>
+      ts.isJsxOpeningElement(node) &&
+      node.tagName.getText(source) === "ResizablePanel",
   )[0] as ts.JsxOpeningElement;
   assert.equal(
     prop(panel, "maxSize", source),
     'maxSize={generalChatCollapsed ? "100%" : panelLayout.maxSize}',
   );
-  const restore = descendants(
-    source,
+  // 恢复入口：caption 控制簇中的统一角色开关（有区域被隐藏时优先恢复，U-05 restore-first）。
+  const captionToggle = descendants(
+    captionSource,
     (node) =>
-      ts.isJsxOpeningElement(node) &&
-      node.tagName.getText(source) === "Button" &&
-      prop(node, "aria-label", source) === 'aria-label="Show main chat"',
+      (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+      node.tagName.getText(captionSource) === "WorkspaceSidePaneToggleButton",
   )[0] as ts.JsxOpeningElement;
-  assert.equal(prop(restore, "onClick", source), "onClick={onToggleGeneralChat}");
+  assert.ok(
+    captionToggle,
+    "caption controls must render the unified role toggle",
+  );
+  assert.equal(
+    prop(captionToggle, "isSidePaneOpen", captionSource),
+    "isSidePaneOpen={!roleToggle.targetHidden}",
+  );
+  assert.equal(
+    prop(captionToggle, "onToggleSidePane", captionSource),
+    "onToggleSidePane={roleToggle.onToggle}",
+  );
+  assert.equal(
+    prop(captionToggle, "disabled", captionSource),
+    "disabled={roleToggle.disabled}",
+  );
   const headerControls = descendants(
     source,
-    (node) => ts.isVariableDeclaration(node) && node.name.getText(source) === "closeSidePaneButton",
+    (node) =>
+      ts.isVariableDeclaration(node) &&
+      node.name.getText(source) === "sidePaneCaptionControls",
   )[0];
   assert.ok(headerControls);
-  assert.match(headerControls.getText(source), /generalChatCollapsed && onToggleGeneralChat/);
+  assert.match(
+    headerControls.getText(source),
+    /WorkspaceSidePaneCaptionControls/,
+  );
 });
 
 test("discussion activation uses the native reveal-and-reuse entry without changing general chat", async () => {
@@ -353,27 +480,42 @@ test("discussion activation uses the native reveal-and-reuse entry without chang
   const handler = descendants(
     source,
     (node) =>
-      ts.isVariableDeclaration(node) && node.name.getText(source) === "handleOpenCodeViewer",
+      ts.isVariableDeclaration(node) &&
+      node.name.getText(source) === "handleOpenCodeViewer",
   )[0];
   assert.ok(handler);
   const text = handler.getText(source);
   assert.ok(
-    text.indexOf("revealSidePaneForCurrentOwner()") < text.indexOf("commitOpenedSidePaneState("),
+    text.indexOf("revealSidePaneForCurrentOwner()") <
+      text.indexOf("commitOpenedSidePaneState("),
   );
-  assert.match(text, /openCodeViewerSidePane\(current, source, sidePaneOwnerIdRef.current\)/);
-  assert.doesNotMatch(text, /setActiveTask|onSessionCreated|createSession|sendConversationCommand/);
+  assert.match(
+    text,
+    /openCodeViewerSidePane\(current, source, sidePaneOwnerIdRef.current\)/,
+  );
+  assert.doesNotMatch(
+    text,
+    /setActiveTask|onSessionCreated|createSession|sendConversationCommand/,
+  );
   const sidePane = await parse("../lib/workspaceSidePane.ts");
   const open = descendants(
     sidePane,
-    (node) => ts.isFunctionDeclaration(node) && node.name?.text === "openCodeViewerSidePane",
+    (node) =>
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === "openCodeViewerSidePane",
   )[0];
   const activate = descendants(
     sidePane,
-    (node) => ts.isFunctionDeclaration(node) && node.name?.text === "activateSidePaneTab",
+    (node) =>
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === "activateSidePaneTab",
   )[0];
   assert.ok(open && activate);
   assert.match(open.getText(sidePane), /tab.sourceKey === nextTab.sourceKey/);
-  assert.match(activate.getText(sidePane), /findTabIndexById\(current.tabs, tab.id\)/);
+  assert.match(
+    activate.getText(sidePane),
+    /findTabIndexById\(current.tabs, tab.id\)/,
+  );
   assert.match(activate.getText(sidePane), /nextTabs\[existingIndex\] = tab/);
 });
 
@@ -381,7 +523,9 @@ test("actual Workbench admission guard prevents a second managed discussion cont
   const source = await parse("../v4/WorkbenchPane.tsx");
   const native = descendants(
     source,
-    (node) => ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "SessionPane",
+    (node) =>
+      ts.isJsxSelfClosingElement(node) &&
+      node.tagName.getText(source) === "SessionPane",
   );
   assert.equal(native.length, 1);
   assert.ok(ts.isJsxElement(native[0]!.parent));
@@ -391,7 +535,9 @@ test("actual Workbench admission guard prevents a second managed discussion cont
   );
   const declaration = descendants(
     source,
-    (node) => ts.isFunctionDeclaration(node) && node.name?.text === "SpecManagedSessionGuard",
+    (node) =>
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === "SpecManagedSessionGuard",
   )[0];
   assert.ok(declaration);
   const compiled = ts.transpileModule(
@@ -414,12 +560,21 @@ test("actual Workbench admission guard prevents a second managed discussion cont
   const exported: { default?: (props: GuardProps) => ReactNode } = {};
   let managed: { ownerToken: symbol | null } | null = null;
   const lookups: (string | null | undefined)[][] = [];
-  const lookup = (path: string, identity: string | undefined, sessionId: string | null) => {
+  const lookup = (
+    path: string,
+    identity: string | undefined,
+    sessionId: string | null,
+  ) => {
     lookups.push([path, identity, sessionId]);
     return sessionId === "managed-child" ? managed : null;
   };
-  const Button = ({ children, disabled }: { children: ReactNode; disabled?: boolean }) =>
-    createElement("button", { disabled }, children);
+  const Button = ({
+    children,
+    disabled,
+  }: {
+    children: ReactNode;
+    disabled?: boolean;
+  }) => createElement("button", { disabled }, children);
   new Function(
     "exports",
     "require",
@@ -452,7 +607,8 @@ test("actual Workbench admission guard prevents a second managed discussion cont
   managed = { ownerToken: null };
   assert.match(render("managed-child"), /Reopen its document/);
   assert.equal(mounts, 0);
-  for (const sessionId of ["ordinary-session", null, "__draft__"]) render(sessionId);
+  for (const sessionId of ["ordinary-session", null, "__draft__"])
+    render(sessionId);
   render("managed-child", "remote-endpoint");
   assert.equal(mounts, 4);
   assert.deepEqual(lookups.at(-1), ["local-project", "workspace-a", null]);

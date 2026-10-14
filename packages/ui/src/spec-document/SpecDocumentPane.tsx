@@ -86,8 +86,6 @@ export interface SpecDocumentPaneProps {
   onOpenBrowserUrl?: (url: string) => void;
   onOpenCodeViewer?: (source: CodeViewerSource) => void;
   visible?: boolean;
-  generalChatCollapsed?: boolean;
-  onToggleGeneralChat?: () => void;
   onActivate?: () => void;
 }
 
@@ -100,30 +98,46 @@ function Documents({
   onOpenBrowserUrl,
   onOpenCodeViewer,
   visible = true,
-  generalChatCollapsed = false,
-  onToggleGeneralChat,
   onActivate,
 }: SpecDocumentPaneProps) {
-  const { specDocumentService: documentService, fileWatcherService } = useServices();
+  const { specDocumentService: documentService, fileWatcherService } =
+    useServices();
   // Capture this pane's project in every IO request; no shared mutable workspace.
   const documents = useMemo(
     () =>
       documentService && {
         getWorkspace: () => documentService.getWorkspace({ workspacePath }),
         list: () => documentService.list({ workspacePath }),
-        read: (params: { path: string }) => documentService.read({ ...params, workspacePath }),
-        save: (params: { path: string; content: string; expectedSha256: string }) =>
-          documentService.save({ ...params, workspacePath }),
+        read: (params: { path: string }) =>
+          documentService.read({ ...params, workspacePath }),
+        save: (params: {
+          path: string;
+          content: string;
+          expectedSha256: string;
+        }) => documentService.save({ ...params, workspacePath }),
       },
     [documentService, workspacePath],
   );
-  const executionSource = useNativeExecutionSource(workspaceIdentity?.trim() || workspacePath);
-  const parentSessionId = resolveSpecExecutionSessionId(shellParentSessionId, executionSource);
+  const executionSource = useNativeExecutionSource(
+    workspaceIdentity?.trim() || workspacePath,
+  );
+  const parentSessionId = resolveSpecExecutionSessionId(
+    shellParentSessionId,
+    executionSource,
+  );
   const storageKey = specThreadStorageKey(workspacePath, workspaceIdentity);
-  const discussionWriter = useSpecDiscussionWriter(workspaceIdentity?.trim() || workspacePath);
-  const presentationKey = documentPresentationKey(workspacePath, workspaceIdentity);
-  const [restoredPresentation] = useState(() => readDocumentPresentation(presentationKey));
-  const presentationRef = useRef<DocumentPresentationState>(restoredPresentation);
+  const discussionWriter = useSpecDiscussionWriter(
+    workspaceIdentity?.trim() || workspacePath,
+  );
+  const presentationKey = documentPresentationKey(
+    workspacePath,
+    workspaceIdentity,
+  );
+  const [restoredPresentation] = useState(() =>
+    readDocumentPresentation(presentationKey),
+  );
+  const presentationRef =
+    useRef<DocumentPresentationState>(restoredPresentation);
   // 本面板的草稿写入令牌：卸载清理时退役，之后任何迟到写入都不得覆盖
   // 接管面板（子窗口/重新挂载的源面板）已经持久化的草稿。
   const [paneWriteToken] = useState(() => newDocumentPaneWriteToken());
@@ -153,7 +167,9 @@ function Documents({
   const [discussionMode, setDiscussionMode] = useState<DiscussionMode>(
     restoredPresentation.discussionMode,
   );
-  const [discussionRect, setDiscussionRect] = useState(restoredPresentation.discussionRect);
+  const [discussionRect, setDiscussionRect] = useState(
+    restoredPresentation.discussionRect,
+  );
   const [discussionBounds, setDiscussionBounds] = useState<DiscussionBounds>({
     width: 720,
     height: 600,
@@ -162,7 +178,8 @@ function Documents({
   const discussionRectRef = useRef(discussionRect);
   const discussionBoundsRef = useRef(discussionBounds);
   const discussionGestureRef = useRef<
-    (DiscussionGesture & { pointerId: number; target: HTMLButtonElement }) | null
+    | (DiscussionGesture & { pointerId: number; target: HTMLButtonElement })
+    | null
   >(null);
   discussionRectRef.current = discussionRect;
   discussionBoundsRef.current = discussionBounds;
@@ -172,7 +189,10 @@ function Documents({
     if (!element) return;
     const measure = () => {
       if (!element.clientWidth || !element.clientHeight) return;
-      const bounds = { width: element.clientWidth, height: element.clientHeight };
+      const bounds = {
+        width: element.clientWidth,
+        height: element.clientHeight,
+      };
       discussionBoundsRef.current = bounds;
       setDiscussionBounds(bounds);
       setDiscussionRect((current) => clampDiscussionRect(current, bounds));
@@ -186,7 +206,10 @@ function Documents({
     const gesture = discussionGestureRef.current;
     if (!gesture) return;
     discussionGestureRef.current = null;
-    if (canceled) setDiscussionRect(cancelDiscussionGesture(gesture, discussionBoundsRef.current));
+    if (canceled)
+      setDiscussionRect(
+        cancelDiscussionGesture(gesture, discussionBoundsRef.current),
+      );
     if (gesture.target.hasPointerCapture(gesture.pointerId))
       gesture.target.releasePointerCapture(gesture.pointerId);
   }
@@ -214,7 +237,12 @@ function Documents({
     const gesture = discussionGestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     setDiscussionRect(
-      updateDiscussionGesture(gesture, event.clientX, event.clientY, discussionBoundsRef.current),
+      updateDiscussionGesture(
+        gesture,
+        event.clientX,
+        event.clientY,
+        discussionBoundsRef.current,
+      ),
     );
   }
   function keyboardDiscussion(
@@ -226,7 +254,10 @@ function Documents({
       event.stopPropagation();
       return;
     }
-    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    if (
+      !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+    )
+      return;
     event.preventDefault();
     setDiscussionRect((current) =>
       keyboardDiscussionGeometry(
@@ -311,7 +342,10 @@ function Documents({
       !target.matches("textarea, [data-markdown-preview]")
     )
       return;
-    presentationRef.current = { ...presentationRef.current, scrollTop: target.scrollTop };
+    presentationRef.current = {
+      ...presentationRef.current,
+      scrollTop: target.scrollTop,
+    };
     persistPresentation();
   }
   useLayoutEffect(() => {
@@ -323,7 +357,9 @@ function Documents({
       frame = requestAnimationFrame(() => {
         const target = editing
           ? editorRef.current
-          : contentRef.current?.querySelector<HTMLElement>("[data-markdown-preview]");
+          : contentRef.current?.querySelector<HTMLElement>(
+              "[data-markdown-preview]",
+            );
         if (!target) return;
         target.scrollTop = presentationRef.current.scrollTop;
         restoringScrollRef.current = false;
@@ -342,10 +378,13 @@ function Documents({
   }, [document?.path, editing]);
   const writeGuard = useSpecWriteGuard([
     ...(parentSessionId ? [parentSessionId] : []),
-    ...threads.flatMap((thread) => (thread.sessionId ? [thread.sessionId] : [])),
+    ...threads.flatMap((thread) =>
+      thread.sessionId ? [thread.sessionId] : [],
+    ),
     ...threads.map((thread) => thread.parentSessionId),
   ]);
-  const writers = writeGuard.blocked || threads.some((thread) => Boolean(thread.pending));
+  const writers =
+    writeGuard.blocked || threads.some((thread) => Boolean(thread.pending));
   useEffect(() => {
     if (!documents || !document?.path) return;
     return watchSpecDocument({
@@ -359,16 +398,20 @@ function Documents({
         ioPending: ioPendingRef.current,
       }),
       apply: (next) => {
-        const preview = contentRef.current?.querySelector<HTMLElement>("[data-markdown-preview]");
-        const scrollTop = preview?.scrollTop ?? editorRef.current?.scrollTop ?? 0;
+        const preview = contentRef.current?.querySelector<HTMLElement>(
+          "[data-markdown-preview]",
+        );
+        const scrollTop =
+          preview?.scrollTop ?? editorRef.current?.scrollTop ?? 0;
         const start = editorRef.current?.selectionStart;
         const end = editorRef.current?.selectionEnd;
         install(next);
         setStatus("Updated from disk");
         setSelection(null);
         requestAnimationFrame(() => {
-          const refreshed =
-            contentRef.current?.querySelector<HTMLElement>("[data-markdown-preview]");
+          const refreshed = contentRef.current?.querySelector<HTMLElement>(
+            "[data-markdown-preview]",
+          );
           if (refreshed) refreshed.scrollTop = scrollTop;
           if (editorRef.current) {
             editorRef.current.scrollTop = scrollTop;
@@ -387,7 +430,9 @@ function Documents({
         );
       },
       error: (cause) =>
-        setError(`Document watch/read failed: ${String(cause)}. Use Reload to recover.`),
+        setError(
+          `Document watch/read failed: ${String(cause)}. Use Reload to recover.`,
+        ),
     });
   }, [documents, fileWatcherService, document?.path, workspacePath]);
   useEffect(() => {
@@ -395,7 +440,10 @@ function Documents({
     setBindingReady(false);
     let releaseThreads: (() => void) | undefined;
     try {
-      const store = getSpecThreadStore(storageKey, workspaceIdentity?.trim() || workspacePath);
+      const store = getSpecThreadStore(
+        storageKey,
+        workspaceIdentity?.trim() || workspacePath,
+      );
       threadStoreRef.current = store;
       const refresh = () => {
         const current = store.get();
@@ -430,7 +478,9 @@ function Documents({
             setStatus(`${next.length} documents · local UTF-8 files`);
           }
           if (requestedPath) {
-            const normalizedRoot = grant.root.replaceAll("\\", "/").replace(/\/$/, "");
+            const normalizedRoot = grant.root
+              .replaceAll("\\", "/")
+              .replace(/\/$/, "");
             const normalizedPath = requestedPath.replaceAll("\\", "/");
             const relativePath = normalizedPath
               .toLowerCase()
@@ -460,7 +510,9 @@ function Documents({
                 setDiscussionsVisible(false);
               }
               setStatus(
-                restored.content !== opened.content ? "Unsaved draft restored" : "Saved on disk",
+                restored.content !== opened.content
+                  ? "Unsaved draft restored"
+                  : "Saved on disk",
               );
               if (restored.conflict)
                 setError(
@@ -476,7 +528,8 @@ function Documents({
           // 修复：文件缺失时清掉过期的 path/线程选择/滚动（草稿条目保留），
           // 显示可恢复状态：文件回来或再次选择该文件时草稿会自动恢复。
           if (requestedPath && isMissingDocumentError(cause)) {
-            const recovered = recoverMissingDocumentPresentation(presentationKey);
+            const recovered =
+              recoverMissingDocumentPresentation(presentationKey);
             presentationRef.current = recovered ?? {
               ...presentationRef.current,
               path: null,
@@ -510,9 +563,15 @@ function Documents({
   function updateThread(next: SpecThread) {
     // Command acknowledgements may finish after the user has changed the composer draft.
     if (discussionWriter.canWrite())
-      threadStoreRef.current?.update((current) => mergeSpecThreadUpdate(current, next));
+      threadStoreRef.current?.update((current) =>
+        mergeSpecThreadUpdate(current, next),
+      );
   }
-  function updateQuestionDraft(threadId: string, questionDraft: string, expected?: string) {
+  function updateQuestionDraft(
+    threadId: string,
+    questionDraft: string,
+    expected?: string,
+  ) {
     if (discussionWriter.canWrite())
       threadStoreRef.current?.update((current) =>
         changeSpecQuestionDraft(current, threadId, questionDraft, expected),
@@ -524,16 +583,27 @@ function Documents({
     setError("");
     try {
       const next = await documents.read({ path });
-      presentationRef.current = { ...presentationRef.current, path: next.path, scrollTop: 0 };
+      presentationRef.current = {
+        ...presentationRef.current,
+        path: next.path,
+        scrollTop: 0,
+      };
       install(next);
       setSelection(null);
       setActiveThreadId(null);
-      const restored = restoreDocumentDraft(next, readDocumentDraft(presentationKey, next.path));
+      const restored = restoreDocumentDraft(
+        next,
+        readDocumentDraft(presentationKey, next.path),
+      );
       draftRef.current = restored.content;
       setDraft(restored.content);
       baseSha256Ref.current = restored.baseSha256;
       setBaseSha256(restored.baseSha256);
-      setStatus(restored.content !== next.content ? "Unsaved draft restored" : "Saved on disk");
+      setStatus(
+        restored.content !== next.content
+          ? "Unsaved draft restored"
+          : "Saved on disk",
+      );
       if (restored.conflict)
         setError(
           "Document changed on disk while closed. Your unsaved draft is retained; Save checks its original hash. Reload discards the draft and uses current disk content.",
@@ -545,7 +615,8 @@ function Documents({
     }
   }
   async function save() {
-    if (!documents || !document || !writable || writers || !dirty || ioPending) return;
+    if (!documents || !document || !writable || writers || !dirty || ioPending)
+      return;
     setIoPending(true);
     setError("");
     setStatus("Saving…");
@@ -622,19 +693,25 @@ function Documents({
       setError(String(cause));
     }
   }
-  const documentThreads = threads.filter((thread) => thread.documentPath === document?.path);
-  const activeThread = documentThreads.find((thread) => thread.id === activeThreadId);
+  const documentThreads = threads.filter(
+    (thread) => thread.documentPath === document?.path,
+  );
+  const activeThread = documentThreads.find(
+    (thread) => thread.id === activeThreadId,
+  );
   useEffect(() => {
     let live = true;
     const activate = (event: Event) => {
-      const request = (event as CustomEvent<ManagedNativeDiscussionOpenRequest>).detail;
+      const request = (event as CustomEvent<ManagedNativeDiscussionOpenRequest>)
+        .detail;
       if (
         !request ||
         (request.workspaceIdentity?.trim() || request.workspacePath) !==
           (workspaceIdentity?.trim() || workspacePath) ||
         !threadsRef.current.some(
           (thread) =>
-            thread.id === request.threadId && thread.documentPath === request.documentPath,
+            thread.id === request.threadId &&
+            thread.documentPath === request.documentPath,
         )
       )
         return;
@@ -676,7 +753,11 @@ function Documents({
             next,
             readDocumentDraft(presentationKey, next.path),
           );
-          presentationRef.current = { ...presentationRef.current, path: next.path, scrollTop: 0 };
+          presentationRef.current = {
+            ...presentationRef.current,
+            path: next.path,
+            scrollTop: 0,
+          };
           install(next);
           draftRef.current = restored.content;
           setDraft(restored.content);
@@ -684,7 +765,11 @@ function Documents({
           setBaseSha256(restored.baseSha256);
           setActiveThreadId(request.threadId);
           setDiscussionsVisible(true);
-          setStatus(restored.content !== next.content ? "Unsaved draft restored" : "Saved on disk");
+          setStatus(
+            restored.content !== next.content
+              ? "Unsaved draft restored"
+              : "Saved on disk",
+          );
           if (restored.conflict)
             setError(
               "Document changed on disk while closed. Your unsaved draft is retained; Save checks its original hash. Reload discards the draft and uses current disk content.",
@@ -700,11 +785,18 @@ function Documents({
     window.addEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, activate);
     return () => {
       live = false;
-      window.removeEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, activate);
+      window.removeEventListener(
+        MANAGED_NATIVE_DISCUSSION_OPEN_EVENT,
+        activate,
+      );
     };
   }, [documents, workspaceIdentity, workspacePath, presentationKey]);
   useEffect(() => {
-    if (bindingReady && activeThreadId && !threads.some((thread) => thread.id === activeThreadId)) {
+    if (
+      bindingReady &&
+      activeThreadId &&
+      !threads.some((thread) => thread.id === activeThreadId)
+    ) {
       setActiveThreadId(null);
       setDiscussionsVisible(false);
     }
@@ -751,14 +843,19 @@ function Documents({
         </select>
       </div>
       {error ? (
-        <div role="alert" className="border-b border-border px-3 py-2 text-ui-sm text-destructive">
+        <div
+          role="alert"
+          className="border-b border-border px-3 py-2 text-ui-sm text-destructive"
+        >
           {error}
         </div>
       ) : null}
       <div
         ref={discussionContainerRef}
         className={
-          discussionMode === "docked" && discussionsVisible && dockedLayout.stacked
+          discussionMode === "docked" &&
+          discussionsVisible &&
+          dockedLayout.stacked
             ? "relative flex min-h-0 flex-1 flex-col overflow-y-auto"
             : "relative flex min-h-0 flex-1"
         }
@@ -768,7 +865,9 @@ function Documents({
           onScrollCapture={captureScroll}
           className="relative flex min-w-0 flex-1 flex-col"
           style={
-            discussionMode === "docked" && discussionsVisible && dockedLayout.stacked
+            discussionMode === "docked" &&
+            discussionsVisible &&
+            dockedLayout.stacked
               ? { minHeight: MIN_DOCUMENT_HEIGHT }
               : undefined
           }
@@ -806,18 +905,9 @@ function Documents({
               preserveDocumentViewState
               documentActions={
                 <>
-                  {onToggleGeneralChat ? (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title={generalChatCollapsed ? "Вернуть чат" : "Развернуть документ"}
-                      aria-label={generalChatCollapsed ? "Вернуть чат" : "Развернуть документ"}
-                      aria-pressed={generalChatCollapsed}
-                      onClick={onToggleGeneralChat}
-                    >
-                      {generalChatCollapsed ? <Minimize2 /> : <Maximize2 />}
-                    </Button>
-                  ) : null}
+                  {/* U-04：旧的 ⤢ 文档展开/还原聊天按钮已并入 tabs 容器 caption 的
+                      角色开关（workspacePanelRoles.ts）——聊天显隐不再是文档头的
+                      位置相关控制，恢复入口在 swap 两种排列下都可用（U-05）。 */}
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -861,12 +951,16 @@ function Documents({
                 </>
               }
               onDocumentComment={
-                !dirty && parentSessionId && bindingReady && discussionWriter.writable
+                !dirty &&
+                parentSessionId &&
+                bindingReady &&
+                discussionWriter.writable
                   ? ({ selectedText, comment, range }) => {
                       const lines = draft.split("\n");
                       const start =
-                        lines.slice(0, Math.max(0, range.startLine - 1)).join("\n").length +
-                        (range.startLine > 1 ? 1 : 0);
+                        lines
+                          .slice(0, Math.max(0, range.startLine - 1))
+                          .join("\n").length + (range.startLine > 1 ? 1 : 0);
                       discuss(
                         {
                           start,
@@ -888,17 +982,26 @@ function Documents({
                 workspaceKey: workspaceIdentity?.trim() || workspacePath,
               }}
               onDiscussFragment={
-                !dirty && parentSessionId && bindingReady && discussionWriter.writable
+                !dirty &&
+                parentSessionId &&
+                bindingReady &&
+                discussionWriter.writable
                   ? (quote) => {
                       const first = draft.indexOf(quote);
-                      const unique = first >= 0 && draft.indexOf(quote, first + 1) < 0;
+                      const unique =
+                        first >= 0 && draft.indexOf(quote, first + 1) < 0;
                       const start = unique ? first : -1;
                       discuss({
                         start,
                         quote,
-                        prefix: unique ? draft.slice(Math.max(0, start - 120), start) : "",
+                        prefix: unique
+                          ? draft.slice(Math.max(0, start - 120), start)
+                          : "",
                         suffix: unique
-                          ? draft.slice(start + quote.length, start + quote.length + 120)
+                          ? draft.slice(
+                              start + quote.length,
+                              start + quote.length + 120,
+                            )
                           : "",
                         sha256: document!.sha256,
                       });
@@ -978,7 +1081,10 @@ function Documents({
               if (
                 event.key === "Escape" &&
                 !event.defaultPrevented &&
-                !(event.target instanceof Element && event.target.closest('[role="dialog"]'))
+                !(
+                  event.target instanceof Element &&
+                  event.target.closest('[role="dialog"]')
+                )
               )
                 event.stopPropagation();
             }}
@@ -992,17 +1098,25 @@ function Documents({
                 aria-valuenow={Math.round(dockedLayout.width)}
                 title="Resize discussion · arrow keys"
                 className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize touch-none outline-none focus:bg-primary/20 hover:bg-primary/10"
-                onPointerDown={(event) => startDiscussionGesture(event, "resize-docked")}
+                onPointerDown={(event) =>
+                  startDiscussionGesture(event, "resize-docked")
+                }
                 onPointerMove={moveDiscussionGesture}
                 onPointerUp={() => finishDiscussionGesture()}
                 onPointerCancel={() => finishDiscussionGesture(true)}
                 onLostPointerCapture={() => finishDiscussionGesture(true)}
-                onKeyDown={(event) => keyboardDiscussion(event, "resize-docked")}
+                onKeyDown={(event) =>
+                  keyboardDiscussion(event, "resize-docked")
+                }
               />
             ) : null}
             <div
               className="flex shrink-0 items-center gap-1 border-b border-border p-2"
-              style={discussionMode === "floating" ? { minWidth: MIN_DISCUSSION_WIDTH } : undefined}
+              style={
+                discussionMode === "floating"
+                  ? { minWidth: MIN_DISCUSSION_WIDTH }
+                  : undefined
+              }
             >
               {discussionMode === "floating" ? (
                 <Button
@@ -1011,7 +1125,9 @@ function Documents({
                   aria-label="Move discussion"
                   title="Move discussion · arrow keys"
                   className="cursor-move touch-none"
-                  onPointerDown={(event) => startDiscussionGesture(event, "move")}
+                  onPointerDown={(event) =>
+                    startDiscussionGesture(event, "move")
+                  }
                   onPointerMove={moveDiscussionGesture}
                   onPointerUp={() => finishDiscussionGesture()}
                   onPointerCancel={() => finishDiscussionGesture(true)}
@@ -1042,7 +1158,11 @@ function Documents({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={discussionMode === "floating" ? "Dock discussion" : "Float discussion"}
+                aria-label={
+                  discussionMode === "floating"
+                    ? "Dock discussion"
+                    : "Float discussion"
+                }
                 title={
                   discussionMode === "floating"
                     ? "Dock discussion"
@@ -1050,7 +1170,9 @@ function Documents({
                 }
                 onClick={() => {
                   finishDiscussionGesture(true);
-                  setDiscussionMode(discussionMode === "floating" ? "docked" : "floating");
+                  setDiscussionMode(
+                    discussionMode === "floating" ? "docked" : "floating",
+                  );
                 }}
               >
                 {discussionMode === "floating" ? <Minimize2 /> : <Maximize2 />}
@@ -1069,7 +1191,9 @@ function Documents({
                 <div
                   key={thread.id}
                   className={
-                    thread.id === activeThreadId ? "flex min-h-0 flex-1 flex-col" : "hidden"
+                    thread.id === activeThreadId
+                      ? "flex min-h-0 flex-1 flex-col"
+                      : "hidden"
                   }
                   style={
                     discussionMode === "floating"
@@ -1087,7 +1211,11 @@ function Documents({
                     updateQuestionDraft={updateQuestionDraft}
                     workspacePath={workspacePath}
                     workspaceIdentity={workspaceIdentity}
-                    visible={visible && discussionsVisible && thread.id === activeThreadId}
+                    visible={
+                      visible &&
+                      discussionsVisible &&
+                      thread.id === activeThreadId
+                    }
                     onOpenBrowserUrl={onOpenBrowserUrl}
                     onOpenCodeViewer={onOpenCodeViewer}
                     onActivate={() => {
@@ -1106,7 +1234,10 @@ function Documents({
                 </div>
               ))
             ) : (
-              <p role="status" className="p-3 text-ui-sm text-foreground-subtle">
+              <p
+                role="status"
+                className="p-3 text-ui-sm text-foreground-subtle"
+              >
                 {discussionWriter.phase === "busy"
                   ? "Document discussions are controlled in another window. This document remains available to read."
                   : discussionWriter.phase === "checking"
@@ -1125,12 +1256,16 @@ function Documents({
                 aria-label="Resize discussion"
                 title="Resize discussion · arrow keys"
                 className="absolute bottom-0 right-0 z-20 size-5 cursor-se-resize touch-none rounded-br-xl text-foreground-subtle outline-none focus:bg-primary/20"
-                onPointerDown={(event) => startDiscussionGesture(event, "resize-floating")}
+                onPointerDown={(event) =>
+                  startDiscussionGesture(event, "resize-floating")
+                }
                 onPointerMove={moveDiscussionGesture}
                 onPointerUp={() => finishDiscussionGesture()}
                 onPointerCancel={() => finishDiscussionGesture(true)}
                 onLostPointerCapture={() => finishDiscussionGesture(true)}
-                onKeyDown={(event) => keyboardDiscussion(event, "resize-floating")}
+                onKeyDown={(event) =>
+                  keyboardDiscussion(event, "resize-floating")
+                }
               >
                 <Maximize2 className="size-3" />
               </button>
@@ -1145,10 +1280,13 @@ function Documents({
         ) : null}
         {!parentSessionId && document ? (
           <p role={executionSource?.phase === "error" ? "alert" : "status"}>
-            {executionSource?.error || "Preparing the native ZCODE model for fragment discussions…"}
+            {executionSource?.error ||
+              "Preparing the native ZCODE model for fragment discussions…"}
           </p>
         ) : null}
-        {writable && writers ? <p>Save waits for active conversations to finish.</p> : null}
+        {writable && writers ? (
+          <p>Save waits for active conversations to finish.</p>
+        ) : null}
       </div>
     </div>
   );
@@ -1158,7 +1296,9 @@ export function SpecDocumentPane(props: SpecDocumentPaneProps) {
   const scope = useMemo(
     () => ({
       workspacePath: props.workspacePath,
-      ...(props.workspaceIdentity ? { workspaceIdentity: props.workspaceIdentity } : {}),
+      ...(props.workspaceIdentity
+        ? { workspaceIdentity: props.workspaceIdentity }
+        : {}),
     }),
     [props.workspacePath, props.workspaceIdentity],
   );

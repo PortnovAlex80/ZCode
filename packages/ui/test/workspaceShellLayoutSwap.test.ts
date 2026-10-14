@@ -46,13 +46,19 @@ describe("specShellLayoutSwap persistence helper (U-01)", () => {
     const keyB = specShellLayoutSwapKey("D:\\work\\project-b");
 
     expect(readSpecShellLayoutSwap(keyA, storage)).toBe("chat-center");
-    expect(writeSpecShellLayoutSwap(keyA, "document-center", storage)).toBe(true);
+    expect(writeSpecShellLayoutSwap(keyA, "document-center", storage)).toBe(
+      true,
+    );
     expect(readSpecShellLayoutSwap(keyA, storage)).toBe("document-center");
     // 不同的 workspace identity 互不串扰。
     expect(readSpecShellLayoutSwap(keyB, storage)).toBe("chat-center");
 
-    expect(toggleSpecShellLayoutSwapMode("chat-center")).toBe("document-center");
-    expect(toggleSpecShellLayoutSwapMode("document-center")).toBe("chat-center");
+    expect(toggleSpecShellLayoutSwapMode("chat-center")).toBe(
+      "document-center",
+    );
+    expect(toggleSpecShellLayoutSwapMode("document-center")).toBe(
+      "chat-center",
+    );
   });
 
   it("ignores corrupted storage instead of guessing a mode", () => {
@@ -60,7 +66,10 @@ describe("specShellLayoutSwap persistence helper (U-01)", () => {
     const key = specShellLayoutSwapKey("/repo");
     storage.setItem(key, "{not json");
     expect(readSpecShellLayoutSwap(key, storage)).toBe("chat-center");
-    storage.setItem(key, JSON.stringify({ version: 2, mode: "document-center" }));
+    storage.setItem(
+      key,
+      JSON.stringify({ version: 2, mode: "document-center" }),
+    );
     expect(readSpecShellLayoutSwap(key, storage)).toBe("chat-center");
     storage.setItem(key, JSON.stringify({ version: 1, mode: "unexpected" }));
     expect(readSpecShellLayoutSwap(key, storage)).toBe("chat-center");
@@ -80,18 +89,18 @@ describe("specShellLayoutSwap persistence helper (U-01)", () => {
 
   it("keeps a separate layout namespace and panel id order per arrangement", () => {
     // RRP 的布局存储键按面板出现顺序拼接：交换排列必须同步翻转 panelIds。
-    expect(specShellBodyLayoutId("workspace-body-layout", false)).toBe("workspace-body-layout");
+    expect(specShellBodyLayoutId("workspace-body-layout", false)).toBe(
+      "workspace-body-layout",
+    );
     expect(specShellBodyLayoutId("workspace-body-layout", true)).toBe(
       "workspace-body-layout:document-center",
     );
-    expect(resolveSpecShellBodyPanelIds(false, ["conversation-column", "browser"])).toEqual([
-      "conversation-column",
-      "browser",
-    ]);
-    expect(resolveSpecShellBodyPanelIds(true, ["conversation-column", "browser"])).toEqual([
-      "browser",
-      "conversation-column",
-    ]);
+    expect(
+      resolveSpecShellBodyPanelIds(false, ["conversation-column", "browser"]),
+    ).toEqual(["conversation-column", "browser"]);
+    expect(
+      resolveSpecShellBodyPanelIds(true, ["conversation-column", "browser"]),
+    ).toEqual(["browser", "conversation-column"]);
   });
 });
 
@@ -109,9 +118,9 @@ describe("AnimatedSidePanePanel document-center layout model (U-01)", () => {
       minSize: "240px",
       useResizablePanel: true,
     });
-    expect(Number.parseFloat(SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE)).toBeGreaterThan(
-      50,
-    );
+    expect(
+      Number.parseFloat(SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE),
+    ).toBeGreaterThan(50);
   });
 
   it("keeps the ordinary desktop side pane arrangement unchanged", () => {
@@ -127,7 +136,9 @@ describe("AnimatedSidePanePanel document-center layout model (U-01)", () => {
       minSize: "240px",
       useResizablePanel: true,
     });
-    expect(resolveAnimatedSidePanePanelLayout({ mobileOverlay: false })).toMatchObject({
+    expect(
+      resolveAnimatedSidePanePanelLayout({ mobileOverlay: false }),
+    ).toMatchObject({
       defaultSize: "0px",
       maxSize: "65%",
     });
@@ -144,13 +155,21 @@ describe("AnimatedSidePanePanel document-center layout model (U-01)", () => {
 });
 
 describe("WorkspaceShellLayout source contract for the swap (U-01)", () => {
-  const layoutSource = readSource("packages/ui/src/app-shell/WorkspaceShellLayout.tsx");
-  const sidePaneSource = readSource("packages/ui/src/app-shell/AnimatedSidePanePanel.tsx");
+  const layoutSource = readSource(
+    "packages/ui/src/app-shell/WorkspaceShellLayout.tsx",
+  );
+  const sidePaneSource = readSource(
+    "packages/ui/src/app-shell/AnimatedSidePanePanel.tsx",
+  );
 
   it("persists the mode per workspace identity through the dedicated helper", () => {
-    expect(layoutSource).toContain("specShellLayoutSwapKey(workspaceAbsPath, workspaceIdentity)");
+    expect(layoutSource).toContain(
+      "specShellLayoutSwapKey(workspaceAbsPath, workspaceIdentity)",
+    );
     expect(layoutSource).toContain("readSpecShellLayoutSwap(");
-    expect(layoutSource).toContain("writeSpecShellLayoutSwap(shellLayoutSwapStorageKey, nextMode)");
+    expect(layoutSource).toContain(
+      "writeSpecShellLayoutSwap(shellLayoutSwapStorageKey, nextMode)",
+    );
     expect(layoutSource).toContain("toggleSpecShellLayoutSwapMode(");
   });
 
@@ -168,9 +187,13 @@ describe("WorkspaceShellLayout source contract for the swap (U-01)", () => {
     // 视觉换位由 order 完成，分隔条始终位于文档与聊天之间（chat=1 / handle=2 / tabs=3）。
     // RRP Panel 的 style prop 只作用于内层 div，外层 flex item 的 order 由
     // elementRef 挂载写入 + 宿主渲染期 applySpecShellLayoutSwapOrders 同步。
-    expect(sidePaneSource).toContain('element.style.order = documentCenter ? "1" : "3"');
+    expect(sidePaneSource).toContain(
+      'element.style.order = documentCenter ? "1" : "3"',
+    );
     expect(sidePaneSource).toContain("style={{ order: 2 }}");
-    expect(layoutSource).toContain('element.style.order = isDocumentCenterLayout ? "3" : "1"');
+    expect(layoutSource).toContain(
+      'element.style.order = isDocumentCenterLayout ? "3" : "1"',
+    );
     expect(layoutSource).toMatch(
       /applySpecShellLayoutSwapOrders\(\s*conversationColumnOuterElementRef\.current,\s*sidePanePanelElementRef\.current,/u,
     );
@@ -178,9 +201,15 @@ describe("WorkspaceShellLayout source contract for the swap (U-01)", () => {
 
   it("flips the conversation panel constraints so the mode change re-registers RRP panels", () => {
     // 约束变化触发面板重注册，库按 offsetLeft（含 flex order）重排，拖拽/键盘跟随实际位置。
-    expect(layoutSource).toContain("SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_MIN_SIZE");
-    expect(layoutSource).toContain("SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_DEFAULT_SIZE");
-    expect(layoutSource).toContain("SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE");
+    expect(layoutSource).toContain(
+      "SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_MIN_SIZE",
+    );
+    expect(layoutSource).toContain(
+      "SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_DEFAULT_SIZE",
+    );
+    expect(layoutSource).toContain(
+      "SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE",
+    );
   });
 
   it("exposes the current arrangement on the conversation frame for tests and a11y tooling", () => {
@@ -194,12 +223,15 @@ describe("WorkspaceShellLayout source contract for the swap (U-01)", () => {
 
   it("routes Windows/Linux inline window controls to whichever caption is actually top-right", () => {
     // 普通排列：tabs 容器 caption 承载窗控；交换排列：聊天列 Header 承载；
-    // «Развернуть документ» 隐藏聊天后 tabs 容器铺满，caption 重新承载。
+    // 聊天被隐藏（角色模型下 AUXILIARY 隐藏）后 tabs 容器铺满，caption 重新承载。
+    // U-04：WorkspaceHeader 的 isSidePaneOpen 布尔同时门控面板恢复按钮与内联窗控
+    // （WorkspaceHeaderActionSection 既有契约），窗控路由项保持原语义；第二项仅在
+    // 无内联窗控平台（macOS/Web）抑制无事可做的恢复按钮。
     expect(layoutSource).toMatch(
       /sidePaneCaptionCarriesWindowControls =\s*!isDocumentCenterLayout \|\| generalChatCollapsed/u,
     );
     expect(layoutSource).toMatch(
-      /isSidePaneOpen=\{\s*isSidePaneOpen &&\s*sidePaneCaptionCarriesWindowControls\s*\}/u,
+      /isSidePaneOpen=\{\s*\(isSidePaneOpen &&\s*sidePaneCaptionCarriesWindowControls\) \|\|\s*chatCaptionSuppressIdleRestore\s*\}/u,
     );
     expect(layoutSource).toMatch(
       /showWindowControls=\{\s*!options\.mobileOverlay &&\s*usesInlineWindowControls &&\s*sidePaneCaptionCarriesWindowControls\s*\}/u,
@@ -207,27 +239,46 @@ describe("WorkspaceShellLayout source contract for the swap (U-01)", () => {
   });
 
   it("offers an accessible icon toggle with the requested tooltips", () => {
-    expect(sidePaneSource).toContain('data-spec-shell-layout-swap-toggle=""');
-    expect(sidePaneSource).toContain("aria-pressed={documentCenter}");
-    expect(sidePaneSource).toContain(
+    // U-04：swap 控制移入 WorkspaceSidePaneCaptionControls，语义不变（几何换位）。
+    const captionSource = readSource(
+      "packages/ui/src/app-shell/WorkspaceSidePaneCaptionControls.tsx",
+    );
+    expect(captionSource).toContain('data-spec-shell-layout-swap-toggle=""');
+    expect(captionSource).toContain("aria-pressed={documentCenter}");
+    expect(captionSource).toContain(
       'aria-label={documentCenter ? "Чат в центре" : "Документ в центре"}',
     );
-    expect(sidePaneSource).toContain(
+    expect(captionSource).toContain(
       'title={documentCenter ? "Чат в центре" : "Документ в центре"}',
     );
   });
 
-  it("points the show-main-chat control toward the side the chat actually occupies", () => {
-    expect(sidePaneSource).toContain(
-      "const ShowChatIcon = documentCenter ? PanelRightOpen : PanelLeftOpen;",
+  it("keeps the caption free of position-dependent panel glyphs (U-04)", () => {
+    // U-04 迁移：「Show main chat」方向箭头（PanelLeft/RightOpen）与固定右侧面板开关
+    // （PanelRightClose/Open）全部并入角色开关；壳层内不得残留方向性面板图标。
+    expect(sidePaneSource).not.toContain("PanelLeftOpen");
+    expect(sidePaneSource).not.toContain("PanelRightOpen");
+    expect(sidePaneSource).not.toContain("PanelLeftClose");
+    expect(sidePaneSource).not.toContain("PanelRightClose");
+    expect(sidePaneSource).not.toContain("Show main chat");
+    const toggleSource = readSource(
+      "packages/ui/src/WorkspaceSidePaneToggleButton.tsx",
     );
+    expect(toggleSource).not.toContain("PanelRightClose");
+    expect(toggleSource).not.toContain("PanelRightOpen");
+    expect(toggleSource).toContain("Columns2");
   });
 
-  it("keeps the document-expand flow meaning: «Развернуть документ» hides the chat on the chosen side", () => {
-    // 既有折叠语义未改动：仍以 generalChatCollapsed 折叠 conversation-column，
-    // 交换排列下聊天在右侧被隐藏，文档铺满；«Вернуть чат» 原路恢复。
+  it("keeps the chat-hide flow meaning: hidden chat collapses the conversation column on the chosen side", () => {
+    // U-04 后聊天显隐仍以 generalChatCollapsed 折叠 conversation-column（铺满规则泛化为
+    // 「AUXILIARY 隐藏 ⇒ PRIMARY 铺满」）；恢复入口并入 tabs caption 的角色开关。
     expect(layoutSource).toContain("collapsible={generalChatCollapsed}");
-    expect(sidePaneSource).toContain("generalChatCollapsed && onToggleGeneralChat");
+    expect(layoutSource).toContain("resolveWorkspaceBodyRoleState({");
+    const captionSource = readSource(
+      "packages/ui/src/app-shell/WorkspaceSidePaneCaptionControls.tsx",
+    );
+    expect(captionSource).toContain("WorkspaceSidePaneToggleButton");
+    expect(sidePaneSource).toContain("roleToggle={sidePaneRoleToggle}");
   });
 });
 
@@ -241,8 +292,14 @@ describe("WorkspaceShellLayout source contract for the swap (U-01)", () => {
  */
 describe("react-resizable-panels follows the swapped placement (U-01 mechanism)", () => {
   function installLayoutGeometryStub() {
-    const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetLeft");
-    const widthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetLeft",
+    );
+    const widthDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetWidth",
+    );
     expect(descriptor).toBeTruthy();
     Object.defineProperty(HTMLElement.prototype, "offsetLeft", {
       configurable: true,
@@ -256,9 +313,14 @@ describe("react-resizable-panels follows the swapped placement (U-01 mechanism)"
       get: () => 1000,
     });
     return () => {
-      if (descriptor) Object.defineProperty(HTMLElement.prototype, "offsetLeft", descriptor);
+      if (descriptor)
+        Object.defineProperty(HTMLElement.prototype, "offsetLeft", descriptor);
       if (widthDescriptor)
-        Object.defineProperty(HTMLElement.prototype, "offsetWidth", widthDescriptor);
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetWidth",
+          widthDescriptor,
+        );
     };
   }
 
@@ -280,14 +342,20 @@ describe("react-resizable-panels follows the swapped placement (U-01 mechanism)"
       onChatMountChange(1);
       return () => onChatMountChange(-1);
     }, [onChatMountChange]);
-    const handleConversationElementRef = useCallbackRef((element: HTMLDivElement | null) => {
-      conversationElementRef.current = element;
-      if (element) element.style.order = documentCenter ? "3" : "1";
-    }, documentCenter);
-    const handleSidePaneElementRef = useCallbackRef((element: HTMLDivElement | null) => {
-      sidePaneElementRef.current = element;
-      if (element) element.style.order = documentCenter ? "1" : "3";
-    }, documentCenter);
+    const handleConversationElementRef = useCallbackRef(
+      (element: HTMLDivElement | null) => {
+        conversationElementRef.current = element;
+        if (element) element.style.order = documentCenter ? "3" : "1";
+      },
+      documentCenter,
+    );
+    const handleSidePaneElementRef = useCallbackRef(
+      (element: HTMLDivElement | null) => {
+        sidePaneElementRef.current = element;
+        if (element) element.style.order = documentCenter ? "1" : "3";
+      },
+      documentCenter,
+    );
     // 渲染期同步 order（与产品实现一致：必须先于 RRP 面板重注册读取 offsetLeft 生效）。
     applySpecShellLayoutSwapOrders(
       conversationElementRef.current,
@@ -305,7 +373,9 @@ describe("react-resizable-panels follows the swapped placement (U-01 mechanism)"
           defaultSize: documentCenter
             ? SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_DEFAULT_SIZE
             : "60%",
-          minSize: documentCenter ? SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_MIN_SIZE : "35%",
+          minSize: documentCenter
+            ? SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_MIN_SIZE
+            : "35%",
           elementRef: handleConversationElementRef,
         },
         createElement("input", {
@@ -314,15 +384,20 @@ describe("react-resizable-panels follows the swapped placement (U-01 mechanism)"
             chatDraftRef.current = element;
           },
           value: draft,
-          onChange: (event: { target: { value: string } }) => setDraft(event.target.value),
+          onChange: (event: { target: { value: string } }) =>
+            setDraft(event.target.value),
         }),
       ),
       createElement(Separator, { style: { order: 2 } }),
       createElement(Panel, {
         id: "browser",
-        defaultSize: documentCenter ? SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE : "40%",
+        defaultSize: documentCenter
+          ? SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE
+          : "40%",
         minSize: "10%",
-        maxSize: documentCenter ? SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_MAX_SIZE : "65%",
+        maxSize: documentCenter
+          ? SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_MAX_SIZE
+          : "65%",
         elementRef: handleSidePaneElementRef,
       }),
     );
@@ -380,21 +455,29 @@ describe("react-resizable-panels follows the swapped placement (U-01 mechanism)"
       expect(chatMounted).toBe(1);
       const draftInput = chatDraftRef.current;
       expect(draftInput).toBeTruthy();
-      const separator = container.querySelector("[data-separator]") as HTMLElement;
+      const separator = container.querySelector(
+        "[data-separator]",
+      ) as HTMLElement;
       expect(separator).toBeTruthy();
-      const groupElement = container.querySelector("[data-group]") as HTMLElement;
+      const groupElement = container.querySelector(
+        "[data-group]",
+      ) as HTMLElement;
       expect(groupElement).toBeTruthy();
 
       const layoutNormalBefore = groupRef.current?.getLayout();
       act(() => {
-        separator.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+        separator.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+        );
       });
       const layoutNormalAfter = groupRef.current?.getLayout() ?? {};
       // 普通排列：chat 在左、doc 在右；ArrowRight 右移分隔条 ⇒ chat 变宽、doc 变窄。
       expect(layoutNormalAfter["conversation-column"]).toBeGreaterThan(
         layoutNormalBefore?.["conversation-column"] ?? 0,
       );
-      expect(layoutNormalAfter["browser"]).toBeLessThan(layoutNormalBefore?.["browser"] ?? 100);
+      expect(layoutNormalAfter["browser"]).toBeLessThan(
+        layoutNormalBefore?.["browser"] ?? 100,
+      );
 
       // 切换到 «Документ в центре»：仅 order 与约束变化，无卸载/重挂载。
       act(() => {
@@ -417,11 +500,15 @@ describe("react-resizable-panels follows the swapped placement (U-01 mechanism)"
 
       const layoutSwappedBefore = groupRef.current?.getLayout();
       act(() => {
-        separator.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+        separator.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+        );
       });
       const layoutSwappedAfter = groupRef.current?.getLayout() ?? {};
       // 交换排列：doc 在左、chat 在右；ArrowRight 仍右移分隔条 ⇒ doc 变宽、chat 变窄。
-      expect(layoutSwappedAfter["browser"]).toBeGreaterThan(layoutSwappedBefore?.["browser"] ?? 0);
+      expect(layoutSwappedAfter["browser"]).toBeGreaterThan(
+        layoutSwappedBefore?.["browser"] ?? 0,
+      );
       expect(layoutSwappedAfter["conversation-column"]).toBeLessThan(
         layoutSwappedBefore?.["conversation-column"] ?? 100,
       );
@@ -441,7 +528,9 @@ describe("react-resizable-panels follows the swapped placement (U-01 mechanism)"
       expect(draftInput?.value).toBe("unsaved-draft");
       const layoutRestoredBefore = groupRef.current?.getLayout();
       act(() => {
-        separator.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+        separator.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
+        );
       });
       const layoutRestoredAfter = groupRef.current?.getLayout() ?? {};
       expect(layoutRestoredAfter["conversation-column"]).toBeLessThan(

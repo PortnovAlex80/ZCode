@@ -28,21 +28,62 @@ swapped, U-01):
   (packages/ui/src/app-shell/WorkspaceShellLayout.tsx:614-636,
   packages/ui/src/app-shell/AnimatedSidePanePanel.tsx:589-595).
 
+### Roles (U-04, user refinement 2026-10-14)
+
+Every arrangement has a PRIMARY region (center, wide) and an AUXILIARY region (right,
+narrow). The swap **exchanges the roles** of the chat and the tabs container; visibility
+never flips on a swap (each region keeps its own visibility state):
+
+| Arrangement     | PRIMARY (center, wide)     | AUXILIARY (right, narrow)  |
+| --------------- | -------------------------- | -------------------------- |
+| chat-center     | chat (conversation column) | tabs pane (`browser`)      |
+| document-center | tabs pane (`browser`)      | chat (conversation column) |
+
+Resolver (single source for the role math): `resolveWorkspaceBodyRoleState`
+packages/ui/src/spec-document/workspacePanelRoles.ts. Full width = auxiliary hidden,
+regardless of roles (chat-center + tabs hidden ⇒ chat full width; document-center +
+chat hidden ⇒ tabs full width).
+
+Panel controls after U-04 (exactly two, both position-independent):
+
+1. **Role toggle «Скрыть/Показать боковую панель»** — ONE control rendered by
+   `WorkspaceSidePaneToggleButton` (neutral `Columns2` glyph; labels via the existing
+   `sidePane.collapse`/`sidePane.expand` intl ids). It hides/shows whichever region is
+   currently AUXILIARY; when some region is hidden it restores that region first
+   (U-05 restore-first, covers a hidden PRIMARY whose caption is unreachable). It lives
+   in the top-right caption cluster: the tabs-pane caption
+   (packages/ui/src/app-shell/WorkspaceSidePaneCaptionControls.tsx, rendered by
+   AnimatedSidePanePanel) whenever the tabs pane is visible, and the chat-column
+   WorkspaceHeader while the tabs pane is hidden (persistent shell-anchored reopen
+   affordance). The migration merged into it: the ⤢ «Развернуть документ» button in the
+   document header, the «Show main chat» caption arrow, and the fixed-region
+   PanelRight* side-pane toggle. No PanelLeft*/PanelRight\* Open/Close glyphs remain in
+   the shell (remaining uses outside the shell are position-true: the fixed-left
+   navigator DesktopTopOverlay/quickpick/collapsed-rail icons and the left-edge
+   selection-share reopen tab).
+2. **Swap toggle** (ArrowLeftRight, target-state label, `aria-pressed`) — geometry-only:
+   exchanges roles, never changes visibility. Unchanged from U-01.
+
+The navigator (left sidebar) stays a root toggle, unchanged.
+
 ## Owners
 
-| Piece | Owner | Evidence |
-| --- | --- | --- |
-| Whole shell composition & CSS-var sidebar split | `WorkspaceShellLayout` (memo component) | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:282 |
-| Left navigator DOM (`<aside id="sidebar">`) | `WorkspaceShellLayout` renders `WorkspaceSidebar` inside it | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2291-2315 |
-| Sidebar show/hide state (`isSidebarVisible`) | shell props (root-level toggle, shortcut) | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:347 |
-| Body split (chat ⇄ tabs) | RRP `ResizablePanelGroup` + `ResizablePanel`s | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2430-2444 |
-| Right tabs container panel (`id="browser"`) | `AnimatedSidePanePanel` (rendered by the shell as `sidePanePanel`) | packages/ui/src/app-shell/AnimatedSidePanePanel.tsx:1638-1665, packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2799 |
-| Side-pane tab inventory/kinds | `WorkspaceSidePaneTab` union (21 kinds: background-bash, browser, browser-permissions, git, code-viewer, treemapping, whiteboard, model-trajectory, developer-tools, terminal, browser-use, subagent-session, subagent-directory, selection-side-chat, plan-detail, plugin-ui, workflow-run, workflow-directory, workflow-actor-session, workflow-workspace, workflow-artifact) | packages/ui/src/lib/workspaceSidePane.ts:530-551, kind literals at :13,:44,:52,:66,:75,:85,:96,:104,:116,:185,:199,:244,:287,:327,:379,:430 |
-| Side-pane open/collapsed animation & imperative size | `useAnimatedResizablePanel` (rAF-deferred `panel.resize`/`panel.collapse`/`panel.expand`) | packages/ui/src/app-shell/useAnimatedResizablePanel.ts:56-130 |
-| Swap mode persistence | `specShellLayoutSwap.ts` helpers, called from the shell | packages/ui/src/spec-document/specShellLayoutSwap.ts:18-58, packages/ui/src/app-shell/WorkspaceShellLayout.tsx:516-541 |
-| Chat collapse («Развернуть документ») state | `generalChatCollapsedWorkspaceKey` state + `resolveSpecGeneralChatCollapsed`/`toggleSpecGeneralChatCollapse` | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:637-665, packages/ui/src/spec-document/specGeneralChatCollapse.ts |
-| Terminal open/size | `useAnimatedResizablePanel({open: isTerminalOpen, expandedSize: "30%"})` | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:590-596 |
-| Conversation auto-collapse policy (window resize) | effect in the shell reading `conversationPanelElementRef` width | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:711-798 |
+| Piece                                                 | Owner                                                                                                                                                                                                                                                                                                                                                                           | Evidence                                                                                                                                                                |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Whole shell composition & CSS-var sidebar split       | `WorkspaceShellLayout` (memo component)                                                                                                                                                                                                                                                                                                                                         | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:282                                                                                                                  |
+| Left navigator DOM (`<aside id="sidebar">`)           | `WorkspaceShellLayout` renders `WorkspaceSidebar` inside it                                                                                                                                                                                                                                                                                                                     | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2291-2315                                                                                                            |
+| Sidebar show/hide state (`isSidebarVisible`)          | shell props (root-level toggle, shortcut)                                                                                                                                                                                                                                                                                                                                       | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:347                                                                                                                  |
+| Body split (chat ⇄ tabs)                              | RRP `ResizablePanelGroup` + `ResizablePanel`s                                                                                                                                                                                                                                                                                                                                   | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2430-2444                                                                                                            |
+| Right tabs container panel (`id="browser"`)           | `AnimatedSidePanePanel` (rendered by the shell as `sidePanePanel`)                                                                                                                                                                                                                                                                                                              | packages/ui/src/app-shell/AnimatedSidePanePanel.tsx:1638-1665, packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2799                                                  |
+| Side-pane tab inventory/kinds                         | `WorkspaceSidePaneTab` union (21 kinds: background-bash, browser, browser-permissions, git, code-viewer, treemapping, whiteboard, model-trajectory, developer-tools, terminal, browser-use, subagent-session, subagent-directory, selection-side-chat, plan-detail, plugin-ui, workflow-run, workflow-directory, workflow-actor-session, workflow-workspace, workflow-artifact) | packages/ui/src/lib/workspaceSidePane.ts:530-551, kind literals at :13,:44,:52,:66,:75,:85,:96,:104,:116,:185,:199,:244,:287,:327,:379,:430                             |
+| Side-pane open/collapsed animation & imperative size  | `useAnimatedResizablePanel` (rAF-deferred `panel.resize`/`panel.collapse`/`panel.expand`)                                                                                                                                                                                                                                                                                       | packages/ui/src/app-shell/useAnimatedResizablePanel.ts:56-130                                                                                                           |
+| Swap mode persistence                                 | `specShellLayoutSwap.ts` helpers, called from the shell                                                                                                                                                                                                                                                                                                                         | packages/ui/src/spec-document/specShellLayoutSwap.ts:18-58, packages/ui/src/app-shell/WorkspaceShellLayout.tsx:516-541                                                  |
+| Body role math (U-04)                                 | `resolveWorkspaceBodyRoleState` pure resolver (primary/auxiliary/hidden/role-toggle target)                                                                                                                                                                                                                                                                                     | packages/ui/src/spec-document/workspacePanelRoles.ts                                                                                                                    |
+| Role toggle presentation (U-04)                       | shell computes target+action+disabled and passes to the tabs caption; chat header receives the restore action via `onToggleSidePane`                                                                                                                                                                                                                                            | packages/ui/src/app-shell/WorkspaceShellLayout.tsx (sidePaneRoleToggle / handleChatCaptionRestorePanel), packages/ui/src/app-shell/WorkspaceSidePaneCaptionControls.tsx |
+| Chat hide state («Скрыть чат» side of the role model) | `generalChatCollapsedWorkspaceKey` state + `resolveSpecGeneralChatCollapsed`/`toggleSpecGeneralChatCollapse` (visibility preserved across swaps)                                                                                                                                                                                                                                | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:637-665, packages/ui/src/spec-document/specGeneralChatCollapse.ts                                                    |
+| Spec namespace layout restore (5.2a re-key)           | `transitionSpecGeneralChatLayout` + `rekeyLayoutToCurrentPanelOrder` — the only shell-side `setLayout` caller; re-keys the restored ordinary layout to the current registry order so RRP's positional math stays aligned                                                                                                                                                        | packages/ui/src/spec-document/specGeneralChatCollapse.ts, packages/ui/src/app-shell/WorkspaceShellLayout.tsx (handleSpecDocumentActiveChange)                           |
+| Terminal open/size                                    | `useAnimatedResizablePanel({open: isTerminalOpen, expandedSize: "30%"})`                                                                                                                                                                                                                                                                                                        | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:590-596                                                                                                              |
+| Conversation auto-collapse policy (window resize)     | effect in the shell reading `conversationPanelElementRef` width                                                                                                                                                                                                                                                                                                                 | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:711-798                                                                                                              |
 
 ## Sizing & divider math
 
@@ -74,8 +115,8 @@ swapped, U-01):
 ### Body group (chat ⇄ tabs container) — the divider between document and chat
 
 - Group: `ResizablePanelGroup` with `layoutId =
-  specShellBodyLayoutId(specGeneralChatLayoutId(workspaceKey, isSpecDocumentActive),
-  isDocumentCenterLayout)`; `panelIds` follow the visual arrangement so the RRP storage
+specShellBodyLayoutId(specGeneralChatLayoutId(workspaceKey, isSpecDocumentActive),
+isDocumentCenterLayout)`; `panelIds` follow the visual arrangement so the RRP storage
   key (built from panel order) reads back what it saved
   packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2430-2444,
   packages/ui/src/spec-document/specShellLayoutSwap.ts:64-78,
@@ -91,14 +132,14 @@ swapped, U-01):
 - browser (tabs container) constraints from `resolveAnimatedSidePanePanelLayout`:
   normal default 0px (opens via imperative resize), min 240px, max 65%; document-center
   default 62%, max 80%; `collapsible`/`disabled` only while hidden (`isDragCollapsible =
-  isResizeDisabled = !isVisible`)
+isResizeDisabled = !isVisible`)
   packages/ui/src/app-shell/animatedSidePanePanelModel.ts:61-96,
   packages/ui/src/app-shell/AnimatedSidePanePanel.tsx:455-456, :1638-1653.
 - The separator lives between the two panels with `order: 2` and mounts only while the
   side pane is visible and chat is not hidden
   packages/ui/src/app-shell/AnimatedSidePanePanel.tsx:1619-1636.
 - Open/resize flow: `useAnimatedResizablePanel` defers one rAF, then `panel.resize(
-  expandedSize)` on open and `panel.collapse()` on close; `rememberExpandedSize` stores
+expandedSize)` on open and `panel.collapse()` on close; `rememberExpandedSize` stores
   the last expanded % so the manual width survives collapse cycles
   packages/ui/src/app-shell/useAnimatedResizablePanel.ts:80-130.
 - Drag/keyboard direction: RRP sorts panels by `offsetLeft` (which reflects CSS `order`)
@@ -106,8 +147,11 @@ swapped, U-01):
   direction follows the actual visual arrangement. The shell therefore re-asserts the
   orders on **every render** (`applySpecShellLayoutSwapOrders`, diff-aware writes)
   packages/ui/src/app-shell/WorkspaceShellLayout.tsx:614-636,
-  packages/ui/src/spec-document/specShellLayoutSwap.ts:94-113 — this is the U-03 fix
-  for the inverted-direction-after-resize report (see below).
+  packages/ui/src/spec-document/specShellLayoutSwap.ts:94-113 — the wave-6 U-03 fix.
+  Layout objects must also keep their **key order == current registry order** (RRP reads
+  them positionally); the only shell-side `setLayout` caller
+  (`transitionSpecGeneralChatLayout`) re-keys the restored layout to the current order
+  before committing — the 5.2a live-regression fix (see the U-03 bug notes below).
 
 ### Conversation column (vertical, inside conversation-column)
 
@@ -119,40 +163,71 @@ swapped, U-01):
 
 ## Interactions
 
-| Interaction | Entry point | Mechanics |
-| --- | --- | --- |
-| Toggle sidebar | shell header/shortcut (`handleToggleSidebar`) | only visibility; width state and CSS var persist |
-| Drag sidebar separator | pointer session | CSS-var during drag, state+persist on release (see above) |
-| Open/close side pane | `WorkspaceSidePaneToggleButton` in tabs caption | `useAnimatedResizablePanel` rAF resize/collapse |
-| Toggle swap «Чат в центре»/«Документ в центре» | icon button in tabs caption (`data-spec-shell-layout-swap-toggle`, aria-pressed) | writes swap storage + in-memory mode; constraints flip → RRP re-registration re-sorts by offsetLeft; DOM order stable, zero remounts packages/ui/src/app-shell/AnimatedSidePanePanel.tsx:1009-1017, packages/ui/src/app-shell/WorkspaceShellLayout.tsx:533-543 |
-| «Развернуть документ» (⤢) | document actions in `SpecDocumentPane` | sets `generalChatCollapsed` → conversation-column collapses to 0 (collapsible only in this state); «Вернуть чат» restores packages/ui/src/spec-document/SpecDocumentPane.tsx:809-820, packages/ui/src/app-shell/WorkspaceShellLayout.tsx:637-679 |
-| Show-main-chat arrow | tabs caption when chat hidden | `onToggleGeneralChat`; icon side follows the arrangement packages/ui/src/app-shell/AnimatedSidePanePanel.tsx:987-1006 |
-| Window resize → auto-collapse | resize listener, 300ms idle | conversation < 480px ⇒ collapse side pane, then conversation < 360px ⇒ collapse sidebar; only reacts to window resizes (not panel opens) packages/ui/src/app-shell/WorkspaceShellLayout.tsx:145-155, :711-798 |
-| Body divider drag/keyboard | RRP separator | direction follows visual order; persisted per layoutId namespace |
+| Interaction                                         | Entry point                                                                                                                                                                   | Mechanics                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Toggle sidebar (navigator)                          | shell header/shortcut (`handleToggleSidebar`)                                                                                                                                 | root toggle, unchanged; only visibility, width state and CSS var persist                                                                                                                                                                                                                                                                                                                                                     |
+| Drag sidebar separator                              | pointer session                                                                                                                                                               | CSS-var during drag, state+persist on release (see above)                                                                                                                                                                                                                                                                                                                                                                    |
+| Role toggle «Скрыть/Показать боковую панель» (U-04) | tabs caption (`WorkspaceSidePaneCaptionControls` → `WorkspaceSidePaneToggleButton`) while the tabs pane is visible; chat-column WorkspaceHeader while the tabs pane is hidden | ONE position-independent control: hides/shows the current AUXILIARY region (tabs pane in chat-center, chat in document-center); restores any hidden region first (U-05). Shell resolves target via `resolveWorkspaceBodyRoleState` and routes to `handleToggleSidePane` / `handleToggleGeneralChat`; hiding the chat still requires an active document (`canCollapseSpecGeneralChat`), the button renders disabled otherwise |
+| Swap «Чат в центре»/«Документ в центре»             | icon button in tabs caption (`data-spec-shell-layout-swap-toggle`, aria-pressed, target-state label)                                                                          | exchanges the ROLES of chat and tabs container; visibility of each region is preserved. Writes swap storage + in-memory mode; constraints flip → RRP re-registration re-sorts by offsetLeft; DOM order stable, zero remounts packages/ui/src/app-shell/WorkspaceSidePaneCaptionControls.tsx, packages/ui/src/app-shell/WorkspaceShellLayout.tsx:533-543                                                                      |
+| Window resize → auto-collapse                       | resize listener, 300ms idle                                                                                                                                                   | conversation < 480px ⇒ collapse side pane, then conversation < 360px ⇒ collapse sidebar; only reacts to window resizes (not panel opens) packages/ui/src/app-shell/WorkspaceShellLayout.tsx:145-155, :711-798                                                                                                                                                                                                                |
+| Body divider drag/keyboard                          | RRP separator                                                                                                                                                                 | direction follows visual order; persisted per layoutId namespace                                                                                                                                                                                                                                                                                                                                                             |
+
+### Removed 2026-10-14 (U-04 migration)
+
+The position-dependent controls were merged into the single role toggle above:
+the ⤢ «Развернуть документ»/«Вернуть чат» button in the document header
+(packages/ui/src/spec-document/SpecDocumentPane.tsx), the «Show main chat» caption arrow
+and the fixed-region PanelRight* side-pane toggle in the tabs caption
+(packages/ui/src/app-shell/AnimatedSidePanePanel.tsx,
+packages/ui/src/WorkspaceSidePaneToggleButton.tsx). No
+PanelLeft*/PanelRight\* Open/Close glyphs remain in the shell.
 
 ## Persistence keys (summary)
 
-| Key | Scope | Value | Owner |
-| --- | --- | --- | --- |
-| `zcode:workspace-shell:sidebar-width-px` | global | sidebar px width | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:139 |
-| `spec-harness-shell-layout-swap:v1:<workspaceIdentity \|\| path>` | per workspace | `{version:1, mode:"chat-center"\|"document-center"}` | packages/ui/src/spec-document/specShellLayoutSwap.ts:18-22 |
-| `react-resizable-panels:<body layoutId>[:document-center]:<panelIds…>` | per workspace × arrangement × spec-doc-active | panel % layout (RRP `useDefaultLayout`) | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2434-2441, packages/ui/src/spec-document/specGeneralChatCollapse.ts:29-32 |
-| `workspace-conversation-column-layout` | global | conversation/terminal % | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2480 |
+| Key                                                                    | Scope                                         | Value                                                | Owner                                                                                                                        |
+| ---------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `zcode:workspace-shell:sidebar-width-px`                               | global                                        | sidebar px width                                     | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:139                                                                       |
+| `spec-harness-shell-layout-swap:v1:<workspaceIdentity \|\| path>`      | per workspace                                 | `{version:1, mode:"chat-center"\|"document-center"}` | packages/ui/src/spec-document/specShellLayoutSwap.ts:18-22                                                                   |
+| `react-resizable-panels:<body layoutId>[:document-center]:<panelIds…>` | per workspace × arrangement × spec-doc-active | panel % layout (RRP `useDefaultLayout`)              | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2434-2441, packages/ui/src/spec-document/specGeneralChatCollapse.ts:29-32 |
+| `workspace-conversation-column-layout`                                 | global                                        | conversation/terminal %                              | packages/ui/src/app-shell/WorkspaceShellLayout.tsx:2480                                                                      |
 
-## U-03 bug note — inverted divider direction after window resize (fixed)
+## U-03 bug notes — inverted divider direction (two root causes, both fixed)
 
-Root cause: RRP re-sorts panels at (re)registration using `offsetLeft`; the shell's
-render-phase order re-assertion was latched on the swap-mode string, so re-registrations
-driven by window-resize auto-collapse (`collapsible`/`disabled`/`defaultSize` flips in
-AnimatedSidePanePanel.tsx:455-456 and WorkspaceShellLayout.tsx:2464-2471) could read a
+### 1. Stale `order` at re-registration (fixed in wave 6, 2026-10-13)
+
+RRP re-sorts panels at (re)registration using `offsetLeft`; the shell's render-phase order
+re-assertion was latched on the swap-mode string, so re-registrations driven by
+window-resize auto-collapse (`collapsible`/`disabled`/`defaultSize` flips in
+AnimatedSidePanePanel.tsx ~1739-1742 and WorkspaceShellLayout.tsx ~2854-2860) could read a
 reset `order` with the mode unchanged, sorting panels back into the pre-swap arrangement —
-the divider stayed bound to the pre-swap side (drag right grows the panel the user sees on
-the *other* side; toward the max-constrained side the move died entirely).
-Fix: re-assert orders on every render with diff-aware writes
-(packages/ui/src/spec-document/specShellLayoutSwap.ts:94-113,
-packages/ui/src/app-shell/WorkspaceShellLayout.tsx:614-636). Regression matrix:
-packages/ui/test/workspaceShellDividerDirection.test.ts (both modes, container shrink/grow,
-mode toggle, collapse/reopen, reload with swapped mode persisted).
+the divider stayed bound to the pre-swap side. Fix: re-assert orders on every render with
+diff-aware writes (packages/ui/src/spec-document/specShellLayoutSwap.ts:94-113,
+packages/ui/src/app-shell/WorkspaceShellLayout.tsx:614-636).
+
+### 2. Foreign-key-order layout restore (live regression 5.2a, fixed 2026-10-14)
+
+User report on build 9fe78d6c: in document-center the middle divider still moved sizes in
+the WRONG direction — wave 6 covered the drag-after-resize path only. Root cause (traced
+against react-resizable-panels 4.10.0 dist): the library treats a Group layout
+**positionally** — `adjustLayoutByDelta` reads `Object.values(layout)` by index, while
+pivot/panel indices come from the panel registry (visual order). `transitionSpecGeneralChatLayout`
+(packages/ui/src/spec-document/specGeneralChatCollapse.ts) restores
+`memory.ordinaryLayout` captured under the OLD arrangement; the user swaps while a spec
+document is active (the swap control sits right in the tabs caption), so the restored
+object's key order no longer matches the current registry order. The committed layout puts
+each size in the wrong slot; from then on **every** input path — pointer drag (fresh
+pairing, but positional flex), keyboard arrows (cached pairing), imperative
+`panel.resize/collapse` (index-based pivots and registry-position sign flip) — moves the
+divider the wrong way until the layout is rebuilt from persistence.
+Fix: re-key the restored layout to the group's current key order before `setLayout`
+(`rekeyLayoutToCurrentPanelOrder`, specGeneralChatCollapse.ts) — per-panel values are
+kept, only their positions follow the current registry. Direction is therefore derived
+from the actual placement for all input paths.
+Regression matrix: packages/ui/test/workspaceShellDividerDirection.test.ts — drag AND
+keyboard (both directions) in both modes, before/after container shrink/grow,
+auto-collapse/reopen, chat hide/restore, mode toggle, reload with the swapped layout
+persisted, and both transition-restore directions (cc-ordered saved layout restored into
+dc and vice versa — this last block reproduces the live bug pre-fix).
 
 ## Removed 2026-10-13 (RETIREMENT-2, user decision)
 
