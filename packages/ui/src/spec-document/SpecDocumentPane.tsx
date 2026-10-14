@@ -76,6 +76,12 @@ import {
   retireDocumentPaneWrites,
   type DocumentPresentationState,
 } from "./specDocumentPresentationState.js";
+import { SpecDocumentPicker } from "./specDocumentPicker.js";
+import {
+  SpecPopoutIconButton,
+  SpecPopoutRegionPortal,
+  useSpecPopoutRegion,
+} from "./specPopoutRegion.js";
 
 export interface SpecDocumentPaneProps {
   workspacePath: string;
@@ -339,7 +345,10 @@ function Documents({
     if (
       restoringScrollRef.current ||
       !(target instanceof HTMLElement) ||
-      !target.matches("textarea, [data-markdown-preview]")
+      // U-09：[data-document-prose] 是 txt 只读正文视图（本面板自带，见 sourceEditor 槽）。
+      !target.matches(
+        "textarea, [data-markdown-preview], [data-document-prose]",
+      )
     )
       return;
     presentationRef.current = {
@@ -358,7 +367,7 @@ function Documents({
         const target = editing
           ? editorRef.current
           : contentRef.current?.querySelector<HTMLElement>(
-              "[data-markdown-preview]",
+              "[data-markdown-preview], [data-document-prose]",
             );
         if (!target) return;
         target.scrollTop = presentationRef.current.scrollTop;
@@ -399,7 +408,7 @@ function Documents({
       }),
       apply: (next) => {
         const preview = contentRef.current?.querySelector<HTMLElement>(
-          "[data-markdown-preview]",
+          "[data-markdown-preview], [data-document-prose]",
         );
         const scrollTop =
           preview?.scrollTop ?? editorRef.current?.scrollTop ?? 0;
@@ -410,7 +419,7 @@ function Documents({
         setSelection(null);
         requestAnimationFrame(() => {
           const refreshed = contentRef.current?.querySelector<HTMLElement>(
-            "[data-markdown-preview]",
+            "[data-markdown-preview], [data-document-prose]",
           );
           if (refreshed) refreshed.scrollTop = scrollTop;
           if (editorRef.current) {
@@ -578,7 +587,28 @@ function Documents({
       );
   }
   async function open(path: string) {
-    if (!documents || dirty || ioPending) return;
+    if (!documents || !path || ioPending) return;
+    // Bug 修复（U-11 活体回归 2026-10-14）：原先缓冲区一旦有未保存修改（dirty）就静默
+    // return，选择器又把 value 弹回旧路径——用户看到“换文件毫无反应，永远只开着第一个
+    // 文件”。根因不是 21221728 的 value/option 路径不匹配（list/read 都返回同一套相对
+    // POSIX 路径），而是 open() 的 dirty 守卫把按 path 无损切换的设计（per-path 草稿）
+    // 整个短路了。修复：换文件前先把脏缓冲连同原始 hash 持久化到 per-path 草稿槽，
+    // 只有持久化失败（存储不可用）才阻止切换并给出原因；之后照常读取新文件。
+    if (document && dirty) {
+      const retained = writeDocumentDraft(
+        presentationKey,
+        document.path,
+        { content: draft, baseSha256: baseSha256Ref.current },
+        undefined,
+        paneWriteToken,
+      );
+      if (!retained) {
+        setError(
+          "The unsaved document draft could not be retained. Save it before switching documents.",
+        );
+        return;
+      }
+    }
     setIoPending(true);
     setError("");
     try {
@@ -816,6 +846,20 @@ function Documents({
         : null,
     [document?.path, draft, workspacePath, workspaceIdentity],
   );
+  // U-08：.txt 是一等文档（服务端已列出；文件链接路由已覆盖 txt），只读视图按正文渲染。
+  const isPlainProseDocument = Boolean(
+    document && document.path.toLowerCase().endsWith(".txt"),
+  );
+  // U-06：讨论可“вынести в окно”——Document PiP 真 OS 窗口（自动置顶、可拖到其它显示器），
+  // 同一棵 React 子树经稳定 portal host 移入 PiP 文档，会话/线程/草稿不丢；共享槽位
+  // （U-07：聊天弹出时这里自动回位）。API 不可用时按钮为 absent-with-reason 禁用态，
+  // 面板内浮动（discussionMode === floating）保持原样。
+  const discussionPopout = useSpecPopoutRegion({
+    regionId: "spec-discussion",
+    workspaceKey: workspaceIdentity?.trim() || workspacePath,
+    title: "Дискуссия документа",
+    enabled: Boolean(document) && discussionsVisible,
+  });
   return (
     <div
       className="flex h-full min-h-0 flex-col bg-background text-foreground"
@@ -824,23 +868,18 @@ function Documents({
       {/* Bug 修复（D-03/D-05 活体反馈 2026-10-13）：选择器之前只在 !document 时渲染，
           文档打开后无法 перевыбрать/切换。现在始终显示并选中当前路径；草稿按
           workspace+path 持久化，切换无损；仅 I/O 进行中或列表为空时禁用。 */}
+      {/* Bug 修复（D-03/D-05 活体反馈 2026-10-13）：选择器之前只在 !document 时渲染，
+          文档打开后无法 перевыбрать/切换。现在始终显示并选中当前路径；草稿按
+          workspace+path 持久化，切换无损；仅 I/O 进行中或列表为空时禁用。
+          U-08（2026-10-14）：原生 select 升级为可搜索 combobox（内联过滤 + 键盘优先 +
+          双击直接打开，见 specDocumentPicker.tsx）；.txt 与 .md 同列一等工作区文档。 */}
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <select
-          aria-label="Choose project document"
+        <SpecDocumentPicker
+          files={files}
+          value={document?.path ?? null}
           disabled={ioPending || !files.length}
-          value={document?.path ?? ""}
-          className="min-w-0 flex-1 rounded-md border border-input-border bg-background px-2 py-1 text-ui-sm"
-          onChange={(event) => void open(event.target.value)}
-        >
-          {!document ? (
-            <option value="" disabled>
-              Choose a document…
-            </option>
-          ) : null}
-          {files.map((path) => (
-            <option key={path}>{path}</option>
-          ))}
-        </select>
+          onOpen={(path) => void open(path)}
+        />
       </div>
       {error ? (
         <div
@@ -891,7 +930,17 @@ function Documents({
             </div>
           ) : null}
           {nativeSource ? (
+            /* Bug 修复（U-10 活体回归 2026-10-14）：PreviewPane 内部把 markdownViewMode
+               锁在 "code"（编辑时强制 code、恢复编辑器在场，PreviewPane.tsx 的
+               `if (sourceEditor) setMarkdownViewMode("code")`），退出编辑后没有任何路径把它
+               复位回 "preview"，且 preserveDocumentViewState 对同一 source 身份直接早退——
+               结果 Edit↔View 反复切换后“眼睛”仍显示源码，看起来渲染坏掉/模式消失，只有
+               关闭文档 tab 重开（PreviewPane 卸载重建）才恢复。PreviewPane.tsx 不在本次
+               独占路径内，故在调用方修复：按编辑模式 key 化，每次模式切换都挂载新的
+               PreviewPane，其内部 markdownViewMode 重新按 source 初始化（md → preview），
+               查看模式恢复为渲染视图。模式切换本来就整体换内容树，重挂成本与原先一致。 */
             <PreviewPane
+              key={editing ? "document-edit" : "document-view"}
               source={nativeSource}
               onClose={onClose}
               workspacePath={workspacePath}
@@ -1037,9 +1086,21 @@ function Documents({
                     }}
                     onSelect={select}
                     spellCheck={false}
+                    // U-09：textarea 默认 soft wrap——长行按面板宽度换行，散文无横向滚动。
                     aria-label="Document source editor"
                     className="h-full min-h-0 w-full resize-none bg-background p-4 font-mono text-ui-base leading-relaxed outline-none"
                   />
+                ) : isPlainProseDocument ? (
+                  /* U-08/U-09：txt 是一等文档——只读视图不再走代码查看器（行号/默认不换行/
+                     横向滚动），改由面板自带正文视图：whitespace-pre-wrap + break-words 让
+                     长行按面板宽度换行，无横向滚动条；经 PreviewPane 的 sourceEditor 内容槽
+                     传入（对非 markdown source 该槽就是整块内容覆盖位）。 */
+                  <div
+                    data-document-prose=""
+                    className="h-full min-h-0 w-full overflow-y-auto p-4 font-mono text-ui-base leading-relaxed whitespace-pre-wrap break-words"
+                  >
+                    {draft}
+                  </div>
                 ) : undefined
               }
             />
@@ -1057,38 +1118,72 @@ function Documents({
           ) : null}
         </div>
         {document ? (
-          <aside
-            data-discussion-mode={discussionMode}
+          /* U-06：锚点未弹出时 display:contents——aside 直接参与父级 flex 布局（停靠/
+             浮动几何不变）；弹出后锚点变成原位占位（说明 + «вернуть»），aside 子树整体
+             移入 PiP 文档。 */
+          <div
+            ref={discussionPopout.anchorRef}
             className={
-              discussionsVisible
-                ? discussionMode === "floating"
-                  ? "absolute z-20 flex min-h-0 flex-col overflow-auto rounded-2xl border border-border bg-popover shadow-xl"
-                  : "relative flex min-h-0 shrink-0 flex-col border-l border-border bg-background"
-                : "hidden"
+              discussionPopout.popped
+                ? "relative flex min-h-0 shrink-0 flex-col items-center justify-center gap-2 border-l border-border bg-background p-3"
+                : "contents"
             }
-            aria-label="Fragment discussions"
-            style={
-              discussionMode === "floating"
-                ? {
-                    left: discussionRect.x,
-                    top: discussionRect.y,
-                    width: discussionRect.width,
-                    height: discussionRect.height,
-                  }
-                : { width: dockedLayout.width, height: dockedLayout.height }
-            }
-            onKeyDown={(event) => {
-              if (
-                event.key === "Escape" &&
-                !event.defaultPrevented &&
-                !(
-                  event.target instanceof Element &&
-                  event.target.closest('[role="dialog"]')
-                )
-              )
-                event.stopPropagation();
-            }}
           >
+            {discussionPopout.popped ? (
+              <>
+                <p className="text-center text-ui-xs text-foreground-subtle">
+                  Дискуссия открыта в отдельном окне.
+                </p>
+                <SpecPopoutIconButton
+                  region={discussionPopout}
+                  popLabel="Вынести дискуссию в окно"
+                  restoreLabel="Вернуть дискуссию"
+                />
+              </>
+            ) : null}
+            <SpecPopoutRegionPortal
+              region={discussionPopout}
+              title="Дискуссия документа"
+            >
+              <aside
+                data-discussion-mode={discussionMode}
+                className={
+                  /* 弹出态：aside 铺满 PiP 内层容器（头部下方的剩余空间）——停靠/浮动的
+                     px 尺寸与 absolute 定位只在面板内有意义，带进 PiP 会留下固定宽度
+                     的窄条。仅切换 className/style（不换结构），不触发子树重挂。 */
+                  discussionPopout.popped
+                    ? "flex h-full min-h-0 w-full flex-col overflow-hidden"
+                    : discussionsVisible
+                      ? discussionMode === "floating"
+                        ? "absolute z-20 flex min-h-0 flex-col overflow-auto rounded-2xl border border-border bg-popover shadow-xl"
+                        : "relative flex min-h-0 shrink-0 flex-col border-l border-border bg-background"
+                      : "hidden"
+                }
+                aria-label="Fragment discussions"
+                style={
+                  discussionPopout.popped
+                    ? undefined
+                    : discussionMode === "floating"
+                      ? {
+                          left: discussionRect.x,
+                          top: discussionRect.y,
+                          width: discussionRect.width,
+                          height: discussionRect.height,
+                        }
+                      : { width: dockedLayout.width, height: dockedLayout.height }
+                }
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Escape" &&
+                    !event.defaultPrevented &&
+                    !(
+                      event.target instanceof Element &&
+                      event.target.closest('[role="dialog"]')
+                    )
+                  )
+                    event.stopPropagation();
+                }}
+              >
             {discussionMode === "docked" && !dockedLayout.stacked ? (
               <button
                 type="button"
@@ -1155,6 +1250,11 @@ function Documents({
                   </option>
                 ))}
               </select>
+              <SpecPopoutIconButton
+                region={discussionPopout}
+                popLabel="Вынести дискуссию в окно"
+                restoreLabel="Вернуть дискуссию"
+              />
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -1270,7 +1370,9 @@ function Documents({
                 <Maximize2 className="size-3" />
               </button>
             ) : null}
-          </aside>
+              </aside>
+            </SpecPopoutRegionPortal>
+          </div>
         ) : null}
       </div>
       <div className="space-y-1 border-t border-border px-3 py-2 text-ui-xs text-foreground-subtle">

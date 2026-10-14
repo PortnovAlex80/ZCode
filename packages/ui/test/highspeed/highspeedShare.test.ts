@@ -10,6 +10,13 @@ import {
 
 const metrics = { outputTokens: 120_000, durationMs: 600_000, regularTps: 20, highspeedTps: 100 };
 
+// 数字分组跟随操作系统区域：分享卡 SVG 的 imageSummary 用裸
+// Math.floor(...).toLocaleString()（highspeedShare.ts），本机默认区域是 ru-RU（空格分组），
+// 而上游 v3.15.1（aac47556 引入本测试）的断言按 en-US 逗号写死，导致非逗号分组区域的
+// 机器必挂。git blame 显示该格式化行自上游引入后没有 fork 波次改过——不是产品回归。
+// 期望值改用同一原语派生，仍校验数值与文案，只是不再钉死分组符号。
+const formatCount = (value: number): string => value.toLocaleString();
+
 describe("highspeed client share", () => {
   it("requires a complete speedup greater than 1.2x before enabling sharing", () => {
     expect(
@@ -129,7 +136,7 @@ describe("highspeed client share", () => {
       copied = blob;
     });
     expect(copied?.type).toBe("image/svg+xml");
-    expect(await copied?.text()).toContain("120,000 tokens");
+    expect(await copied?.text()).toContain(`${formatCount(120000)} tokens`);
     expect(await copied?.text()).not.toContain("Copy image");
   });
 

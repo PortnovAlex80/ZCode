@@ -42,6 +42,11 @@ import {
   type SpecShellLayoutSwapMode,
 } from "@/spec-document/specShellLayoutSwap.js";
 import {
+  SpecPopoutIconButton,
+  SpecPopoutRegionPortal,
+  useSpecPopoutRegion,
+} from "@/spec-document/specPopoutRegion.js";
+import {
   V4SplitPaneEntryProvider,
   type V4SplitPaneSessionTarget,
 } from "@/v4/splitPaneEntryContext.js";
@@ -569,6 +574,20 @@ export const WorkspaceShellLayout = memo(
       enabled: !isWebRemoteControlShell,
       selectSession: (sessionId) =>
         handleSelectTask(workspaceAbsPath, sessionId, workspaceIdentity),
+    });
+    // U-07：主聊天可 «вынести в окно» —— 与文档讨论（U-06）共用同一 Document PiP 机制与
+    // 全 App 唯一共享槽位（specPopoutWindow.ts）：聊天弹出时讨论自动回位，反之亦然；
+    // 同一棵 V4WorkspaceChatArea 子树经稳定 portal host 移动，会话/草稿不丢。PiP 窗口
+    // 按规范自动置顶（automatic pin，无手动置顶）。手机远控与浏览器 Web 端不启用。
+    const chatPopoutEnabled =
+      Boolean(isDesktop) &&
+      !isWebRemoteControlShell &&
+      workspaceMainView === "chat";
+    const chatPopout = useSpecPopoutRegion({
+      regionId: "main-chat",
+      workspaceKey,
+      title: "Чат",
+      enabled: chatPopoutEnabled,
     });
     const workspaceShellRef = useRef<HTMLDivElement | null>(null);
     const workspaceSidebarPanelElementRef = useRef<HTMLDivElement | null>(null);
@@ -3000,6 +3019,20 @@ export const WorkspaceShellLayout = memo(
                             />
                           </ScopedErrorBoundary>
                         ) : null}
+                        {chatPopoutEnabled ? (
+                          /* U-07：聊天列头部下缘右角的直达弹出图标（«вынести в окно»/
+                              «вернуть»）。不放进 WorkspaceHeader（其动作区/内联窗控不在
+                              本次独占路径内，且该位置必须避开窗控与终端/帮助按钮）——
+                              悬浮在聊天列头部与正文交界处，任何排列下都不与窗控冲突。
+                              API 不可用时为 absent-with-reason 禁用态。 */
+                          <div className="absolute right-0 top-13 z-30 flex items-center pr-1 [app-region:no-drag]">
+                            <SpecPopoutIconButton
+                              region={chatPopout}
+                              popLabel="Вынести чат в окно"
+                              restoreLabel="Вернуть чат"
+                            />
+                          </div>
+                        ) : null}
                         {isWebRemoteControlShell ? (
                           <Button
                             type="button"
@@ -3148,7 +3181,30 @@ export const WorkspaceShellLayout = memo(
                                   永远停在 draft。v4 语义下 sessionId ≡ taskId，meta 只服务 Header 显示。
                                   M5⑤：桌面主区升级为分屏宿主（Layout/Focus 两层）；primary pane
                                   绑定语义与 testid 契约（paneId=workspace-main）不变。 */}
-                                <V4WorkspaceChatArea
+                                {/* U-07：锚点未弹出时 display:contents（原布局零变化）；弹出后原位留
+                    占位说明 + «вернуть»，V4WorkspaceChatArea 子树整体移入 PiP 文档。 */}
+                <div
+                  ref={chatPopout.anchorRef}
+                  className={
+                    chatPopout.popped
+                      ? "flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-2 p-4"
+                      : "contents"
+                  }
+                >
+                  {chatPopout.popped ? (
+                    <>
+                      <p className="text-ui-sm text-foreground-subtle">
+                        Чат открыт в отдельном окне.
+                      </p>
+                      <SpecPopoutIconButton
+                        region={chatPopout}
+                        popLabel="Вынести чат в окно"
+                        restoreLabel="Вернуть чат"
+                      />
+                    </>
+                  ) : null}
+                  <SpecPopoutRegionPortal region={chatPopout} title="Чат">
+                    <V4WorkspaceChatArea
                                   readOnly={Boolean(workspaceReadOnlyReason)}
                                   foregroundEnabled={
                                     isWorkspaceVisible && !generalChatCollapsed
@@ -3254,6 +3310,8 @@ export const WorkspaceShellLayout = memo(
                                     onSearchResultHighlightDone
                                   }
                                 />
+                  </SpecPopoutRegionPortal>
+                </div>
                               </ScopedErrorBoundary>
                             </main>
                           )}

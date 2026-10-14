@@ -172,6 +172,74 @@ expandedSize)` on open and `panel.collapse()` on close; `rememberExpandedSize` s
 | Window resize → auto-collapse                       | resize listener, 300ms idle                                                                                                                                                   | conversation < 480px ⇒ collapse side pane, then conversation < 360px ⇒ collapse sidebar; only reacts to window resizes (not panel opens) packages/ui/src/app-shell/WorkspaceShellLayout.tsx:145-155, :711-798                                                                                                                                                                                                                |
 | Body divider drag/keyboard                          | RRP separator                                                                                                                                                                 | direction follows visual order; persisted per layoutId namespace                                                                                                                                                                                                                                                                                                                                                             |
 
+## Popout windows (U-06/U-07, added 2026-10-14)
+
+Two regions can be popped out into a **Document Picture-in-Picture OS window**
+(renderer-only; Chromium ≥116 / Electron 41; NO Main-process window machinery —
+the retired detach stack stays retired, RETIREMENT-2):
+
+- **Дискуссия документа** (U-06): «вынести в окно» icon on the discussion aside
+  header (SpecDocumentPane.tsx). While popped out, the pane keeps a slim in-place
+  placeholder with a «вернуть» icon; the PiP window shows a host header
+  («Дискуссия документа» + «вернуть»). The in-app floating mode
+  (discussionMode === floating) is unchanged and remains available.
+- **Главный чат** (U-07): the same icon floating at the chat column's top-right
+  corner (right below the WorkspaceHeader, inside the conversation section;
+  deliberately NOT inside WorkspaceHeader — its action cluster/inline window
+  controls are position-sensitive and the control must not collide in either
+  arrangement). Placeholder + «вернуть» in place while popped.
+
+Mechanics (`packages/ui/src/spec-document/specPopoutWindow.ts`,
+`specPopoutRegion.tsx` — both under the spec-document exclusive path):
+
+- The region subtree always renders through `createPortal(children, hostNode)`
+  with a **stable hostNode** — the portal target never changes identity, so React
+  never rebuilds the subtree; popping out/returning only moves the host node
+  between the in-pane anchor and the PiP `document.body` (session, thread and
+  drafts survive). React's delegated event listeners are attached to the portal
+  container itself, so they travel with the host node into the PiP document.
+- Sizing is **per location** (review fix 2026-10-14): while docked in the pane
+  the anchor, the host node AND the portal's wrapper divs are all
+  `display: contents` — the region subtree (aside / V4WorkspaceChatArea)
+  participates in the pane layout exactly as before the popout existed, and no
+  `width: 100%` box can leak in as a flex item (a `w-full` host under a
+  `contents` anchor would give the content column `flex: 1 1 0%` a 0px share).
+  Filling classes (`w-full`/`h-full`, plus a header-height context below the
+  «вернуть» host header) are applied only while the host lives in the PiP
+  document and are reverted on return.
+- **One shared PiP slot per app**: opening the chat popout while the discussion
+  is popped out (or vice versa) force-returns the other region first
+  (`forceReturnSpecPopoutOwner`), then requests the single PiP window.
+- PiP windows are always-on-top by spec (the "automatic pin"); there is no manual
+  pin control. Closing via the OS close button (`pagehide`) or any «вернуть» icon
+  restores the region in place.
+- Sizes persist per region × workspace
+  (`spec-harness-popout-size:v1:<regionId>:<workspaceKey>`, clamped
+  320×240…1920×1080, default 480×640); the final size is captured on close.
+- Styles are adopted into the PiP document at open time (head `<style>`/
+  `<link rel=stylesheet>` nodes cloned + `documentElement` theme classes synced).
+- When `documentPictureInPicture` is unavailable the icons render an explicit
+  **absent-with-reason disabled state** (title carries the reason) and nothing
+  else changes.
+
+## Document picker (U-08, added 2026-10-14)
+
+The «Choose project document» control in the document pane header
+(SpecDocumentPane.tsx) is a searchable combobox
+(`packages/ui/src/spec-document/specDocumentPicker.tsx`):
+
+- click the file row → dropdown with an inline filter field (magnifier icon);
+- typing filters immediately (keyboard-first; case-insensitive substring over
+  relative paths); ↓/↑ navigate (wrapping), Enter opens the highlighted match
+  (the top match by default), double-click on a row opens it directly; Esc
+  closes and refocuses the trigger, an outside pointer closes without stealing
+  focus from the click target;
+- `.txt` files are first-class workspace documents (same list/open/view/draft/
+  CAS-save semantics as `.md`; the service has always listed them — the pane now
+  renders their read-only view as wrapping prose instead of the code viewer,
+  U-09);
+- the global project-search icon is a separate action and is unchanged.
+
 ### Removed 2026-10-14 (U-04 migration)
 
 The position-dependent controls were merged into the single role toggle above:

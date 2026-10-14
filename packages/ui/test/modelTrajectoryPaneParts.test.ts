@@ -15,6 +15,14 @@ import { CallCard } from "@/ModelTrajectoryPaneParts.js";
 import { TrajectorySearchRevealContext } from "@/ModelTrajectorySearch.js";
 import { trajectoryToolOutputs } from "@/ModelTrajectoryToolPayload.js";
 
+// 数字分组跟随操作系统区域：被测组件（ModelTrajectoryPaneParts 的 IN/OUT 元数据）用裸
+// value.toLocaleString()，本机默认区域是 ru-RU（空格分组），而上游 v3.15.1（aac47556 引入
+// 本测试）的断言按 en-US 逗号写死，导致非逗号分组区域的机器必挂。git blame 显示这些格式化行
+// 自上游引入后没有 fork 波次改过——不是产品回归。期望值改用同一原语派生，仍校验数值与文案，
+// 只是不再钉死分组符号；若产品日后改为按应用 locale 定死分组（参考 ConversationQuotaBanner
+// 的 new Intl.NumberFormat(locale, …)），需同步改回固定期望。
+const formatCount = (value: number): string => value.toLocaleString();
+
 const messages: Record<string, string> = {
   "modelTrajectory.inputSection": "输入",
   "modelTrajectory.attempt": "第 {attempt} 次尝试",
@@ -393,7 +401,7 @@ describe("ModelTrajectoryPaneParts", () => {
     );
 
     expect(html).toContain("标题生成");
-    expect(html).toContain("IN 40,077");
+    expect(html).toContain(`IN ${formatCount(40077)}`);
     expect(html).toContain("OUT 354");
     expect(html).toContain("21.7s");
     expect(html).not.toContain("第 2 次尝试");
@@ -409,7 +417,7 @@ describe("ModelTrajectoryPaneParts", () => {
     expect(html).not.toContain('data-trajectory-source-title="" class="min-w-0 flex-1 truncate');
     expect(html).toContain("items-center gap-1.5 border-b border-border/50");
     expect(html).toContain('data-trajectory-call-metadata=""');
-    expect(html.indexOf("IN 40,077")).toBeLessThan(html.indexOf("OUT 354"));
+    expect(html.indexOf(`IN ${formatCount(40077)}`)).toBeLessThan(html.indexOf("OUT 354"));
     expect(html.indexOf("OUT 354")).toBeLessThan(html.indexOf("21.7s"));
     expect(html.indexOf("21.7s")).toBeLessThan(html.indexOf('title="2026-06-03T12:00:00.000Z"'));
     expect(html).toContain('data-trajectory-message-role="tool"');

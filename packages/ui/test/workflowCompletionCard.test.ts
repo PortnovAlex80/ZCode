@@ -7,6 +7,14 @@ import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 
+// 数字分组跟随操作系统区域：被测组件（WorkflowCompletionCard 的 title 全值）用裸
+// value.toLocaleString()，本机默认区域是 ru-RU（空格分组），而上游 v3.15.1（aac47556 引入
+// 本测试）的断言按 en-US 逗号写死，导致非逗号分组区域的机器必挂。git blame 显示这些格式化行
+// 自上游引入后没有 fork 波次改过——不是产品回归。期望值改用同一原语派生，仍校验数值与文案，
+// 只是不再钉死分组符号；若产品日后改为按应用 locale 定死分组（参考 ConversationQuotaBanner
+// 的 new Intl.NumberFormat(locale, …)），需同步改回固定期望。
+const formatCount = (value: number): string => value.toLocaleString();
+
 vi.mock("@/ControlHintTooltip.js", () => ({
   ControlHintTooltip: ({ children }: { children?: ReactNode }) => children,
 }));
@@ -90,7 +98,9 @@ describe("WorkflowCompletionCard · 形态", () => {
     );
     const tokens = view.getByTestId("workflow-completion-figure-tokens");
     expect(tokens.getAttribute("data-value")).toBe("386.4k");
-    expect(tokens.querySelector("[title]")?.getAttribute("title")).toBe("386,412 tokens");
+    expect(tokens.querySelector("[title]")?.getAttribute("title")).toBe(
+      `${formatCount(386412)} tokens`,
+    );
     expect(
       view.getByTestId("workflow-completion-figure-subagents").getAttribute("data-value"),
     ).toBe("10");
