@@ -578,7 +578,7 @@ function buildScenarioSuite({ modules, args, turns }) {
     },
     {
       id: "combined-per-frame-pipeline",
-      boundary: "combined per-frame pure pipeline (apply + plugin + render units)",
+      boundary: "combined per-frame pure pipeline (plugin derivation + render units; apply is measured separately in the store-boundary scenarios)",
       before: {
         setup: () => ({ index: 0 }),
         run: (context, index) => {
