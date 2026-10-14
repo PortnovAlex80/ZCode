@@ -3209,6 +3209,15 @@ export const WorkspaceShellLayout = memo(
                                   foregroundEnabled={
                                     isWorkspaceVisible && !generalChatCollapsed
                                   }
+                                  /* Presentation visibility（Wave A × U-07 集成）：
+                                     停靠时跟随壳层展示态（Settings 覆盖/文档居中折叠）；
+                                     弹出为 PiP 窗口后子树实际展示在那扇 OS 窗口里，
+                                     展示挂起不得跟随主窗壳层隐藏冻结会话——文档级
+                                     可见性由 SpecPopoutRegionPortal 声明的 PiP 文档裁决。 */
+                                  presentationVisible={
+                                    (isWorkspaceVisible && !generalChatCollapsed) ||
+                                    chatPopout.popped
+                                  }
                                   interactionDialogsVisible={
                                     !generalChatCollapsed
                                   }

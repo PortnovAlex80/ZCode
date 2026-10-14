@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import { PictureInPicture2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
+import { PresentationHostDocumentContext } from "@/v4/usePresentationVisibility.js";
 import {
   adoptSpecPopoutStyles,
   forceReturnSpecPopoutOwner,
@@ -296,6 +297,12 @@ function useIsServerRender(): boolean {
  *   （与引入弹窗之前完全一致，零布局变化）；
  * - 已弹出：外层在 PiP 宿主头部下方铺满窗口，内层给子树一个“头部之外的剩余空间”
  *   高度上下文（子树自身的 h-full 百分比据此解析，不会溢出宿主头部）。
+ *
+ * Presentation visibility 路由（渲染性能 Wave A × U-06/U-07 集成）：弹出时子树实际
+ * 挂载在 PiP 文档里，这里向子树声明该文档（PresentationHostDocumentContext）——
+ * 会话表面（SessionPane/ConversationTimeline）的文档级可见性/visibilitychange 追平
+ * 随之改读 PiP 文档：主文档最小化不冻结 PiP 里仍展示的会话，PiP 最小化则照常冻结。
+ * 未弹出时不提供覆盖（值 null = 主文档），行为与集成前一致。
  */
 export function SpecPopoutRegionPortal({
   region,
@@ -307,25 +314,31 @@ export function SpecPopoutRegionPortal({
   children: ReactNode;
 }) {
   const serverRender = useIsServerRender();
+  const hostDocument =
+    region.popped && region.hostNode && region.hostNode.ownerDocument !== document
+      ? region.hostNode.ownerDocument
+      : null;
   // 无 DOM 环境或服务器渲染：退化为原位渲染，不做 portal。
   if (!region.hostNode || serverRender) return <>{children}</>;
   return createPortal(
-    <div
-      className={
-        region.popped ? "flex h-full min-h-0 w-full flex-col" : "contents"
-      }
-    >
-      {region.popped ? <SpecPopoutHostHeader region={region} title={title} /> : null}
+    <PresentationHostDocumentContext.Provider value={hostDocument}>
       <div
         className={
-          region.popped
-            ? "flex min-h-0 flex-1 flex-col overflow-hidden"
-            : "contents"
+          region.popped ? "flex h-full min-h-0 w-full flex-col" : "contents"
         }
       >
-        {children}
+        {region.popped ? <SpecPopoutHostHeader region={region} title={title} /> : null}
+        <div
+          className={
+            region.popped
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+              : "contents"
+          }
+        >
+          {children}
+        </div>
       </div>
-    </div>,
+    </PresentationHostDocumentContext.Provider>,
     region.hostNode,
   );
 }

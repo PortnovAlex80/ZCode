@@ -106,7 +106,10 @@ import {
   type TimelineUserScrollIntent,
 } from "@/v4/timelineScrollAnchor.js";
 import { useConversationTimelineFind } from "@/v4/useConversationTimelineFind.js";
-import { useCombinedPresentationVisibility } from "@/v4/usePresentationVisibility.js";
+import {
+  useCombinedPresentationVisibility,
+  usePresentationDocument,
+} from "@/v4/usePresentationVisibility.js";
 import { ConversationSelectionTooltip } from "@/v4/ConversationSelectionTooltip.js";
 import type { ConversationSelectionReference } from "@/lib/conversationSelectionReference.js";
 
@@ -171,8 +174,13 @@ const ConversationClockedTurnGroup = memo(function ConversationClockedTurnGroup(
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const running = props.unit.isRunning;
+  // 时钟的可见性追平跟随实际展示宿主文档（Wave A × U-06/U-07 集成）：聊天/讨论被
+  // 弹出为 PiP 窗口后，visibilitychange 在 PiP 文档上，主文档的可见性不再裁决本表。
+  const presentationDoc = usePresentationDocument();
   useEffect(() => {
     if (!running || !clockEnabled) return;
+    const doc = presentationDoc ?? document;
+    if (typeof doc.addEventListener !== "function") return;
     let timer: number | null = null;
     const clearTimer = () => {
       if (timer !== null) window.clearInterval(timer);
@@ -180,17 +188,17 @@ const ConversationClockedTurnGroup = memo(function ConversationClockedTurnGroup(
     };
     const syncVisibility = () => {
       clearTimer();
-      if (document.hidden) return;
+      if (doc.visibilityState === "hidden") return;
       setNowMs(Date.now());
       timer = window.setInterval(() => setNowMs(Date.now()), RUNNING_WORK_DURATION_TICK_MS);
     };
     syncVisibility();
-    document.addEventListener("visibilitychange", syncVisibility);
+    doc.addEventListener("visibilitychange", syncVisibility);
     return () => {
       clearTimer();
-      document.removeEventListener("visibilitychange", syncVisibility);
+      doc.removeEventListener("visibilitychange", syncVisibility);
     };
-  }, [running, clockEnabled]);
+  }, [running, clockEnabled, presentationDoc]);
   const unit = useMemo(
     () =>
       clockRows && nowMs > snapshotNowMs

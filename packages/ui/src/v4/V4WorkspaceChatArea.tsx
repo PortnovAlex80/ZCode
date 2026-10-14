@@ -75,6 +75,13 @@ export interface V4WorkspaceChatAreaProps {
   readOnly?: boolean;
   /** Settings 等覆盖层打开时为 false，隐藏 Pane 不得消费一次性 Composer 请求。 */
   foregroundEnabled?: boolean;
+  /**
+   * Presentation visibility（Wave A × U-07 集成）：会话表面是否被宿主真实展示。
+   * 缺省跟随 foregroundEnabled（Settings 覆盖/文档居中折叠主聊天已折算进去）；
+   * 壳层在聊天被弹出为 PiP 窗口时显式传 true——focused/telemetry（foregroundEnabled）
+   * 仍按主窗壳层口径，展示挂起不得冻结 PiP 里仍展示的会话。
+   */
+  presentationVisible?: boolean;
   interactionDialogsVisible?: boolean;
   keepSpecExecutionSource?: boolean;
   remoteSessionId?: string;
@@ -149,6 +156,7 @@ export function V4WorkspaceChatArea({
   isDesktop = false,
   readOnly = false,
   foregroundEnabled = true,
+  presentationVisible,
   interactionDialogsVisible = true,
   keepSpecExecutionSource = false,
   remoteSessionId,
@@ -577,10 +585,11 @@ export function V4WorkspaceChatArea({
             interactionDialogsVisible,
             keepSpecExecutionSource,
           })}
-          /* Presentation visibility（Wave A）：所有分屏叶子同享壳层的整体展示态
-             （Settings 覆盖 / 文档居中折叠主聊天都已由 shell 折算进 foregroundEnabled）。
-             它与 focus 正交——非 focused 的可见叶子仍需完整展示。 */
-          presentationVisible={foregroundEnabled}
+          /* Presentation visibility（Wave A）：缺省所有分屏叶子同享壳层的整体展示态
+             （Settings 覆盖 / 文档居中折叠主聊天都已由 shell 折算进 foregroundEnabled），
+             壳层对 PiP 弹出态显式传 true 覆盖。它与 focus 正交——非 focused 的可见
+             叶子仍需完整展示。 */
+          presentationVisible={presentationVisible ?? foregroundEnabled}
           showFocusIndicator={showFocusIndicator}
           canSplit={canSplit}
           shellWorkspaceKey={shellWorkspaceKey}

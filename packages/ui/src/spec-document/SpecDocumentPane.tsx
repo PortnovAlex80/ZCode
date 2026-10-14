@@ -1312,9 +1312,14 @@ function Documents({
                     workspacePath={workspacePath}
                     workspaceIdentity={workspaceIdentity}
                     visible={
-                      visible &&
-                      discussionsVisible &&
-                      thread.id === activeThreadId
+                      /* Wave A × U-06 集成：讨论弹出为 PiP 窗口后子树实际展示在那扇
+                         OS 窗口里——native prepare/telemetry/展示挂起都按实际宿主路由
+                         （文档级可见性由 SpecPopoutRegionPortal 声明的 PiP 文档裁决）；
+                         停靠时表达式与集成前逐字节一致。 */
+                      discussionPopout.popped ||
+                      (visible &&
+                        discussionsVisible &&
+                        thread.id === activeThreadId)
                     }
                     onOpenBrowserUrl={onOpenBrowserUrl}
                     onOpenCodeViewer={onOpenCodeViewer}
