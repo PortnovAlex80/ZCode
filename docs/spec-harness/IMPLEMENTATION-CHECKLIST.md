@@ -84,6 +84,8 @@ items plus parked N-01.
 
 ## P — Rendering performance
 
+  REVIEW-2 (2026-10-14, independent review of candidate 2e52f341, docs/spec-harness/RENDERING-PERFORMANCE-REVIEW-2.md): 8 findings — real timeline cache invalidation (HIGH), inactive-discussion PiP visibility (HIGH), SessionPane owner-document visibility, residual hidden token-frequency scans, highspeed output identity, hidden geometry/reveal coverage, batch oracle edge cases, evidence completion. All previously reported P measurements are INVALIDATED pending repairs and re-measurement; P-02/P-03 acceptance stays open.
+
 - [x] **P-00** Production renderer, lazy business entries, event-based detached readiness, auxiliary worker ceiling and visible-turn timer/caches exist. Evidence: `REFRACTORING.md`, `diffsWorkerBudget.test.ts`; this is not a measured speed claim.
 - [ ] **P-01** Establish reproducible baseline: native vs fork, production-only, comparable history/agent count/viewport. Capture cold/warm detach and return, shell-ready vs content-ready vs interactive, p50/p95, CPU, private memory/heap, long tasks, layout/paint and worker count. Use isolated replay fixtures until live profiling is authorized.
 - [ ] **P-02** Reduce measured eager highlight/diff cost without remounting the chat or breaking inline tool/diff output; state whether pools remain renderer-local. Agree thresholds from P-01 before accepting results.
