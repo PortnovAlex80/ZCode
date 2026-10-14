@@ -142,7 +142,9 @@ export function SpecDiscussionPane({
             size="icon-sm"
             aria-label="Delete discussion"
             title={
-              native.removeBlockedReason ? `Delete discussion: ${native.removeBlockedReason}` : "Delete discussion"
+              native.removeBlockedReason
+                ? `Delete discussion: ${native.removeBlockedReason}`
+                : "Delete discussion"
             }
             disabled={ownedElsewhere || !native.canRemove}
             onClick={() => setConfirmDelete(true)}
@@ -220,6 +222,9 @@ export function SpecDiscussionPane({
               readOnly={!nativeInteractive}
               focused={false}
               telemetryVisible={visible}
+              /* Markdown 讨论宿主：讨论区不可见（文档 tab 切走）时冻结展示推导；
+                 订阅与 native 讨论所有权保持原样。 */
+              presentationVisible={visible}
               interactionDialogsVisible={visible && nativeInteractive}
               onOpenBrowserUrl={onOpenBrowserUrl}
               onOpenCodeViewer={onOpenCodeViewer}

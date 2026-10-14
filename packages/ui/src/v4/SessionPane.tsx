@@ -379,6 +379,15 @@ export interface SessionPaneProps {
    * 只影响 foreground UI telemetry，不影响 live subscription 或后台 /event/report。
    */
   telemetryVisible?: boolean;
+  /**
+   * Presentation visibility（渲染性能 Wave A）：本 pane 的会话表面是否被宿主真实展示，
+   * 独立于 focused（快捷键路由）与 telemetryVisible（foreground telemetry）。多个分屏可
+   * 同时可见而只有一个 focused。为 false 时冻结 SessionPane 内 O(rows) 的纯展示派生
+   * （plugin 引用扫描、workflow 卡联查表、PPTX 自动打开探测）并停止
+   * notifyUserInputRendered 误报；订阅、projection 序列/恢复、execution-config 源、
+   * permissions/问答、后台 Highspeed 聚合与插件 live feed 全部保持原样。缺省 true。
+   */
+  presentationVisible?: boolean;
   /** Hide permission/question portals for a force-mounted host view; subscriptions remain live. */
   interactionDialogsVisible?: boolean;
   /** Keep one designated hidden main pane as an execution-config source; no input focus. */
@@ -594,6 +603,7 @@ export function SessionPane({
   onSelectionSideChatUnavailable,
   focused = true,
   telemetryVisible = true,
+  presentationVisible = true,
   interactionDialogsVisible = true,
   keepSpecExecutionSource = false,
   onSplitRight,
@@ -694,6 +704,18 @@ export function SessionPane({
   const [lease, setLease] = useState<SessionLease | null>(null);
   const state = useConversationProjection(lease);
   const snapshot = state.snapshot;
+  // Presentation visibility（Wave A）：隐藏期间把纯展示派生的 rows 输入钉在最后一次
+  // 展示的窗口上（与 EMPTY_SHARE_ROWS_WINDOW 同一模式）。订阅继续实时更新
+  // snapshot/rows（控制面读取不受影响）；恢复展示的首个 render 切换回最新窗口，
+  // 各展示派生一次性重建。控制/控制台事实（quota、mcp notice、Highspeed 收口、
+  // pending 问答）仍直接读 snapshot，不经过本冻结值。
+  const presentedRowsWindowRef = useRef<readonly ConversationRow[] | undefined>(undefined);
+  if (presentationVisible || snapshot === null) {
+    presentedRowsWindowRef.current = snapshot?.rows.window;
+  }
+  const presentedRowsWindow = presentationVisible
+    ? snapshot?.rows.window
+    : presentedRowsWindowRef.current;
   const newlyCreatedSessionIdRef = useRef<string | null>(null);
   const shareDraft = useConversationShareSelectionStore((storeState) =>
     sessionId ? storeState.drafts[sessionId] : undefined,
@@ -760,9 +782,9 @@ export function SessionPane({
   // 流式期间未变化轮次直接复用命中项，稳态成本从全量未缓存构建（~12ms@1000 轮）
   // 降到缓存命中（~0.4ms@1000 轮），且输出与 buildConversationTurnNavigatorItems 一致
   // （由 conversationTurnNavigatorHelpers 的对照测试约束）。缓存属于本挂载，随组件卸载释放。
-  const shareNavigatorBuilderRef = useRef<
-    ReturnType<typeof createCachedConversationTurnNavigatorItemsBuilder> | null
-  >(null);
+  const shareNavigatorBuilderRef = useRef<ReturnType<
+    typeof createCachedConversationTurnNavigatorItemsBuilder
+  > | null>(null);
   if (shareNavigatorBuilderRef.current === null) {
     shareNavigatorBuilderRef.current = createCachedConversationTurnNavigatorItemsBuilder();
   }
@@ -1155,11 +1177,14 @@ export function SessionPane({
   );
   const pluginReferenceIconsEnabled =
     isSessionPluginCatalogReady(state.status, sessionId, snapshot?.sessionId) &&
-    hasPluginReferenceUserRows(snapshot?.rows.window ?? []);
+    hasPluginReferenceUserRows(presentedRowsWindow ?? []);
   // send_result 的落定信号：用户消息真正画进对话历史。z-code 没有乐观渲染，
   // 气泡必须等投影回流出 userInput row 才出现，所以 ACK accepted 不能算发送完成。
   // 取 useEffect 而非 store 订阅回调 —— effect 在 DOM commit 之后跑，此刻气泡已在屏幕上。
+  // Presentation visibility（Wave A）：隐藏表面的 commit 不算「可见渲染」，不落定
+  // send_result；恢复展示时本 effect 依赖 presentationVisible 重跑，按最新 snapshot 补报。
   useEffect(() => {
+    if (!presentationVisible) return;
     const rows = snapshot?.rows.window;
     if (!rows || rows.length === 0) return;
     // 不能只取最后一条 userInput：后台结果行可能紧随其后插到尾部，
@@ -1170,7 +1195,7 @@ export function SessionPane({
         conversationTelemetry?.notifyUserInputRendered(row.sourceCommandId);
       }
     }
-  }, [conversationTelemetry, snapshot]);
+  }, [conversationTelemetry, presentationVisible, snapshot]);
   const fileChangesRequestCache = useMemo(
     () => new Map<string, Promise<V4ConversationFileChangesResult>>(),
     [fileChanges, sessionId, snapshot?.logEpoch],
@@ -1637,12 +1662,15 @@ export function SessionPane({
   useEffect(() => {
     const scopeKey = `${workspaceKey}\u0000${sessionId ?? "draft"}`;
     const enabled = Boolean(onAutoOpenAssistantPptx && focused && sessionId);
+    // Presentation visibility（Wave A）：completedTurn 是 O(rows) 展示探测，隐藏期间
+    // 输入钉在 presentedRowsWindow，不在 token 流上重复扫描；恢复展示时依赖切换回
+    // 最新窗口重新判定（自动打开本就只该发生在可见表面）。
     const result = advanceAssistantPreviewPptxAutoOpenGate(assistantPreviewPptxGateRef.current, {
       enabled,
       scopeKey,
       logEpoch: snapshot?.logEpoch,
       phase: snapshot?.control.phase,
-      completedTurn: resolveLatestCompletedAssistantPreviewTurn(snapshot?.rows.window ?? []),
+      completedTurn: resolveLatestCompletedAssistantPreviewTurn(presentedRowsWindow ?? []),
     });
     assistantPreviewPptxGateRef.current = result.state;
     if (result.target !== undefined) {
@@ -1651,10 +1679,10 @@ export function SessionPane({
   }, [
     focused,
     onAutoOpenAssistantPptx,
+    presentedRowsWindow,
     sessionId,
     snapshot?.control.phase,
     snapshot?.logEpoch,
-    snapshot?.rows.window,
     workspaceKey,
   ]);
   useEffect(() => {
@@ -1743,6 +1771,10 @@ export function SessionPane({
   });
   useEffect(() => {
     if (!sessionId || snapshot?.sessionId !== sessionId) return;
+    // 非 focused pane 从不弹这条 toast；提前返回避免每个流式 snapshot 都做
+    // O(rows) 扫描（隐藏/非 focused pane 的 token 流不再重复遍历窗口）。
+    // focused 恢复时本 effect 依赖 focused 重跑，按最新 snapshot 补判，语义不变。
+    if (!focused) return;
     const now = Date.now();
     for (const row of snapshot.rows.window) {
       if (
@@ -2373,27 +2405,30 @@ export function SessionPane({
   );
   // 发起 toolCallId → 静态图：图是 run 的属性，
   // 三种来源的轮尾 run 卡都到这一张表取图。行窗口一遍建成，随窗口重建。
+  // Presentation visibility（Wave A）：四张联查表只服务 rowContext（工具卡展示），
+  // 隐藏期间输入钉在 presentedRowsWindow，token 流不再 O(rows) 重建；恢复展示时
+  // 随窗口一次性重建。控制面事实走 workflowRuns 投影（上方两张 runId 表），不受影响。
   const workflowGraphByToolCallId = useMemo(
-    () => buildWorkflowGraphByToolCallId(snapshot?.rows.window),
-    [snapshot?.rows.window],
+    () => buildWorkflowGraphByToolCallId(presentedRowsWindow),
+    [presentedRowsWindow],
   );
   // runId → 最新补全的有效脚本图（docs/dynamic-workflow/presentation.md「Holes on the timeline」）：补全之后
   // run 卡与侧板取它。行窗口一遍建成，随窗口重建。
   const workflowFillGraphByRunId = useMemo(
-    () => buildWorkflowFillGraphByRunId(snapshot?.rows.window),
-    [snapshot?.rows.window],
+    () => buildWorkflowFillGraphByRunId(presentedRowsWindow),
+    [presentedRowsWindow],
   );
   // 工作流工具行 → 草稿位置：稿号与
   // 「后面还有更新的一稿」都只能从行序读出，行窗口一遍建成，随窗口重建。
   const workflowDraftByToolCallId = useMemo(
-    () => buildWorkflowDraftByToolCallId(snapshot?.rows.window),
-    [snapshot?.rows.window],
+    () => buildWorkflowDraftByToolCallId(presentedRowsWindow),
+    [presentedRowsWindow],
   );
   // runId → 转写里认领过它的 SaveWorkflow 候选（docs/dynamic-workflow/transcript-and-notifications.md
   // 「Which workflow a run is saved as」规则 1）。行窗口一遍建成，随窗口重建。
   const workflowSaveCandidatesByRunId = useMemo(
-    () => buildWorkflowSaveCandidatesByRunId(snapshot?.rows.window),
-    [snapshot?.rows.window],
+    () => buildWorkflowSaveCandidatesByRunId(presentedRowsWindow),
+    [presentedRowsWindow],
   );
   // Workflow 通知 manifest 的升级条目 Waiting→Answered 联查表（runId → 停驻 qid 集合）。
   const workflowRunPendingQuestionsByRunId = useMemo(
@@ -5793,6 +5828,7 @@ export function SessionPane({
               >
                 <ConversationTimeline
                   compactForRemoteControl={compactForRemoteControl}
+                  presentationVisible={presentationVisible}
                   scrollToBottomActionRef={timelineScrollToBottomRef}
                   scrollToQueryActionRef={timelineScrollToQueryRef}
                   selectionPanelLayoutContainerRef={conversationLayoutContainerRef}

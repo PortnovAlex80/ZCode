@@ -50,6 +50,9 @@ export const SubagentSessionSidePane = memo(function SubagentSessionSidePane({
         compactForRemoteControl={compactForRemoteControl}
         focused={focused}
         telemetryVisible={focused}
+        /* force-mounted 侧栏 tab 的 focused = 「面板可见且本 tab 激活」，恰为展示可见性；
+           与 SessionPane.focused（快捷键路由）数值相同但语义独立，Wave A 起显式分开传递。 */
+        presentationVisible={focused}
         workspacePath={tab.workspacePath}
         workspaceIdentity={tab.workspaceIdentity}
         remoteSessionId={tab.remoteSessionId}

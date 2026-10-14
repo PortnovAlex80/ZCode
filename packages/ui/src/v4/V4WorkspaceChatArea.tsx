@@ -577,6 +577,10 @@ export function V4WorkspaceChatArea({
             interactionDialogsVisible,
             keepSpecExecutionSource,
           })}
+          /* Presentation visibility（Wave A）：所有分屏叶子同享壳层的整体展示态
+             （Settings 覆盖 / 文档居中折叠主聊天都已由 shell 折算进 foregroundEnabled）。
+             它与 focus 正交——非 focused 的可见叶子仍需完整展示。 */
+          presentationVisible={foregroundEnabled}
           showFocusIndicator={showFocusIndicator}
           canSplit={canSplit}
           shellWorkspaceKey={shellWorkspaceKey}

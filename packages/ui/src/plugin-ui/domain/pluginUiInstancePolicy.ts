@@ -57,9 +57,21 @@ export function deriveLogicalUiInstances(
   options: { autoExpandTurns?: number } = {},
 ): PluginUiInstanceDerivation {
   // domain 不用 Map / Set（模块边界约束），全部用数组与普通对象。
+  // 修复原因（渲染性能 Wave C / 2026-10-14 审计发现 2）：turnOrder 原来对每一行做
+  // `turnOrder.includes(row.turnId)` 线性 membership 查找，约 O(rows × turns)——
+  // 2000 轮、无任何插件卡片的历史也测得 p50 ~140ms，纯浪费在回合判重上。
+  // 改为普通对象字典判重（与本函数既有的 groups 普通对象同一模式，不引入 Map/Set，
+  // 不触碰 domain 规则），输出与数组 includes 完全等价：仍按首次出现顺序收集回合。
+  // Object.create(null) 生成无原型普通对象，避免 "__proto__" 等键命中原型链
+  // （includes 版本会把它当普通回合计；等价性测试含该对抗用例）。
   const turnOrder: string[] = [];
+  const seenTurns: Record<string, true> = Object.create(null);
   for (const row of rows) {
-    if (!turnOrder.includes(row.turnId)) turnOrder.push(row.turnId);
+    const turnId = row.turnId;
+    if (seenTurns[turnId] !== true) {
+      seenTurns[turnId] = true;
+      turnOrder.push(turnId);
+    }
   }
   const recentTurns = turnOrder.slice(-(options.autoExpandTurns ?? PLUGIN_UI_AUTO_EXPAND_TURNS));
   const groupKeys: string[] = [];

@@ -26,8 +26,12 @@ describe("ConversationTimeline scrollbar gutter", () => {
     const navigatorIndex = source.indexOf("<ConversationTurnNavigator\n");
 
     expect(navigatorIndex).toBeGreaterThan(-1);
-    expect(source.slice(navigatorIndex - 120, navigatorIndex)).toContain(
-      "hideTurnNavigator ? null : (",
+    // 修复原因：断言停在旧的 `hideTurnNavigator ? null : (` 文本上，而基线 f6d3678e
+    // 的 rail 挂载门已由 wave-6 升级为 `hideTurnNavigator || 窄容器 < 864px`（rail 由
+    // container query 裁决后，窄视口也不得挂载会遍历全部历史的导航目录）。此处按当前
+    // 已提交行为更新断言；该项在基线上就是失败的（见审计记录的预存在失败清单）。
+    expect(source.slice(navigatorIndex - 160, navigatorIndex)).toContain(
+      "hideTurnNavigator || turnNavigatorContainerWidthPx < 864 ? null : (",
     );
   });
 });

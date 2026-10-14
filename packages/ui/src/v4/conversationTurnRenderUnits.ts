@@ -44,6 +44,48 @@ interface DraftTurnRenderUnit {
   orderedRows: ConversationRow[];
 }
 
+/**
+ * 渲染性能 Wave C：把「按 turnId 聚行」步骤从全量 builder 中抽出并导出，
+ * 供 completed-turn 复用缓存（conversationTurnRenderUnitsCache.ts）共享同一分组语义。
+ * 行为与原内联循环逐语句等价（首现顺序 + header 提取），全量 builder 仍走本函数。
+ */
+export type ConversationTurnDraftUnit = DraftTurnRenderUnit;
+
+export function groupConversationTurnDraftUnits(
+  rows: readonly ConversationRow[],
+): DraftTurnRenderUnit[] {
+  const units: DraftTurnRenderUnit[] = [];
+  const unitByTurnId = new Map<string, DraftTurnRenderUnit>();
+  const getOrCreateUnit = (turnId: string) => {
+    const existing = unitByTurnId.get(turnId);
+    if (existing) {
+      return existing;
+    }
+    const unit = createDraftUnit(turnId);
+    units.push(unit);
+    unitByTurnId.set(turnId, unit);
+    return unit;
+  };
+  for (const row of rows) {
+    const unit = getOrCreateUnit(row.turnId);
+    if (isTurnHeaderRow(row)) {
+      unit.header = row;
+      continue;
+    }
+    unit.orderedRows.push(row);
+    if (isUserInputRow(row)) {
+      unit.userInputs.push(row);
+      continue;
+    }
+    if (isHookInvocationRow(row)) {
+      unit.hookInvocations.push(row);
+      continue;
+    }
+    unit.assistantWorkRows.push(row);
+  }
+  return units;
+}
+
 function isAssistantTextRow(row: ConversationRow): row is AssistantTextRow {
   return row.kind === "assistantText";
 }
@@ -189,7 +231,11 @@ function shouldForceOpenAbnormalHistory(
   return sessionPhase === "completedInterrupted" || sessionPhase === "error";
 }
 
-function materializeDraftUnit(
+/**
+ * 渲染性能 Wave C：单轮物化步骤导出，供缓存对受影响轮次单独重建；
+ * 全量 builder（独立参照实现）与缓存共用同一物化语义。
+ */
+export function materializeDraftUnit(
   draft: DraftTurnRenderUnit,
   index: number,
   total: number,
@@ -332,7 +378,8 @@ function createDraftUnit(turnId: string): DraftTurnRenderUnit {
   };
 }
 
-function shouldKeepRenderUnit(unit: ConversationTurnRenderUnit): boolean {
+/** 渲染性能 Wave C：与全量 builder 共享的 keep/normalize 步骤导出（语义不变）。 */
+export function shouldKeepRenderUnit(unit: ConversationTurnRenderUnit): boolean {
   // 隐形行清零后（投影不再产不可渲染 marker），任何工作行都可渲染；
   // 「哪些 marker 可渲染」不再是 UI 的判断。
   return (
@@ -346,7 +393,7 @@ function shouldKeepRenderUnit(unit: ConversationTurnRenderUnit): boolean {
   );
 }
 
-function normalizeRenderUnitPosition(
+export function normalizeRenderUnitPosition(
   unit: ConversationTurnRenderUnit,
   index: number,
   total: number,
@@ -400,40 +447,9 @@ export function buildConversationTurnRenderUnits(
   rows: readonly ConversationRow[],
   options: BuildConversationTurnRenderUnitsOptions = {},
 ): ConversationTurnRenderUnit[] {
-  const units: DraftTurnRenderUnit[] = [];
-  const unitByTurnId = new Map<string, DraftTurnRenderUnit>();
-
-  const getOrCreateUnit = (turnId: string) => {
-    const existing = unitByTurnId.get(turnId);
-    if (existing) {
-      return existing;
-    }
-    const unit = createDraftUnit(turnId);
-    units.push(unit);
-    unitByTurnId.set(turnId, unit);
-    return unit;
-  };
-
-  for (const row of rows) {
-    const unit = getOrCreateUnit(row.turnId);
-    if (isTurnHeaderRow(row)) {
-      unit.header = row;
-      continue;
-    }
-    unit.orderedRows.push(row);
-    if (isUserInputRow(row)) {
-      unit.userInputs.push(row);
-      continue;
-    }
-    if (isHookInvocationRow(row)) {
-      unit.hookInvocations.push(row);
-      continue;
-    }
-    unit.assistantWorkRows.push(row);
-  }
-
-  const materializedUnits = units.map((unit, index) =>
-    materializeDraftUnit(unit, index, units.length, options),
+  const drafts = groupConversationTurnDraftUnits(rows);
+  const materializedUnits = drafts.map((unit, index) =>
+    materializeDraftUnit(unit, index, drafts.length, options),
   );
   const keptUnits = materializedUnits.filter(shouldKeepRenderUnit);
   const normalizedUnits = keptUnits.map((unit, index) =>

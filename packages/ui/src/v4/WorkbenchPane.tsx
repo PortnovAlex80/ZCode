@@ -361,6 +361,8 @@ export interface WorkbenchLeafPaneProps {
   rect: RectExpr;
   focused: boolean;
   telemetryVisible?: boolean;
+  /** Presentation visibility（Wave A）：分屏内所有可见叶子都为 true；壳层整体被隐藏时为 false。 */
+  presentationVisible?: boolean;
   interactionDialogsVisible?: boolean;
   keepSpecExecutionSource?: boolean;
   showFocusIndicator: boolean;
@@ -399,6 +401,7 @@ export function WorkbenchLeafPane({
   rect,
   focused,
   telemetryVisible = true,
+  presentationVisible = true,
   interactionDialogsVisible = true,
   keepSpecExecutionSource = false,
   showFocusIndicator,
@@ -631,6 +634,7 @@ export function WorkbenchLeafPane({
             onSessionDeleted={handleSessionDeleted}
             focused={focused}
             telemetryVisible={telemetryVisible}
+            presentationVisible={presentationVisible}
             interactionDialogsVisible={interactionDialogsVisible}
             keepSpecExecutionSource={keepSpecExecutionSource && isShellWorkspace && !readOnly}
             onSplitRight={canSplit && onSplit ? handleSplitRight : undefined}

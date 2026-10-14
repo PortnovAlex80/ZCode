@@ -62,6 +62,10 @@ import {
   type ConversationTurnRenderUnit,
 } from "@/v4/conversationTurnRenderUnits.js";
 import {
+  createCachedConversationTurnRenderUnitsBuilder,
+  type CachedConversationTurnRenderUnitsBuilder,
+} from "@/v4/conversationTurnRenderUnitsCache.js";
+import {
   resolveConversationTurnNavigatorActiveQueryRowId,
   resolveConversationTurnNavigatorHydrationRetryDelayMs,
   shouldHydrateConversationTurnNavigatorDirectory,
@@ -102,6 +106,7 @@ import {
   type TimelineUserScrollIntent,
 } from "@/v4/timelineScrollAnchor.js";
 import { useConversationTimelineFind } from "@/v4/useConversationTimelineFind.js";
+import { useCombinedPresentationVisibility } from "@/v4/usePresentationVisibility.js";
 import { ConversationSelectionTooltip } from "@/v4/ConversationSelectionTooltip.js";
 import type { ConversationSelectionReference } from "@/lib/conversationSelectionReference.js";
 
@@ -155,16 +160,19 @@ const ConversationClockedTurnGroup = memo(function ConversationClockedTurnGroup(
   clockRows,
   snapshotNowMs,
   sessionPhase,
+  clockEnabled = true,
   ...props
 }: ComponentProps<typeof ConversationTurnGroup> & {
   clockRows?: readonly ConversationRow[];
   snapshotNowMs: number;
   sessionPhase?: SessionPhase;
+  /** 展示时钟开关（presentation visibility）：表面未展示时停表，恢复展示时立即追平一次。 */
+  clockEnabled?: boolean;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const running = props.unit.isRunning;
   useEffect(() => {
-    if (!running) return;
+    if (!running || !clockEnabled) return;
     let timer: number | null = null;
     const clearTimer = () => {
       if (timer !== null) window.clearInterval(timer);
@@ -182,7 +190,7 @@ const ConversationClockedTurnGroup = memo(function ConversationClockedTurnGroup(
       clearTimer();
       document.removeEventListener("visibilitychange", syncVisibility);
     };
-  }, [running]);
+  }, [running, clockEnabled]);
   const unit = useMemo(
     () =>
       clockRows && nowMs > snapshotNowMs
@@ -431,6 +439,14 @@ export interface ConversationTimelineProps {
   };
   /** 分享选择流程存在时，左侧 rail 由分享面板或 reopen 按钮独占。 */
   hideTurnNavigator?: boolean;
+  /**
+   * Presentation visibility（Wave A）：本时间线表面是否被宿主真实展示，独立于
+   * focus/telemetry。为 false 时冻结重量级展示推导的 rows 输入（render units、
+   * plugin 派生、expiry 扫描、时钟行索引）、停用运行时钟与纯展示驱动的目录补拉；
+   * 订阅与滚动/查找/草稿状态原样保留。恢复展示的同一 commit 内按最新 rows 重建，
+   * 不闪现过期内容。缺省 true 保持旧行为。
+   */
+  presentationVisible?: boolean;
 }
 
 /**
@@ -479,8 +495,12 @@ function ConversationTimelineImpl({
   selectionActions,
   shareSelection,
   hideTurnNavigator = false,
+  presentationVisible = true,
 }: ConversationTimelineProps) {
   const { intl } = useZCodeIntl();
+  // 展示可见性 = 宿主展示 ∧ 文档可见。隐藏期间仅冻结展示推导输入；本组件不持有
+  // 订阅（rows 由宿主继续实时下发），控制面（rowsRef/回调）始终读最新值。
+  const presented = useCombinedPresentationVisibility(presentationVisible);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headerSlotRef = useRef<HTMLDivElement>(null);
   // headerSlot 高度参与虚拟窗口换算（scrollMargin），必须随内容与宽度变化实时跟进，
@@ -507,8 +527,21 @@ function ConversationTimelineImpl({
     return () => observer.disconnect();
   }, [hasHeaderSlot]);
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
+  // 隐藏期间把展示推导输入钉在最后一次展示的 rows 上（与 SessionPane 的
+  // EMPTY_SHARE_ROWS_WINDOW 同一模式）：流式 token 只改变 rows 身份，不触发
+  // O(rows)/O(rows×turns) 的 render units/plugin 派生重建；恢复展示的首个 render
+  // 直接切换到最新 rows（隐藏期间订阅未断，rows 已是最新有效投影），一次有界重建，
+  // 不经过中间过期状态。rowsRef 仍保存实时 rows 供控制回调读取。
+  const presentedRowsRef = useRef(rows);
+  if (presented) {
+    presentedRowsRef.current = rows;
+  }
+  const presentedRows = presented ? rows : presentedRowsRef.current;
   // 插件卡片展示模型——同资源替代 + 最近三回合自动展开 + 手动固定；推导结果发布给卡片自己读。
-  const pluginUiDerivation = useMemo(() => deriveLogicalUiInstances(rows), [rows]);
+  const pluginUiDerivation = useMemo(
+    () => deriveLogicalUiInstances(presentedRows),
+    [presentedRows],
+  );
   useEffect(() => {
     setPluginUiInstanceDerivation(sessionKey, pluginUiDerivation);
   }, [pluginUiDerivation, sessionKey]);
@@ -526,29 +559,45 @@ function ConversationTimelineImpl({
     });
   }, [pluginUiDerivation, sessionKey, pluginUiDisclosureVersion]);
   const topicPreparations = useBotTopicPreparations();
+  // 渲染性能 Wave C：completed-turn 渲染单元复用（挂载级缓存；scopeKey = 会话 + logEpoch）。
+  // 流式 token 只物化受影响轮次（尾轮/迟到结果），未变终态轮保持引用恒等；
+  // 等价性由 v4ConversationTurnRenderUnitsCache.test.ts 对照冻结基线约束。
+  const renderUnitsBuilderRef = useRef<CachedConversationTurnRenderUnitsBuilder | null>(null);
+  if (renderUnitsBuilderRef.current === null) {
+    renderUnitsBuilderRef.current = createCachedConversationTurnRenderUnitsBuilder();
+  }
   const { renderUnits, snapshotNowMs } = useMemo(() => {
     const nowMs = Math.max(liveNowMs, Date.now());
     return {
       snapshotNowMs: nowMs,
       renderUnits: withTopicPreparationMessages(
-        buildConversationTurnRenderUnits(rows, {
+        renderUnitsBuilderRef.current!.build(presentedRows, {
           nowMs,
           sessionPhase,
           pluginUiPinResolver,
+          scopeKey: `${sessionKey}:${rowContext.logEpoch ?? ""}`,
         }),
-        rows,
+        presentedRows,
         topicPreparations,
       ),
     };
-  }, [liveNowMs, pluginUiPinResolver, rows, sessionPhase, topicPreparations]);
+  }, [
+    liveNowMs,
+    pluginUiPinResolver,
+    presentedRows,
+    rowContext.logEpoch,
+    sessionKey,
+    sessionPhase,
+    topicPreparations,
+  ]);
 
   const { virtualizedUnits, liveUnit, liveUnitIndex } = useMemo(
     () => splitConversationTimelineLiveTail(renderUnits),
     [renderUnits],
   );
   const nextHighspeedExpiryMs = useMemo(
-    () => resolveNextHighspeedExpiryMs(rows, liveNowMs),
-    [liveNowMs, rows],
+    () => resolveNextHighspeedExpiryMs(presentedRows, liveNowMs),
+    [liveNowMs, presentedRows],
   );
   const clockRowsByTurnId = useMemo(() => {
     const byTurnId = new Map<string, ConversationRow[]>();
@@ -556,10 +605,10 @@ function ConversationTimelineImpl({
       if (unit.isRunning) byTurnId.set(unit.turnId, []);
     }
     if (byTurnId.size > 0) {
-      for (const row of rows) byTurnId.get(row.turnId)?.push(row);
+      for (const row of presentedRows) byTurnId.get(row.turnId)?.push(row);
     }
     return byTurnId;
-  }, [rows, renderUnits]);
+  }, [presentedRows, renderUnits]);
 
   const turnNavigatorQueryRowIds = useMemo(
     () =>
@@ -705,7 +754,11 @@ function ConversationTimelineImpl({
   }, [backgroundScrollLocked, selectionPanelLayoutContainerRef, syncShareSelectionPanelLayout]);
 
   useEffect(() => {
-    if (nextHighspeedExpiryMs === undefined) return;
+    // 展示时钟（Wave A）：表面未展示时不挂起到期唤醒定时器——隐藏期间的 token 流不需要
+    // footer 显隐。恢复展示时 nextHighspeedExpiryMs 已按最新 rows/liveNowMs 重算；若隐藏
+    // 期间已越过边界，render units 在 reveal commit 用 Math.max(liveNowMs, Date.now()) 的
+    // 新鲜 nowMs 重建，footer 立即落位，armHighspeedFooterExpiryClock 的 catch-up 只做收尾。
+    if (nextHighspeedExpiryMs === undefined || !presented) return;
 
     // Bug 根因：会话完成后工作时钟会停止；若 Highspeed 卡稍后才到期，footer 不会自行出现。
     // 单独订阅最近的卡片到期边界，避免为了等待倒计时持续刷新整个历史列表。
@@ -714,7 +767,7 @@ function ConversationTimelineImpl({
     // 消息就出现。与 SessionPane 的 highspeedAutoShareClock 窗口唤醒补偿分工：那条刷新分享
     // 入口/查看按钮的完成态数据，这条刷新组尾 footer 的显隐时钟。
     return armHighspeedFooterExpiryClock(nextHighspeedExpiryMs, () => setLiveNowMs(Date.now()));
-  }, [nextHighspeedExpiryMs]);
+  }, [nextHighspeedExpiryMs, presented]);
 
   useLayoutEffect(() => {
     const element = timelineRootRef.current;
@@ -747,7 +800,11 @@ function ConversationTimelineImpl({
   }, []);
 
   useEffect(() => {
+    // 纯展示驱动的历史补拉（Wave A）：目录只在表面展示时才有资格补齐完整历史；
+    // 隐藏 pane 不因宽容器（如 Settings 覆盖层保宽的 opacity 隐藏）预取全部 rows。
+    // 恢复展示时本 effect 依赖 presented 重跑，按当时的分页资格重新判定。
     if (
+      !presented ||
       !shouldHydrateConversationTurnNavigatorDirectory({
         canLoadOlder,
         containerWidthPx: turnNavigatorContainerWidthPx,
@@ -775,7 +832,7 @@ function ConversationTimelineImpl({
     attempt.status = "in-flight";
     logger.debug("[v4-turn-navigator] 目录请求补齐完整历史", {
       attempt: attempt.attemptCount + 1,
-      loadedRows: rows.length,
+      loadedRows: presentedRows.length,
       sessionKey,
       totalRows: totalCount,
     });
@@ -809,8 +866,9 @@ function ConversationTimelineImpl({
     canLoadOlder,
     loadingOlder,
     onLoadAllOlder,
+    presented,
     rowContext.logEpoch,
-    rows,
+    presentedRows,
     sessionKey,
     totalCount,
     turnNavigatorContainerWidthPx,
@@ -1629,7 +1687,7 @@ function ConversationTimelineImpl({
   useConversationTimelineFind({
     rootRef: scrollRef,
     renderUnits,
-    rows,
+    rows: presentedRows,
     mountedRowsKey,
     canLoadOlder,
     loadingOlder,
@@ -1655,7 +1713,7 @@ function ConversationTimelineImpl({
   }, []);
 
   const rowCount = renderUnits.length;
-  const rowWindowKey = `${rows.length}:${rows[0]?.rowId ?? "none"}:${rows[rows.length - 1]?.rowId ?? "none"}`;
+  const rowWindowKey = `${presentedRows.length}:${presentedRows[0]?.rowId ?? "none"}:${presentedRows[presentedRows.length - 1]?.rowId ?? "none"}`;
   const pendingGuideKey = pendingGuides.map((item) => item.queueItemId).join(":");
 
   // V4 迁移删除旧 ChatView 滚动 hook 后，sessionKey effect 仍固定滚到底部，
@@ -1750,7 +1808,7 @@ function ConversationTimelineImpl({
             pendingRestore,
             scrollRef.current,
             rowCount,
-            canLoadOlder || totalCount > rows.length,
+            canLoadOlder || totalCount > presentedRows.length,
             rowWindowKey,
           )
         ) {
@@ -1875,8 +1933,9 @@ function ConversationTimelineImpl({
     commitFollowing,
     headerSlotHeight,
     pendingGuideKey,
+    presented,
     rowCount,
-    rows,
+    presentedRows,
     scrollToBottom,
     totalSize,
   ]);
@@ -1920,7 +1979,7 @@ function ConversationTimelineImpl({
       {selectionActions ? (
         <ConversationSelectionTooltip
           rootRef={scrollRef}
-          rows={rows}
+          rows={presentedRows}
           sourceSessionId={sessionKey}
           enabled={selectionActions.enabled}
           sideActionDisabled={selectionActions.sideActionDisabled}
@@ -1955,9 +2014,10 @@ function ConversationTimelineImpl({
         data-testid={TID_V4_TIMELINE}
         data-v4-timeline-scroll="true"
         data-v4-timeline-scroll-locked={backgroundScrollLocked ? "true" : "false"}
+        data-v4-timeline-presentation-visible={presented ? "true" : "false"}
         data-markdown-table-layout-root="true"
-        data-row-count={rows.length}
-        data-window-row-count={rows.length}
+        data-row-count={presentedRows.length}
+        data-window-row-count={presentedRows.length}
         data-render-unit-count={renderUnits.length}
         data-total-row-count={totalCount}
         data-following={backToBottomVisible ? "false" : "true"}
@@ -2075,6 +2135,7 @@ function ConversationTimelineImpl({
                         clockRows={clockRowsByTurnId.get(unit.turnId)}
                         snapshotNowMs={snapshotNowMs}
                         sessionPhase={sessionPhase}
+                        clockEnabled={presented}
                         unit={unit}
                         nowMs={liveNowMs}
                         apiRetry={null}
@@ -2109,6 +2170,7 @@ function ConversationTimelineImpl({
                     clockRows={clockRowsByTurnId.get(liveUnit.turnId)}
                     snapshotNowMs={snapshotNowMs}
                     sessionPhase={sessionPhase}
+                    clockEnabled={presented}
                     unit={liveUnit}
                     nowMs={liveNowMs}
                     apiRetry={apiRetry}
@@ -2135,8 +2197,8 @@ function ConversationTimelineImpl({
                     items={pendingGuides}
                     turnId={
                       liveUnit?.turnId ??
-                      rows.at(-1)?.productTurnId ??
-                      rows.at(-1)?.turnId ??
+                      presentedRows.at(-1)?.productTurnId ??
+                      presentedRows.at(-1)?.turnId ??
                       "pending-guide"
                     }
                   />
