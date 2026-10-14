@@ -1312,14 +1312,14 @@ function Documents({
                     workspacePath={workspacePath}
                     workspaceIdentity={workspaceIdentity}
                     visible={
-                      /* Wave A × U-06 集成：讨论弹出为 PiP 窗口后子树实际展示在那扇
-                         OS 窗口里——native prepare/telemetry/展示挂起都按实际宿主路由
-                         （文档级可见性由 SpecPopoutRegionPortal 声明的 PiP 文档裁决）；
+                      /* Wave A × U-06 集成（评审 #2 修复）：活跃线程判定保持在 popped OR
+                         之外——弹出为 PiP 窗口时也只有当前展示的线程 visible，非活跃
+                         线程的包装仍是 hidden（presentation/telemetry/问答门/
+                         native prepare 都不得为不可见线程开启，含未发送草稿线程）。
                          停靠时表达式与集成前逐字节一致。 */
-                      discussionPopout.popped ||
-                      (visible &&
-                        discussionsVisible &&
-                        thread.id === activeThreadId)
+                      (discussionPopout.popped ||
+                        (visible && discussionsVisible)) &&
+                        thread.id === activeThreadId
                     }
                     onOpenBrowserUrl={onOpenBrowserUrl}
                     onOpenCodeViewer={onOpenCodeViewer}

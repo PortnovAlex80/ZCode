@@ -4,6 +4,7 @@ import { useStartPlanRecommendation } from "@/hooks/useStartPlanRecommendation.j
 import type { SessionCreateSource } from "@zcode/shared";
 import { reportSessionCreate } from "@/lib/sessionCreateTelemetry.js";
 import { getLocalTtftObserver } from "@/v4/telemetry/localTtftObserver.js";
+import { useCombinedPresentationVisibility } from "@/v4/usePresentationVisibility.js";
 import { BotGroupDeliveryProvider } from "@/v4/BotGroupDeliveryAction.js";
 /* oxlint-disable eslint(max-lines) -- SessionPane 是单 pane 竖切的命令编排收口（订阅/发送/停止/fork/edit/retry/queue/slash 全集），与旧 ChatView 同粒度；HEAD 已超限（693 行计数），拆散命令组会打散 dispatchCommand/snapshotRef 的闭包纪律。 */
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -704,16 +705,23 @@ export function SessionPane({
   const [lease, setLease] = useState<SessionLease | null>(null);
   const state = useConversationProjection(lease);
   const snapshot = state.snapshot;
+  // Presentation visibility（Wave A × 评审 #2 修复）：SessionPane 自己的展示责任
+  // （下述 rows 冻结、send_result 落定）与 ConversationTimeline 同口径——宿主展示
+  // 输入 ∧ 实际挂载宿主文档可见性（PiP 弹出时为 PiP 文档），而不是裸 prop：
+  // 主文档/PiP 文档隐藏期间父层不再重建 O(rows) 联查表、不误报可见渲染。
+  // 控制面（订阅、projection 序列/恢复、execution-config、permissions、后台聚合、
+  // 插件 live feed）不读取本值，保持原样。
+  const presented = useCombinedPresentationVisibility(presentationVisible);
   // Presentation visibility（Wave A）：隐藏期间把纯展示派生的 rows 输入钉在最后一次
   // 展示的窗口上（与 EMPTY_SHARE_ROWS_WINDOW 同一模式）。订阅继续实时更新
   // snapshot/rows（控制面读取不受影响）；恢复展示的首个 render 切换回最新窗口，
   // 各展示派生一次性重建。控制/控制台事实（quota、mcp notice、Highspeed 收口、
   // pending 问答）仍直接读 snapshot，不经过本冻结值。
   const presentedRowsWindowRef = useRef<readonly ConversationRow[] | undefined>(undefined);
-  if (presentationVisible || snapshot === null) {
+  if (presented || snapshot === null) {
     presentedRowsWindowRef.current = snapshot?.rows.window;
   }
-  const presentedRowsWindow = presentationVisible
+  const presentedRowsWindow = presented
     ? snapshot?.rows.window
     : presentedRowsWindowRef.current;
   const newlyCreatedSessionIdRef = useRef<string | null>(null);
@@ -1181,10 +1189,11 @@ export function SessionPane({
   // send_result 的落定信号：用户消息真正画进对话历史。z-code 没有乐观渲染，
   // 气泡必须等投影回流出 userInput row 才出现，所以 ACK accepted 不能算发送完成。
   // 取 useEffect 而非 store 订阅回调 —— effect 在 DOM commit 之后跑，此刻气泡已在屏幕上。
-  // Presentation visibility（Wave A）：隐藏表面的 commit 不算「可见渲染」，不落定
-  // send_result；恢复展示时本 effect 依赖 presentationVisible 重跑，按最新 snapshot 补报。
+  // Presentation visibility（Wave A × 评审 #2 修复）：隐藏表面（含宿主文档隐藏，
+  // 主文档或 PiP 文档最小化）的 commit 不算「可见渲染」，不落定 send_result；
+  // 恢复展示时本 effect 依赖 presented 重跑，按最新 snapshot 补报。
   useEffect(() => {
-    if (!presentationVisible) return;
+    if (!presented) return;
     const rows = snapshot?.rows.window;
     if (!rows || rows.length === 0) return;
     // 不能只取最后一条 userInput：后台结果行可能紧随其后插到尾部，
@@ -1195,7 +1204,7 @@ export function SessionPane({
         conversationTelemetry?.notifyUserInputRendered(row.sourceCommandId);
       }
     }
-  }, [conversationTelemetry, presentationVisible, snapshot]);
+  }, [conversationTelemetry, presented, snapshot]);
   const fileChangesRequestCache = useMemo(
     () => new Map<string, Promise<V4ConversationFileChangesResult>>(),
     [fileChanges, sessionId, snapshot?.logEpoch],
