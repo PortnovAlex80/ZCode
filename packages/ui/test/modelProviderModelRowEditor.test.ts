@@ -27,6 +27,7 @@ import {
   resolveProviderApiFormatOptions,
 } from "@/settings/model-provider-section/ProviderCardSections.js";
 import { ModelRowInput } from "@/settings/model-provider-section/ProviderFormControls.js";
+import { ChatGptProviderPanel } from "@/settings/model-provider-section/ChatGptProviderPanel.js";
 import { confirmAndDeleteModelProvider } from "@/settings/model-provider-section/modelProviderActions.js";
 import {
   createProviderModelDraftValues,
@@ -206,6 +207,66 @@ function createProvider(
 }
 
 describe("ProviderModelsSection compact model rows", () => {
+  it("ChatGPT subscription panel adds explicit Personal model IDs with no API-key or endpoint editor", async () => {
+    const config = createModelProviderModelConfig({ id: "user-model" }).config;
+    settingsService.resolveModelConfig.mockResolvedValue({
+      inheritedConfig: config,
+      effectiveConfig: config,
+      issues: [],
+      revision: 1,
+    });
+    const onAddPersonalModel = vi.fn(async () => undefined);
+    const provider = createProvider({
+      providerId: "account:chatgpt",
+      config: {
+        group: "openai-family",
+        access: { type: "openai-oauth", entitled: true },
+        api: { type: "openai-responses", baseUrl: "https://api.openai.com/v1" },
+      },
+      personalConfig: {},
+      models: [],
+    });
+    renderWithProviderFeedback(
+      createElement(ChatGptProviderPanel, { provider, onSave: vi.fn(), onAddPersonalModel }),
+    );
+    expect(screen.queryByTestId(TID_MODEL_PROVIDER_API_KEY_INPUT)).toBeNull();
+    expect(screen.queryByTestId(TID_MODEL_PROVIDER_BASE_URL_INPUT)).toBeNull();
+    expect(screen.queryByTestId(TID_MODEL_PROVIDER_API_FORMAT_TRIGGER)).toBeNull();
+    expect(screen.getByText("settings.modelProvider.chatgpt.manualModels")).toBeTruthy();
+    fireEvent.click(screen.getByTestId(TID_MODEL_PROVIDER_ADD_MODEL_BUTTON));
+    const input = document.querySelector('[data-model-identity-row="true"] input')!;
+    fireEvent.change(input, { target: { value: "user-model" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(settingsService.resolveModelConfig).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(onAddPersonalModel).toHaveBeenCalledOnce());
+    expect(onAddPersonalModel.mock.calls[0]?.slice(0, 2)).toEqual([
+      "account:chatgpt",
+      "user-model",
+    ]);
+  });
+
+  it("ChatGPT subscription model toggle writes existing Personal command only", async () => {
+    const onSave = vi.fn();
+    const onSetPersonalModelEnabled = vi.fn(async () => undefined);
+    const provider = createProvider({
+      providerId: "account:chatgpt",
+      config: { group: "openai-family", access: { type: "openai-oauth", entitled: true } },
+    });
+    renderWithProviderFeedback(
+      createElement(ChatGptProviderPanel, { provider, onSave, onSetPersonalModelEnabled }),
+    );
+    fireEvent.click(screen.getByRole("switch", { name: "停用" }));
+    await waitFor(() =>
+      expect(onSetPersonalModelEnabled).toHaveBeenCalledWith(
+        "account:chatgpt",
+        "deepseek-v4-flash",
+        false,
+      ),
+    );
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("model-provider-enabled-switch")).toBeNull();
+  });
   it.each(["individual-coding-plan", "team-coding-plan", "start-plan", "manual", "standard"])(
     "设置页共享视觉标判断，连接=%s",
     (mode) => {

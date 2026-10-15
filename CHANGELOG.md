@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Show ChatGPT Subscription as its own provider in Model settings, including when
+  account discovery is unavailable. Manage explicit model IDs and enable/disable
+  them through the existing model selector without introducing API-key credentials.
 - Open chats and document discussions in native desktop windows, with independent
   placement, resizing and Return controls. Preserve the existing conversation tree,
   unsent text and model menus when moving between windows.

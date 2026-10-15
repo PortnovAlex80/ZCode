@@ -9,6 +9,7 @@ import type {
 } from "@zcode/shared";
 import {
   BUILTIN_MODEL_PROVIDER_IDS,
+  CHATGPT_PROVIDER_ID,
   isStartPlanModelProviderId,
   resolveModelProviderFamilySpecByProviderId,
   resolveProviderFamilyDomainFromOAuthProvider,
@@ -208,6 +209,19 @@ export function useModelProviderNavigation({
             };
           }),
           ...codingPlanItems.filter((item) => isStartPlanModelProviderId(item.presetId)),
+          // 订阅账号属于 openai-family，不能被 standard-personal 过滤器丢弃。
+          // 无目录/无权益时也保留入口，用户才能登录、重试和配置模型。
+          {
+            key: CHATGPT_PROVIDER_ID,
+            type: "chatgpt",
+            label: intl.formatMessage({ id: "settings.modelProvider.chatgpt.navigation" }),
+            provider:
+              modelProviders.find((provider) => provider.providerId === CHATGPT_PROVIDER_ID) ??
+              null,
+            statusActive: modelProviders.some(
+              (provider) => provider.providerId === CHATGPT_PROVIDER_ID && provider.executable,
+            ),
+          },
         ],
       },
       {
@@ -558,7 +572,9 @@ export function connectionSelectionMatchesNavigationItem(
   selection: ProviderFamilyConnectionSelection,
   item: Exclude<ModelProviderNavGroup["items"][number], { type: "codingPlanLoading" }>,
 ): boolean {
-  if (item.type === "custom") return false;
+  // 只有 Zhipu family 项拥有 presetId；ChatGPT 账号不参与其连接模式选择。
+  if (item.type !== "preset" && item.type !== "codingPlan" && item.type !== "teamPlan")
+    return false;
   const familySpec = resolveModelProviderFamilySpecByProviderId(item.presetId ?? "");
   if (familySpec?.id !== family) return false;
   if (selection.kind === "start-plan") {

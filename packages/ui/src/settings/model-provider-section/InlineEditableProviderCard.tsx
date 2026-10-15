@@ -748,7 +748,9 @@ export function InlineEditableProviderCard({
   }, [onDelete]);
 
   const headerProviderName = providerDisplayName;
-  const isAccountProvider = provider.config.access?.type === "zhipu-account";
+  const isAccountProvider =
+    provider.config.access?.type === "zhipu-account" ||
+    provider.config.access?.type === "openai-oauth";
   const isApiKeyProvider = isApiKeyAccess(provider.config.access);
   const effectiveHeaderVisible = headerVisible && statusSection === undefined;
 

@@ -26,6 +26,8 @@ import {
   type ModelProviderNavItem,
 } from "./constants.js";
 import { InlineEditableProviderCard } from "./InlineEditableProviderCard.js";
+import { ChatGptProviderPanel } from "./ChatGptProviderPanel.js";
+import type { ChatGptAccountRead } from "@/hooks/useChatGptAccount.js";
 import {
   ModelProviderLoadingCard,
   PresetProviderPlaceholderCard,
@@ -227,6 +229,7 @@ export function resolvePlanSettingsProvider({
 }
 
 export function ModelProviderSectionDetail({
+  chatGptAccount,
   selectedNavItem,
   navigationItems = selectedNavItem ? [selectedNavItem] : [],
   connectionSettingsFailed = false,
@@ -255,6 +258,7 @@ export function ModelProviderSectionDetail({
   onSelectNavItem,
   providerSettingsView: providerSettingsViewOverride,
 }: {
+  chatGptAccount?: ChatGptAccountRead;
   selectedNavItem: ModelProviderNavItem | null;
   navigationItems?: ModelProviderNavItem[];
   connectionSettingsFailed?: boolean;
@@ -394,6 +398,23 @@ export function ModelProviderSectionDetail({
 
   if (!selectedNavItem) {
     return <ModelProviderLoadingCard loadingLabel={loadingLabel} />;
+  }
+
+  if (selectedNavItem.type === "chatgpt") {
+    const provider = selectedNavItem.provider;
+    return (
+      <ChatGptProviderPanel
+        account={chatGptAccount}
+        provider={provider}
+        onSave={onSave}
+        {...modelEditingProps}
+        onReorderModelIds={
+          provider && onReorderProviderModels
+            ? (modelIds) => onReorderProviderModels(provider.providerId, modelIds)
+            : undefined
+        }
+      />
+    );
   }
 
   if (selectedNavItem.type === "preset") {

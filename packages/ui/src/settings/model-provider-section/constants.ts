@@ -135,6 +135,13 @@ export function resolveModelProviderDisplayName(
 export type ModelProviderNavItem =
   | {
       key: string;
+      type: "chatgpt";
+      label: string;
+      provider: ProviderSettingsFormProvider | null;
+      statusActive: boolean;
+    }
+  | {
+      key: string;
       type: "preset";
       /** 品牌入口图标独立于其历史 Start 导航身份。 */
       logo?: ProviderSettingsFormProvider["config"]["logo"];

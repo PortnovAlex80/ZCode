@@ -33,6 +33,17 @@ recheck those items before restoring their accepted status.
 
 ## Exclusive write assignments
 
+### ChatGPT provider panel repair — 2026-10-15
+
+User shut ZCode down and requested a dedicated subscription provider with model
+controls, a production rebuild, and only affected tests. Root independently verified
+valid OAuth scopes/audience/client and Cloudflare 520 from both Node and system curl;
+no inference was sent. Found an additional local defect: settings navigation excluded
+the openai-family provider even when its catalog existed. Dedicated navigation and
+the existing Personal model editor are being connected; manual model IDs are explicit
+configuration, not account-catalog or inference success. Runtime/GUI/build evidence
+will be recorded at completion. Existing unrelated user changes remain untouched.
+
 ### Next stage recorded — 2026-10-15
 
 [Artifact Harness plan](ARTIFACT-HARNESS-PLAN.md) develops U-02 into artifact-specific

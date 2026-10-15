@@ -40,7 +40,6 @@ import {
 } from "./model-provider-section/constants.js";
 import { ModelProviderSectionDetail } from "./model-provider-section/Detail.js";
 import { ModelProviderSectionLayout } from "./model-provider-section/SectionLayout.js";
-import { ChatGptAccountCard } from "./model-provider-section/ChatGptAccountCard.js";
 import { useChatGptAccount } from "@/hooks/useChatGptAccount.js";
 import { ProviderTemplatePicker } from "./model-provider-section/ProviderTemplatePicker.js";
 import type { CodingPlanLoginOptions } from "./model-provider-section/codingPlanPricingCards.js";
@@ -1107,7 +1106,6 @@ export function ModelProviderSection({
 
   return (
     <div className="space-y-4">
-      <ChatGptAccountCard account={chatGptAccount} />
       <ModelProviderSectionLayout
         description={intl.formatMessage({
           id: "settings.modelProviderDescription",
@@ -1160,6 +1158,7 @@ export function ModelProviderSection({
           />
         ) : (
           <ModelProviderSectionDetail
+            chatGptAccount={chatGptAccount}
             connectionSelections={effectiveConnectionSelections}
             providerSettingsView={providerSettingsView}
             selectedNavItem={selectedNavItem}

@@ -477,6 +477,56 @@ describe("ChatGPT account projection end-to-end（Host Registry → ModelSelecti
       expect(serializedView).not.toContain("secret-refresh-token-value");
       expect(serializedView).not.toContain("user@example.com");
       disposeView.dispose();
+
+      // 目录服务不可用时，显式添加的 Personal 模型仍走同一 OAuth Provider；
+      // 配置成员不等于账号授权，登出后必须从聊天选择器退出。
+      await credentialService.delete(CHATGPT_CREDENTIAL_KEYS.models);
+      await runtime.providerSettings.refresh("chatgpt-models");
+      const emptySettings = await runtime.providerSettings.getView();
+      expect(
+        emptySettings.providers.find((provider) => provider.providerId === CHATGPT_PROVIDER_ID),
+      ).toMatchObject({ executable: false, models: [] });
+      await runtime.providerSettings.addPersonalModel(CHATGPT_PROVIDER_ID, "gpt-6-astra", {}, true);
+      const personalView = await runtime.modelSelection.getView();
+      expect(
+        personalView.providers.find((provider) => provider.providerId === CHATGPT_PROVIDER_ID),
+      ).toMatchObject({
+        config: { access: { type: "openai-oauth", entitled: true } },
+        models: [{ modelId: "gpt-6-astra" }],
+      });
+      expect(await credentialService.load(CHATGPT_CREDENTIAL_KEYS.models)).toBeNull();
+      await runtime.providerSettings.setPersonalModelEnabled(
+        CHATGPT_PROVIDER_ID,
+        "gpt-6-astra",
+        false,
+      );
+      expect(
+        (await runtime.modelSelection.getView()).providers.some(
+          (provider) => provider.providerId === CHATGPT_PROVIDER_ID,
+        ),
+      ).toBe(false);
+      await runtime.providerSettings.setPersonalModelEnabled(
+        CHATGPT_PROVIDER_ID,
+        "gpt-6-astra",
+        true,
+      );
+      expect(
+        (await runtime.modelSelection.getView()).providers.find(
+          (provider) => provider.providerId === CHATGPT_PROVIDER_ID,
+        )?.models[0]?.modelId,
+      ).toBe("gpt-6-astra");
+      await credentialService.delete(CHATGPT_CREDENTIAL_KEYS.credentials);
+      await runtime.providerSettings.refresh("chatgpt-credentials-changed");
+      expect(
+        (await runtime.modelSelection.getView()).providers.some(
+          (provider) => provider.providerId === CHATGPT_PROVIDER_ID,
+        ),
+      ).toBe(false);
+      expect(
+        (await runtime.providerSettings.getView()).providers.find(
+          (provider) => provider.providerId === CHATGPT_PROVIDER_ID,
+        )?.models[0]?.modelId,
+      ).toBe("gpt-6-astra");
     } finally {
       runtime.dispose();
     }
