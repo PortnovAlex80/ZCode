@@ -18,6 +18,14 @@ not competing implementation plans.
 
 ## Goal and the meaning of the fork
 
+### Next stage: artifact harness (2026-10-15)
+
+The user requested recording the next stage: [artifact passports and portable
+working context](ARTIFACT-HARNESS-PLAN.md). This extends U-02 from file/folder
+metadata to artifact-specific skills, sources, checks and explicit portability.
+AH-01..AH-06 describe planned work; the existing storage service is only a partial
+baseline. This request records the concept and does not start implementation.
+
 ### GPT по подписке ChatGPT (план от 2026-10-15)
 
 По запросу пользователя подготовлен [план интеграции ChatGPT subscription](CHATGPT-SUBSCRIPTION-PLAN.md)

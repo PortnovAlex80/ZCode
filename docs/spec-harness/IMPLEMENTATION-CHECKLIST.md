@@ -33,6 +33,16 @@ recheck those items before restoring their accepted status.
 
 ## Exclusive write assignments
 
+### Next stage recorded — 2026-10-15
+
+[Artifact Harness plan](ARTIFACT-HARNESS-PLAN.md) develops U-02 into artifact-specific
+working context: passport, referenced skills, checks and portability. AH-01..AH-06
+remain unchecked; no runtime implementation is claimed. The existing metadata
+storage is retained as the inspected baseline. Four auxiliary worktrees and the
+fork-research folder were archived under `D:\Development\_archive\zcode-2026-10-15`;
+Git links, branches and uncommitted work were preserved. Main product, Harmess and
+the spec-harness reference remain in place.
+
 ### User handoff audit and push — 2026-10-15
 
 User explicitly approved committing and pushing current work, requested an English
