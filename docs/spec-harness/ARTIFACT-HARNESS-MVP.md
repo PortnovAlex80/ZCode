@@ -67,6 +67,15 @@ queue, model client, runtime, paid prompt or standalone REST executor is introdu
 
 ## ODN pilot
 
+Updated requirement (2026-10-15): the actual ODN deliverable is a Word DOCX
+based on the existing project's real title-sheet sample. The MD/TXT exercise
+below remains a context fixture, not completion of that task. Follow
+[ODN-WORD-TITLE-PILOT.md](ODN-WORD-TITLE-PILOT.md): bind the real template,
+explicit request, renderer skill and output receipt in the document passport.
+Keep layout from the OOXML template; accept only counted replacements using
+confirmed requisites. Return a link to the DOCX. No new button is required:
+open the existing Discussions control without selecting text.
+
 Ship an editable example project under `examples/artifact-harness-odn`: TXT
 requisites (clearly fictional training data), MD title template, working MD title,
 local skill, project and folder passports and a title-specific procedure/checklist.
