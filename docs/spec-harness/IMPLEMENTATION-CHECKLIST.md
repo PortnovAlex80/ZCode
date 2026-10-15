@@ -40,9 +40,42 @@ controls, a production rebuild, and only affected tests. Root independently veri
 valid OAuth scopes/audience/client and Cloudflare 520 from both Node and system curl;
 no inference was sent. Found an additional local defect: settings navigation excluded
 the openai-family provider even when its catalog existed. Dedicated navigation and
-the existing Personal model editor are being connected; manual model IDs are explicit
-configuration, not account-catalog or inference success. Runtime/GUI/build evidence
-will be recorded at completion. Existing unrelated user changes remain untouched.
+the existing Personal model editor are connected in `65c0018d`. Manual model IDs
+are explicit configuration, not account-catalog or inference success. Existing
+unrelated user changes remain untouched.
+
+- [x] Отдельная панель OpenAI — ChatGPT Subscription в Model settings: вход,
+  обновление каталога, добавление и переключатели моделей, без поля API key.
+- [x] Проверка в production `.exe` с настоящим профилем: через UI добавлены
+  `gpt-6-astra` и `gpt-5.6-sol`; обе видимы в селекторе с provider ID
+  `account:chatgpt`. GLM-5.3, GLM-5.3-Flash и zai-api остались в меню.
+- [x] Конфигурация остальных провайдеров до/после побайтно совпадает после
+  исключения записей ChatGPT; выбранная GLM-5.3-Flash сохранена. Проверочный
+  процесс закрыт. Единственный ярлык ZCode указывает на обновлённый win-unpacked.
+- [x] Целевые тесты: шесть UI suites (92 теста), после дополнительного regression
+  guard повторены три navigation suites (8 тестов); service projection — 14 тестов.
+  Команды: `pnpm --filter @zcode/ui exec vitest run` с файлами
+  `chatGptProviderNavigation.test.tsx`, `modelProviderModelRowEditor.test.ts`,
+  `modelProviderNavigationI18n.test.ts`, `modelProviderNavigationLoading.test.ts`,
+  `chatGptAccountCard.test.tsx`, `chatGptAccountSelection.test.tsx` из `test/`;
+  `pnpm exec vitest run packages/services/test/chatGptAccountProjection.test.ts`.
+  `pnpm typecheck` passed; `pnpm lint` — 0 errors, 63 warnings;
+  `pnpm architecture:check --changed` — 0 violations; `git diff --check` passed.
+  Общий related/full test sweep не повторялся по прямому указанию пользователя.
+  Для push стандартный hook заменён уже выполненными целевыми проверками только
+  в текущем вызове Git; постоянные hooks/config не изменялись.
+- [x] `node scripts/spec-harness-production.mjs build` и `Build-Installer.cmd fast`
+  завершились успешно; build commit `65c0018d`, production, auto-update off.
+  `packages/desktop/dist/ZCode-3.15.1-win-x64.exe`: 170139653 bytes,
+  SHA-256 `b43362c8cd6fb276a4ac17f83337a62ed786423b693eb51d7c0201212e618763`.
+  Установщик не запускался: существующий ярлык использует обновлённый portable
+  каталог. GUI-проверка изолированного профиля и production с реальным профилем
+  завершилась успешно; локальные доказательства `.tmp/subscription-panel-*.png`,
+  `.tmp/subscription-selector-*.png` и `.tmp/subscription-panel-real-result.json`
+  не публикуются вместе с содержимым пользовательского профиля.
+- [ ] Успешный live catalog: независимые Node/curl GET пока возвращают 520.
+- [ ] Успешный inference и фактическое списание квоты: запрос модели не отправлялся;
+  наличие ручных записей в меню не доказывает доступность этих IDs для аккаунта.
 
 ### Next stage recorded — 2026-10-15
 
