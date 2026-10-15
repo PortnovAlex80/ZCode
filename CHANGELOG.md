@@ -29,6 +29,9 @@
 
 ### Validation and remaining acceptance
 
+- Full pre-push verification passed: 1,975 test files and 18,419 tests passed;
+  3 files and 67 tests were skipped. Lint reported no errors and architecture
+  checks reported no violations.
 - Focused authentication, catalog retry, account service, UI and window tests passed.
   Product GUI checks covered document project roots, native detach/Return and
   catalog failure → retry → appearance in the real model selector using a local fixture.

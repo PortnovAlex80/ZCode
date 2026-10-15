@@ -25,7 +25,7 @@ recheck those items before restoring their accepted status.
 | Field                          | State                                                                                              |
 | ------------------------------ | -------------------------------------------------------------------------------------------------- |
 | Product decision               | One maintained fork build; official installer is fallback; no maintained overlay build             |
-| Current assignment             | 2026-10-15 follow-up repair: acknowledged native browser launch, active-session document root, and native discussion Expand. User authorized a local commit; rebuilt product GUI acceptance is recorded separately below. Live ChatGPT consent/inference and broader workload performance acceptance remain open. |
+| Current assignment             | 2026-10-15 handoff complete: user approved ordinary UX; browser consent confirmed. Native windows/project roots/catalog retry and OAuth runtime assembly are repaired. English changelog and Russian checklist audited. Full pre-push verification, source push and production packaging passed; packaged GUI smoke passed. Live catalog/inference/billing and specialized window/performance acceptance remain open. |
 | Live runtime gate              | OPEN for ZCode repair/GUI validation: user explicitly confirmed on 2026-10-15 that ZCode is shut down and work may proceed. Build, launch, restart and inspect the repaired app; preserve profiles and sessions. Browser consent remains the user's action; no automatic paid/model prompts or unrelated Office/CAD changes. This supersedes older closed-runtime notes for this repair. |
 | Toolchain decisions            | `pnpm.overrides`/`patchedDependencies` live in `pnpm-workspace.yaml` (frozen-lockfile install verified, react 19.2.7, typecheck green); agents may run `pnpm install --frozen-lockfile` but never lockfile-refreshing commands; node 24.13.1 shell deviation recorded per evidence |
 | Immediate implementation order | Wave 4 (build-only): R-08 Build-Installer.cmd, R-10 fork-safe updates, R-03 build/run instructions, O-06/O-07 and T-05 fixture halves, R-06 doc pass → R-02 full gates at the frozen revision → only live-gated work remains until the user explicitly releases the runtime |
@@ -68,6 +68,25 @@ network chunks versus a 50ms idle limit). Replaced only that test fixture with a
 controlled clock and stream consumption checkpoints, retaining real file/hash checks;
 active data survives 240ms total and stalled data aborts exactly at the 50ms limit.
 Product downloader and timeouts are unchanged. Focused 7 tests passed, lint clean.
+
+Final full pre-push verification at `674d57b8` passed: 1,975 test files and
+18,419 tests passed; 3 files and 67 tests skipped, no failures (1,073.63 seconds).
+Lint completed with 63 warnings and no errors; architecture reported no violations.
+Normal `git push origin dev` completed successfully, advancing origin/dev from
+`aa8236cf` to `674d57b8`; no hooks were bypassed. Production CLI, Electron and UI
+compilation passed at the same revision; installer packaging is recorded below.
+
+Final production artifact: `packages/desktop/dist/ZCode-3.15.1-win-x64.exe`,
+170,130,002 bytes; SHA-256
+`afc136c19e93fe830943197e71e32a6cace3945fe2f1b74f64afbeef1bc6c7fc`.
+Packaged metadata: version 3.15.1, source revision `674d57b8`, build time
+2026-10-15T17:02:45.688Z. Full production build and Build-Installer fast both
+completed successfully, including package audits. Isolated launch of the actual
+`dist/win-unpacked/ZCode.exe` confirmed title ZCode, app.asar renderer and visible
+Continue with ChatGPT welcome; no live inference was sent. Exactly one shortcut
+remains: Desktop/ZCode.lnk targets this win-unpacked executable. Installer was not
+executed; existing installed application/profile were preserved. Later documentation
+commits do not change the artifact's embedded source revision.
 
 ### Callback completion and model catalog recovery — 2026-10-15
 
