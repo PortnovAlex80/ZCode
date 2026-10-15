@@ -784,7 +784,7 @@ function Documents({
       sha256: document.sha256,
     });
   }
-  function discuss(anchor = selection, questionDraft?: string) {
+  function discuss(anchor = selection, questionDraft?: string, scope?: "document") {
     if (
       !document ||
       !anchor ||
@@ -800,6 +800,7 @@ function Documents({
         documentPath: document.path,
         parentSessionId,
         anchor,
+        ...(scope ? { scope } : {}),
         ...(questionDraft ? { questionDraft } : {}),
       };
       persist([...threadsRef.current, thread]);
@@ -815,6 +816,16 @@ function Documents({
   const activeThread = documentThreads.find(
     (thread) => thread.id === activeThreadId,
   );
+  function discussDocument() {
+    if (!document) return;
+    const existing = documentThreads.find(thread => thread.scope === "document");
+    if (existing) {
+      setActiveThreadId(existing.id);
+      setDiscussionsVisible(true);
+      return;
+    }
+    discuss({ quote: document.path, prefix: "", suffix: "", start: -1, sha256: document.sha256 }, undefined, "document");
+  }
   useEffect(() => {
     let live = true;
     const activate = (event: Event) => {
@@ -1076,7 +1087,14 @@ function Documents({
                     title="Discussions"
                     aria-label="Discussions"
                     aria-pressed={discussionsVisible}
-                    onClick={() => setDiscussionsVisible(!discussionsVisible)}
+                    disabled={!discussionsVisible && !documentThreads.length && (!parentSessionId || dirty || !bindingReady || !discussionWriter.writable || ioPending)}
+                    onClick={() => {
+                      if (discussionsVisible) setDiscussionsVisible(false);
+                      else if (documentThreads.length) {
+                        if (!activeThreadId) setActiveThreadId(documentThreads[0]!.id);
+                        setDiscussionsVisible(true);
+                      } else discussDocument();
+                    }}
                   >
                     <MessageSquare />
                   </Button>

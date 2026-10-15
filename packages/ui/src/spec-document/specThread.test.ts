@@ -221,10 +221,36 @@ test("document context preserves the exact fragment bytes for keyboard and view 
   const index = text.indexOf(embedded);
   assert.equal(
     Buffer.compare(
-      Buffer.from(text.slice(index + embedded.length - fragment.length - 1, index + embedded.length - 1), "utf8"),
+      Buffer.from(
+        text.slice(index + embedded.length - fragment.length - 1, index + embedded.length - 1),
+        "utf8",
+      ),
       Buffer.from(fragment, "utf8"),
     ),
     0,
   );
   assert.ok(!text.includes("before") && !text.includes("after"));
+});
+
+test("document-scoped discussion binds the file without requiring or silently attaching a fragment", () => {
+  const text = documentQuestion(
+    {
+      id: "doc",
+      parentSessionId: "parent",
+      documentPath: "docs/title-sheet.md",
+      scope: "document",
+      anchor: {
+        quote: "docs/title-sheet.md",
+        prefix: "PRIVATE CONTENT",
+        suffix: "PRIVATE CONTENT",
+        start: -1,
+        sha256: "hash",
+      },
+    },
+    "Оформи титул",
+    "D:/ODN",
+  );
+  assert.ok(text.includes("Document link: docs/title-sheet.md"));
+  assert.ok(text.includes("Question:\nОформи титул"));
+  assert.ok(!text.includes("Selected fragment") && !text.includes("PRIVATE CONTENT"));
 });

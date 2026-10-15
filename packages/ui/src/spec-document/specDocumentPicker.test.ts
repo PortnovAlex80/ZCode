@@ -32,9 +32,7 @@ function renderPicker(options?: {
     createElement(SpecDocumentPicker, {
       files,
       value,
-      ...(options?.workspaceRoot === undefined
-        ? {}
-        : { workspaceRoot: options.workspaceRoot }),
+      ...(options?.workspaceRoot === undefined ? {} : { workspaceRoot: options.workspaceRoot }),
       ...(options?.disabled === undefined ? {} : { disabled: options.disabled }),
       onOpen,
     }),
@@ -111,13 +109,11 @@ describe("U-08 searchable document picker", () => {
     expect(onOpen).toHaveBeenCalledWith("notes/расчёт.txt");
   });
 
-  it("double-click on a row opens it directly; single click only highlights", () => {
+  it("a single click opens the result directly", () => {
     const onOpen = renderPicker();
     openDropdown();
     const row = optionRows().find((element) => element.dataset.pickerPath === "README.md")!;
     fireEvent.click(row);
-    expect(onOpen).not.toHaveBeenCalled();
-    fireEvent.doubleClick(row);
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onOpen).toHaveBeenCalledWith("README.md");
     expect(screen.queryByLabelText("Filter documents")).toBeNull();
@@ -141,9 +137,7 @@ describe("U-08 searchable document picker", () => {
     filterAgain.focus();
     fireEvent.mouseDown(document.body);
     expect(screen.queryByLabelText("Filter documents")).toBeNull();
-    expect(document.activeElement).not.toBe(
-      screen.getByLabelText("Choose project document"),
-    );
+    expect(document.activeElement).not.toBe(screen.getByLabelText("Choose project document"));
 
     // Esc 关闭则把焦点还给 trigger（键盘用户的连续操作路径）。
     fireEvent.click(screen.getByLabelText("Choose project document"));
@@ -151,9 +145,7 @@ describe("U-08 searchable document picker", () => {
       key: "Escape",
     });
     expect(screen.queryByLabelText("Filter documents")).toBeNull();
-    expect(document.activeElement).toBe(
-      screen.getByLabelText("Choose project document"),
-    );
+    expect(document.activeElement).toBe(screen.getByLabelText("Choose project document"));
 
     // 禁用态（I/O 或空列表）：不展开。
     cleanup();
@@ -228,20 +220,17 @@ describe("U-13 clean workspace-relative display", () => {
     expect(optionRows().map((row) => row.dataset.pickerPath)).toEqual([DIRTY_FILES[2]]);
     fireEvent.change(filter, { target: { value: "расч" } });
     expect(optionRows().map((row) => row.dataset.pickerPath)).toEqual([DIRTY_FILES[1]]);
-    // 盘符与 «./» 不属于展示形：按原始（脏）形态过滤必须一无所获。
+    // 未完整匹配的盘符不是项目内文件；./ 输入会规范化成相对路径。
     fireEvent.change(filter, { target: { value: "D:" } });
     expect(optionRows()).toEqual([]);
     fireEvent.change(filter, { target: { value: "./notes" } });
-    expect(optionRows()).toEqual([]);
-    expect(screen.getByText(/No documents match/u)).toBeTruthy();
+    expect(optionRows().map((row) => row.dataset.pickerPath)).toEqual([DIRTY_FILES[1]]);
   });
 
   it("opens the file by the source service path, not the display form", () => {
     const onOpen = renderPicker({ files: DIRTY_FILES, workspaceRoot: ROOT });
     openDropdown();
-    const absoluteRow = optionRows().find(
-      (row) => row.dataset.pickerPath === DIRTY_FILES[2],
-    )!;
+    const absoluteRow = optionRows().find((row) => row.dataset.pickerPath === DIRTY_FILES[2])!;
     fireEvent.doubleClick(absoluteRow);
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onOpen).toHaveBeenCalledWith(DIRTY_FILES[2]);
@@ -253,6 +242,59 @@ describe("U-13 clean workspace-relative display", () => {
     fireEvent.keyDown(filter, { key: "Enter" });
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onOpen).toHaveBeenCalledWith(DIRTY_FILES[2]);
+  });
+});
+
+describe("pasted paths and filename-first document search", () => {
+  afterEach(() => cleanup());
+  const root = "D:\\Development\\ODN-Foundation-Document-Pilot";
+  const title = "harness-title-pilot/docs/title-sheet.md";
+
+  it("finds the reported project-prefixed path and quoted Windows path, then Enter opens the service path", () => {
+    const onOpen = renderPicker({ files: [title, "README.md"], workspaceRoot: root });
+    const input = openDropdown();
+    for (const query of [
+      "ODN-Foundation-Document-Pilot/" + title,
+      '"' + root + '\\harness-title-pilot\\docs\\title-sheet.md"',
+      "./" + title,
+    ]) {
+      fireEvent.change(input, { target: { value: query } });
+      expect(optionRows().map((row) => row.dataset.pickerPath)).toEqual([title]);
+    }
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledWith(title);
+  });
+
+  it("matches multiple terms and prioritizes filename matches over directories", () => {
+    renderPicker({
+      files: ["title-sheet/archive.md", title, "docs/TITLE-SHEET.md"],
+      workspaceRoot: root,
+    });
+    const input = openDropdown();
+    fireEvent.change(input, { target: { value: "title sheet" } });
+    expect(optionRows().map((row) => row.dataset.pickerPath)).toEqual([
+      title,
+      "docs/TITLE-SHEET.md",
+      "title-sheet/archive.md",
+    ]);
+    fireEvent.change(input, { target: { value: "docs title" } });
+    expect(optionRows().map((row) => row.dataset.pickerPath)).toEqual([
+      title,
+      "docs/TITLE-SHEET.md",
+    ]);
+  });
+
+  it("shows the project, refuses an outside absolute path and clears the query without opening a file", () => {
+    const onOpen = renderPicker({ files: [title], workspaceRoot: root });
+    const input = openDropdown();
+    expect(screen.getByText(root)).toBeTruthy();
+    fireEvent.change(input, { target: { value: "D:/Other/" + title } });
+    expect(optionRows()).toEqual([]);
+    expect(screen.getByText(/Search is limited to ODN-Foundation-Document-Pilot/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear document search" }));
+    expect(optionRows()).toHaveLength(1);
+    expect(document.activeElement).toBe(input);
+    expect(onOpen).not.toHaveBeenCalled();
   });
 });
 
@@ -290,15 +332,11 @@ describe("U-14 picker delete (корзина)", () => {
   it("trash asks for confirmation; Delete calls onDelete with the service path (and never opens)", () => {
     const { onOpen, onDelete } = renderDeletablePicker();
     openDropdown();
-    const trash = document.querySelector<HTMLElement>(
-      '[data-picker-delete="README.md"]',
-    )!;
+    const trash = document.querySelector<HTMLElement>('[data-picker-delete="README.md"]')!;
     expect(trash).toBeTruthy();
     fireEvent.click(trash);
     // 行内确认出现；尚未删除。
-    expect(
-      document.querySelector('[data-picker-delete-confirm="README.md"]'),
-    ).toBeTruthy();
+    expect(document.querySelector('[data-picker-delete-confirm="README.md"]')).toBeTruthy();
     expect(onDelete).not.toHaveBeenCalled();
     // 点 корзина 不打开文档（stopPropagation：option 的选择/打开语义不被触发）。
     expect(onOpen).not.toHaveBeenCalled();
@@ -306,9 +344,7 @@ describe("U-14 picker delete (корзина)", () => {
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(onDelete).toHaveBeenCalledWith("README.md");
     // 确认后回到普通行（无确认态），下拉保持打开（可继续操作其它文件）。
-    expect(
-      document.querySelector("[data-picker-delete-confirm]"),
-    ).toBeNull();
+    expect(document.querySelector("[data-picker-delete-confirm]")).toBeNull();
     expect(screen.getByLabelText("Filter documents")).toBeTruthy();
   });
 
@@ -316,20 +352,14 @@ describe("U-14 picker delete (корзина)", () => {
     const { onDelete } = renderDeletablePicker();
     openDropdown();
     fireEvent.click(
-      document.querySelector<HTMLElement>(
-        '[data-picker-delete="notes/расчёт.txt"]',
-      )!,
+      document.querySelector<HTMLElement>('[data-picker-delete="notes/расчёт.txt"]')!,
     );
-    fireEvent.click(
-      screen.getByLabelText("Cancel deleting notes/расчёт.txt"),
-    );
+    fireEvent.click(screen.getByLabelText("Cancel deleting notes/расчёт.txt"));
     expect(onDelete).not.toHaveBeenCalled();
     expect(document.querySelector("[data-picker-delete-confirm]")).toBeNull();
     // корзина 回来了（可再次发起确认）。
     expect(
-      document.querySelector<HTMLElement>(
-        '[data-picker-delete="notes/расчёт.txt"]',
-      ),
+      document.querySelector<HTMLElement>('[data-picker-delete="notes/расчёт.txt"]'),
     ).toBeTruthy();
   });
 

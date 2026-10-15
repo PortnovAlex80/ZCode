@@ -149,12 +149,18 @@ export function SpecDiscussionPane({
         ) : null}
         <div className="flex items-center justify-between gap-2">
           <div className="mb-1 text-ui-xs text-foreground-subtle">
-            Selected fragment ·{" "}
-            {thread.anchor.start < 0
-              ? "location unresolved"
-              : anchorCurrent
-                ? "current"
-                : "changed since selection"}
+            {thread.scope === "document" ? (
+              "Document discussion"
+            ) : (
+              <>
+                Selected fragment ·{" "}
+                {thread.anchor.start < 0
+                  ? "location unresolved"
+                  : anchorCurrent
+                    ? "current"
+                    : "changed since selection"}
+              </>
+            )}
           </div>
           <Button
             variant="ghost"

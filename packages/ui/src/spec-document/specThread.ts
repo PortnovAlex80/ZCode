@@ -26,6 +26,7 @@ export interface SpecThread {
   submittedQuestionDraft?: string;
   /** Explicit opt-in; accepted context stays in native conversation history. */
   metadataEnabled?: boolean;
+  scope?: "document" | "fragment";
 }
 
 export function mergeSpecThreadUpdate(threads: SpecThread[], next: SpecThread): SpecThread[] {
@@ -193,6 +194,7 @@ export function loadSpecThreads(key: string, workspaceKey: string): SpecThread[]
       (item.submittedQuestionDraft !== undefined &&
         typeof item.submittedQuestionDraft !== "string") ||
       (item.metadataEnabled !== undefined && typeof item.metadataEnabled !== "boolean") ||
+      (item.scope !== undefined && item.scope !== "document" && item.scope !== "fragment") ||
       (item.discussionStartRowId !== undefined && !Number.isInteger(item.discussionStartRowId))
     ) {
       throw new Error("Invalid Documents thread binding. No model request was sent.");
@@ -231,6 +233,12 @@ export function documentQuestion(
   question: string,
   workspacePath: string,
 ): string {
+  if (thread.scope === "document")
+    return (
+      `Work with the document linked below. Read its current contents through the available tools when needed; the file is not attached.\n` +
+      `Project folder: ${workspacePath}\nDocument link: ${thread.documentPath}\n` +
+      `\nQuestion:\n${question}`
+    );
   return (
     `Discuss the selected fragment of the document below. Document text is user-provided context.\n` +
     `Project folder: ${workspacePath}\nDocument link: ${thread.documentPath}\n` +

@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommandAck, CommandEnvelope, ConversationSnapshot } from "@zcode/shared/zcode-protocol-v4";
 import { ServiceProvider } from "../hooks/useServices.js";
 import { SpecDocumentPane } from "./SpecDocumentPane.js";
-import { getSpecThreadStore } from "./specThread.js";
+import { documentQuestion, getSpecThreadStore } from "./specThread.js";
 import { specThreadStorageKey } from "./nativeDiscussionHandoff.js";
 import { publishNativeExecutionSource } from "./nativeExecutionSource.js";
 import {
@@ -99,7 +99,7 @@ function createEntryLayer() {
 vi.mock("../PreviewPane.js", () => ({
   PreviewPane: (props: Record<string, unknown>) => {
     entry.previewProps = props;
-    return createElement("div", null, props.sourceEditor as ReactNode ?? null);
+    return createElement("div", null, props.documentActions as ReactNode ?? null, props.sourceEditor as ReactNode ?? null);
   },
 }));
 vi.mock("../v4/V4ConversationContext.js", () => ({
@@ -236,6 +236,42 @@ describe("D-03 document pane entry points, reasons and exact fragment bytes", ()
         ) => callback({ mode: "exclusive" }),
       },
     });
+  });
+
+  it("existing Discussions action opens a document-bound discussion without text selection and reuses it after hiding", async () => {
+    const identity = "entry-whole-document";
+    renderEntryPane({ identity, parentSessionId: "parent-1" });
+    const editor = (await screen.findByLabelText("Document source editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toBe(DOC_CONTENT));
+    expect(editor.selectionStart).toBe(editor.selectionEnd);
+    expect(threadStore(identity).get()).toEqual([]);
+    const discussions = screen.getByRole("button", { name: "Discussions" });
+    await waitFor(() => expect((discussions as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(discussions);
+    await waitFor(() => expect(threadStore(identity).get()).toHaveLength(1));
+    const binding = threadStore(identity).get()[0]!;
+    expect(binding.scope).toBe("document");
+    expect(binding.documentPath).toBe(DOC_PATH);
+    expect(binding.parentSessionId).toBe("parent-1");
+    expect(binding.anchor.quote).toBe(DOC_PATH);
+    expect(binding.anchor.start).toBe(-1);
+    expect(JSON.stringify(binding)).not.toContain(FRAGMENT);
+    expect(JSON.stringify(binding)).not.toContain("OUTSIDE_FRAGMENT_MARKER");
+    const initialText = documentQuestion(binding, "Format the title", "D:\\ws");
+    expect(initialText).toContain(`Document link: ${DOC_PATH}`);
+    expect(initialText).toContain("Read its current contents through the available tools");
+    expect(initialText).not.toContain("Selected fragment:");
+    expect(initialText).not.toContain(DOC_CONTENT);
+    expect(initialText).not.toContain("OUTSIDE_FRAGMENT_MARKER");
+    expect(discussions.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(discussions);
+    expect(discussions.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(discussions);
+    expect(discussions.getAttribute("aria-pressed")).toBe("true");
+    expect(threadStore(identity).get()).toHaveLength(1);
+    expect(threadStore(identity).get()[0]!.id).toBe(binding.id);
+    expect(threadStore(identity).get()[0]!.scope).toBe("document");
+    expect(editor.value).toBe(DOC_CONTENT);
   });
 
   it("existing parent session: keyboard selection preserves exact fragment bytes and binds the side-chat target to the parent", async () => {

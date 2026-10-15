@@ -14,6 +14,12 @@
 
 ### Fixed
 
+- Make document search accept project-prefixed and absolute workspace paths,
+  match multiple terms, prioritize filenames and open results with one click.
+  Show the current project, result count and clear-search control.
+- Open a document discussion from the existing Discussions control without
+  requiring a selected fragment.
+
 - Show ChatGPT Subscription as its own provider in Model settings, including when
   account discovery is unavailable. Manage explicit model IDs and enable/disable
   them through the existing model selector without introducing API-key credentials.

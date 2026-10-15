@@ -6,9 +6,10 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { Search, Trash2 } from "lucide-react";
+import { Search, Trash2, X } from "lucide-react";
 import { cn } from "@/components/lib/utils.js";
 import { Button } from "@/components/ui/button.js";
+import { findDocuments } from "./documentSearch.js";
 
 /**
  * U-08：工作区文档选择器——可搜索 combobox。
@@ -18,7 +19,7 @@ import { Button } from "@/components/ui/button.js";
  * combobox）：
  * - 点击文件行（trigger）打开下拉，内联过滤输入框（放大镜图标），输入即时过滤；
  * - 键盘优先：↓/↑ 移动高亮，Enter 打开高亮项（过滤后默认第一项），Esc 关闭；
- * - 行上双击直接打开；单击仅选中高亮（打开路径 = Enter / 双击，与设计一致）；
+ * - 单击或 Enter 打开；完整路径输入仅用于匹配当前项目列表，不扩大文件读取范围；
  * - 过滤对展示形相对路径不区分大小写；全局项目搜索图标是另一个独立入口，不在此处。
  *
  * U-13（活体反馈 2026-10-14，用户截图«странные пути»）：诊断确认列表来源是
@@ -57,9 +58,7 @@ export function documentDisplayParts(
       display = display.slice(root.length + 1);
     }
   }
-  display = display
-    .replace(/^(?:[a-z]:\/+|\/+)/i, "")
-    .replace(/\/{2,}/g, "/");
+  display = display.replace(/^(?:[a-z]:\/+|\/+)/i, "").replace(/\/{2,}/g, "/");
   while (display.startsWith("./")) display = display.slice(2);
   const slash = display.lastIndexOf("/");
   return {
@@ -112,16 +111,23 @@ export function SpecDocumentPicker({
     () => files.map((path) => ({ path, ...documentDisplayParts(path, workspaceRoot) })),
     [files, workspaceRoot],
   );
-  const matches = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    if (!needle) return entries;
-    return entries.filter((entry) => entry.display.toLowerCase().includes(needle));
-  }, [entries, filter]);
+  const matches = useMemo(
+    () => findDocuments(entries, filter, workspaceRoot),
+    [entries, filter, workspaceRoot],
+  );
+  const projectName = workspaceRoot?.replaceAll("\\", "/").replace(/\/+$/, "").split("/").at(-1);
 
   // 过滤结果变化后高亮回落到第一项：Enter 永远打开“顶部匹配”（键盘优先）。
   useEffect(() => {
     setActiveIndex(0);
   }, [filter, entries]);
+
+  useEffect(() => {
+    if (open)
+      rootRef.current
+        ?.querySelector(`[data-picker-index="${activeIndex}"]`)
+        ?.scrollIntoView?.({ block: "nearest" });
+  }, [open, activeIndex]);
 
   useEffect(() => {
     if (!open) return;
@@ -208,10 +214,7 @@ export function SpecDocumentPicker({
             <>
               <span data-picker-file-name>{valueParts.name}</span>
               {valueParts.directory ? (
-                <span
-                  data-picker-directory
-                  className="ml-1 text-foreground-subtlest"
-                >
+                <span data-picker-directory className="ml-1 text-foreground-subtlest">
                   {valueParts.directory}
                 </span>
               ) : null}
@@ -230,6 +233,17 @@ export function SpecDocumentPicker({
           role="dialog"
           aria-label="Choose project document"
         >
+          {workspaceRoot ? (
+            <div
+              className="border-b border-border px-3 py-2 text-ui-xs text-foreground-subtle"
+              title={workspaceRoot}
+            >
+              <span>
+                Project: <strong className="text-foreground">{projectName}</strong>
+              </span>
+              <span className="mt-0.5 block truncate">{workspaceRoot}</span>
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 border-b border-border p-2">
             <Search aria-hidden="true" className="size-4 shrink-0 text-foreground-subtle" />
             <input
@@ -238,16 +252,29 @@ export function SpecDocumentPicker({
               onChange={(event) => setFilter(event.target.value)}
               onKeyDown={onFilterKeyDown}
               aria-label="Filter documents"
-              placeholder="Фильтр по пути…"
+              placeholder="Имя файла или путь…"
               spellCheck={false}
               className="min-w-0 flex-1 rounded-md border border-input-border bg-background px-2 py-1 text-ui-sm outline-none"
             />
+            {filter ? (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Clear document search"
+                onClick={() => {
+                  setFilter("");
+                  filterInputRef.current?.focus();
+                }}
+              >
+                <X className="size-3.5" />
+              </Button>
+            ) : null}
           </div>
           <ul
             id={listId}
             role="listbox"
             aria-label="Project documents"
-            className="max-h-64 overflow-y-auto p-1"
+            className="max-h-[min(24rem,55dvh)] overflow-y-auto p-1"
           >
             {matches.length ? (
               matches.map(({ path, display, name, directory }, index) => (
@@ -264,22 +291,25 @@ export function SpecDocumentPicker({
                   )}
                 >
                   <div
+                    data-picker-index={index}
                     role="option"
                     aria-selected={path === value}
                     tabIndex={-1}
                     data-picker-path={path}
                     className="min-w-0 flex-1 cursor-default px-2 py-1"
-                    onClick={() => setActiveIndex(index)}
+                    onClick={() => openDocument(path)}
                     onDoubleClick={() => openDocument(path)}
                   >
                     {/* U-13：名称在前（truncate 只吃掉 muted 目录侧），
                         深路径不再把文件名挤出可视区。 */}
-                    <span className="block truncate">
-                      <span data-picker-file-name>{name}</span>
+                    <span className="block min-w-0" title={display}>
+                      <span data-picker-file-name className="block truncate text-foreground">
+                        {name}
+                      </span>
                       {directory ? (
                         <span
                           data-picker-directory
-                          className="ml-1 text-foreground-subtlest"
+                          className="block truncate text-ui-xs text-foreground-subtlest"
                         >
                           {directory}
                         </span>
@@ -347,9 +377,21 @@ export function SpecDocumentPicker({
             ) : (
               <li className="px-2 py-3 text-ui-sm text-foreground-subtlest">
                 No documents match “{filter.trim()}”.
+                {projectName ? (
+                  <span className="mt-1 block">
+                    Search is limited to {projectName}. Open the correct project to search its
+                    documents.
+                  </span>
+                ) : null}
               </li>
             )}
           </ul>
+          <div className="flex justify-between gap-2 border-t border-border px-3 py-1.5 text-ui-xs text-foreground-subtle">
+            <span>
+              {matches.length} / {entries.length} documents
+            </span>
+            <span>↑↓ select · Enter open · Esc close</span>
+          </div>
         </div>
       ) : null}
     </div>
