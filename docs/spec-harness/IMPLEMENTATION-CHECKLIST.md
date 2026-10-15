@@ -163,6 +163,9 @@ items plus parked N-01.
 
 - [ ] **U-13** The document picker displays CLEAN workspace-relative paths: forward slashes, no leading «./», no absolute-drive or workspace-folder prefix, no duplicated repo segments; the file name is the primary text and the directory part secondary (muted); the search filter matches over exactly this displayed form. Live report 2026-10-14: the picker currently shows strange paths in the dropdown (user screenshot) — diagnose the actual displayed string source and fix the display + filter together.
 
+- [ ] **U-14** The picker delete (корзина) actually deletes the document (visible confirmation, error state on failure, no silent no-op); disabled state explains why if deletion is not allowed.
+- [ ] **U-15** The picker paths are relative to THE CONVERSATION PROJECT WORKSPACE (the project the user works in), not the ZCODE execution/launch root. Live report 2026-10-14: the project lives in a different folder; the picker currently builds paths from the wrong root (the ZCODE launch dir), so displayed paths and filtering are misleading.
+
 ## N — Parked outside this release
 
 - [ ] **N-01** Compact agent capability/reference map for Word/Excel/AutoCAD (object → operation → limits → minimal example; versioned startup index plus lazy resources). Intentionally outside this checklist's release scope as a separate user request. Evidence: IMPLEMENTATION-PLAN.md:277-282.
