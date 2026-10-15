@@ -1,5 +1,9 @@
 # Spec Harness: fork ZCODE
 
+Следующий этап Claude: [английский промпт интеграции](ANTHROPIC-INTEGRATION-PROMPT.md).
+Повторно используем интерфейс моделей; доступ через официальный Claude Code runtime
+требует отдельного адаптера. Исследование выполнено, реализация ещё не начата.
+
 Актуальная цель — одна поддерживаемая сборка из этого форка с обычным локальным профилем ZCODE. Официальный установщик — запасной вариант; отдельную overlay-сборку больше не развиваем. Управление работой: [план реализации](IMPLEMENTATION-PLAN.md), [чеклист с приёмкой](IMPLEMENTATION-CHECKLIST.md), [английский промпт команды](AGENT-TEAM-PROMPT.md). Чеклист отделяет проверенный код от ещё не выполненной живой приёмки.
 
 Интеграция Word/Excel/AutoCAD: [SRS](DOCUMENT-HOSTS.md), [сборка и подключение](../../prototypes/document-host/README.md). Ранний план: [OFFICE-INTEGRATION.md](OFFICE-INTEGRATION.md).
