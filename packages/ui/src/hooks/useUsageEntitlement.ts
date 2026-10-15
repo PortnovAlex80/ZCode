@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   UsageEntitlementSnapshot,
   ZCodeAccountAccess,
-  ZCodeProviderAccountAccess,
+  ZCodeZhipuProviderAccountAccess,
 } from "@zcode/shared";
 import type { IUsageStatsService } from "@zcode/services";
 import { useOptionalBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
@@ -136,7 +136,7 @@ export interface UseUsageEntitlementOptions {
   enabled?: boolean;
   includeSubscription?: boolean;
   preferredProviderId?: string;
-  accountAccess?: ZCodeProviderAccountAccess | ZCodeAccountAccess;
+  accountAccess?: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess;
   allowDisabledPreferredProvider?: boolean;
   requirePreferredProvider?: boolean;
   allowEnvApiKey?: boolean;

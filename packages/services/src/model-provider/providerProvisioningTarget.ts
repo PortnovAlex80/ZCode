@@ -17,7 +17,7 @@ import {
 import type { ICredentialService } from "../credential/credential.js";
 import type { ISettingService } from "../setting/setting.js";
 import type { ProviderRuntime } from "./providerRuntime.js";
-import type { AccountProviderService } from "@zcode/provider";
+import type { ProviderSource, AccountProviderConfigSnapshot } from "@zcode/provider";
 import type { IProviderProvisioningTargetService } from "./providerProvisioning.js";
 import {
   PROVIDER_PROVISIONING_OAUTH_CREDENTIAL_KEYS,
@@ -31,7 +31,13 @@ const OAUTH_CREDENTIAL_KEYS = new Set<string>(PROVIDER_PROVISIONING_OAUTH_CREDEN
 export interface ProviderProvisioningTargetOptions {
   readonly providerRuntime: ProviderRuntime;
   readonly personalRepository: PersonalProviderConfigRepository;
-  readonly accountProviderSource: AccountProviderService;
+  /**
+   * Host 账号事实源（zhipu AccountProviderService 或其 ChatGPT-aware 包装）。
+   * Provisioning 只需要 refresh；不依赖具体服务类。
+   */
+  readonly accountProviderSource: ProviderSource<AccountProviderConfigSnapshot> & {
+    refresh(reason: string): Promise<AccountProviderConfigSnapshot>;
+  };
   readonly credentialService: ICredentialService;
   readonly settingService: ISettingService;
   readonly personalConfigFilePath: string;
@@ -178,7 +184,10 @@ interface AppliedProvisioningState {
 
 function parsePersonalConfig(envelope: ProviderProvisioningEnvelope): ProviderConfigLayerUpdate {
   // 信封与本地保存复用正式 Personal codec，不在接收端另建字段清单或模式判断。
-  return decodeProviderConfigFile({ schemaVersion: 1, config: envelope.personalConfig });
+  return decodeProviderConfigFile({
+    schemaVersion: 1,
+    config: envelope.personalConfig,
+  });
 }
 
 async function captureBeforeState(

@@ -60,8 +60,22 @@ describe("Gen UI executor file reader", () => {
     await expect(readGenUiDocument({ ...target, path: oldPath }, outputRoot)).rejects.toThrow(
       "host output directory",
     );
-    await symlink(oldPath, target.path);
-    await expect(readGenUiDocument(target, outputRoot)).rejects.toThrow("symbolic links");
+    // 修复原因：Windows 未开启开发者模式（或非管理员）时创建文件符号链接返回 EPERM，
+    // 无法构造该夹具（自导入 aac47556 起在 Windows 上确定性失败）；下方 junction
+    //（无需特权，且 Node 的 lstat 同样将其识别为符号链接）已完整覆盖
+    // "symbolic links" 拒绝行为，故仅在 EPERM 平台限制时跳过文件软链断言。
+    let fileSymlinkCreated = true;
+    try {
+      await symlink(oldPath, target.path);
+    } catch (error) {
+      if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EPERM") {
+        throw error;
+      }
+      fileSymlinkCreated = false;
+    }
+    if (fileSymlinkCreated) {
+      await expect(readGenUiDocument(target, outputRoot)).rejects.toThrow("symbolic links");
+    }
     await rm(directory, { recursive: true });
     await symlink(target.workspacePath, directory, "junction");
     await expect(readGenUiDocument(target, outputRoot)).rejects.toThrow("symbolic links");

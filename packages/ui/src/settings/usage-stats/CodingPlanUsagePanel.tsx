@@ -332,7 +332,7 @@ function CodingPlanQuotaCards({
   sourceKey: string | undefined;
   preferredProviderId: string | undefined;
   accountAccess:
-    | import("@zcode/shared").ZCodeProviderAccountAccess
+    | import("@zcode/shared").ZCodeZhipuProviderAccountAccess
     | import("@zcode/shared").ZCodeAccountAccess
     | undefined;
   onEntitlementRefresh: () => void | Promise<void>;

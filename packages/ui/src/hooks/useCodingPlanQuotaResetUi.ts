@@ -6,7 +6,7 @@ import type {
   CodingPlanResetStatusSnapshot,
   CodingPlanResetType,
   ZCodeAccountAccess,
-  ZCodeProviderAccountAccess,
+  ZCodeZhipuProviderAccountAccess,
 } from "@zcode/shared";
 import { toast } from "@/components/ui/toast.js";
 import { useOptionalBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
@@ -367,7 +367,7 @@ export function useCodingPlanQuotaResetUi({
 }: {
   sourceKey: string | null | undefined;
   preferredProviderId?: string | null;
-  accountAccess?: ZCodeProviderAccountAccess | ZCodeAccountAccess | null;
+  accountAccess?: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess | null;
   enabled?: boolean;
   onEntitlementRefresh?: () => void | Promise<void>;
 }): CodingPlanQuotaResetUiController {

@@ -6,7 +6,7 @@ import {
   type ProviderFamilyDomain,
   type ProjectAccessTokenMaterial,
   type ZCodeAccountAccess,
-  type ZCodeProviderAccountAccess,
+  type ZCodeZhipuProviderAccountAccess,
   ZAI_PROVIDER_ID,
 } from "@zcode/shared";
 
@@ -21,7 +21,7 @@ export interface AccountRequestAuthMaterial {
 export interface AccountRequestAuthInput {
   providerId: string;
   modelId?: string;
-  accountAccess: ZCodeProviderAccountAccess | ZCodeAccountAccess;
+  accountAccess: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess;
   expectedAccountScope?: string;
   rejectedProjectTokenFingerprint?: string;
   reason: RequestVerificationReason | "off-peak" | "usage";
@@ -29,7 +29,7 @@ export interface AccountRequestAuthInput {
 
 export interface AccountAccessIdentityInput {
   providerId: string;
-  accountAccess: ZCodeProviderAccountAccess | ZCodeAccountAccess;
+  accountAccess: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess;
 }
 
 export class AccountRequestCredentialUnavailableError extends Error {
@@ -40,14 +40,14 @@ export class AccountRequestCredentialUnavailableError extends Error {
 }
 
 export interface AccountRequestAuthResolver {
-  resolveAccessCurrent(access: ZCodeProviderAccountAccess): Promise<ZCodeAccountAccess | null>;
+  resolveAccessCurrent(access: ZCodeZhipuProviderAccountAccess): Promise<ZCodeAccountAccess | null>;
   resolveCurrent(input: AccountRequestAuthInput): Promise<AccountRequestAuthMaterial>;
   assertCurrent(input: AccountAccessIdentityInput): Promise<void>;
 }
 
 interface AccountProviderRequestAuthServiceOptions {
   resolveCurrentAccountAccess(
-    access: ZCodeProviderAccountAccess,
+    access: ZCodeZhipuProviderAccountAccess,
   ): Promise<ZCodeAccountAccess | null>;
   loadOAuthTokenSet(providerId: OAuthProviderId): Promise<{
     accessToken?: string | null;
@@ -71,7 +71,9 @@ class AccountProviderRequestAuthService implements AccountRequestAuthResolver {
     this.#options = options;
   }
 
-  resolveAccessCurrent(access: ZCodeProviderAccountAccess): Promise<ZCodeAccountAccess | null> {
+  resolveAccessCurrent(
+    access: ZCodeZhipuProviderAccountAccess,
+  ): Promise<ZCodeAccountAccess | null> {
     return this.#options.resolveCurrentAccountAccess(access);
   }
 
@@ -141,7 +143,7 @@ class AccountProviderRequestAuthService implements AccountRequestAuthResolver {
   }
 
   #resolveAccess(
-    access: ZCodeProviderAccountAccess | ZCodeAccountAccess,
+    access: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess,
   ): Promise<ZCodeAccountAccess | null> {
     return "mode" in access
       ? this.#options.resolveCurrentAccountAccess(access)

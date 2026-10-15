@@ -3,14 +3,14 @@ import type { IUsageStatsService } from "@zcode/services";
 import type {
   UsageEntitlementSnapshot,
   ZCodeAccountAccess,
-  ZCodeProviderAccountAccess,
+  ZCodeZhipuProviderAccountAccess,
 } from "@zcode/shared";
 
 export interface UsageEntitlementRequestOptions {
   invalidateBalanceCache?: boolean;
   includeSubscription: boolean;
   preferredProviderId?: string;
-  accountAccess?: ZCodeProviderAccountAccess | ZCodeAccountAccess;
+  accountAccess?: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess;
   allowDisabledPreferredProvider: boolean;
   requirePreferredProvider: boolean;
   allowEnvApiKey?: boolean;

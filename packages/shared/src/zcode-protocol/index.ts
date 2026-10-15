@@ -67,7 +67,10 @@ export const zcodeTopicResourceReadResultSchema = z
   })
   .strict();
 export const zcodeTopicResourceCancelParamsSchema = z
-  .object({ requestId: z.string().min(1).max(256), taskId: z.string().min(1).max(256) })
+  .object({
+    requestId: z.string().min(1).max(256),
+    taskId: z.string().min(1).max(256),
+  })
   .strict();
 export const zcodeTopicResourceCancelResultSchema = z.object({ cancelled: z.boolean() }).strict();
 export type ZCodeTopicResourceReadParams = z.infer<typeof zcodeTopicResourceReadParamsSchema>;
@@ -233,7 +236,10 @@ const zcodeCreateWorkflowCausalityGraphDisplaySchema = z
             lane: z.string().min(1).max(64),
             steps: z.array(z.string().min(1).max(64)).min(1).max(64),
             member: z
-              .object({ index: z.number().int().nonnegative(), of: z.number().int().positive() })
+              .object({
+                index: z.number().int().nonnegative(),
+                of: z.number().int().positive(),
+              })
               .strict()
               .optional(),
             many: z.literal(true).optional(),
@@ -244,7 +250,9 @@ const zcodeCreateWorkflowCausalityGraphDisplaySchema = z
     handoffs: z
       .array(
         zcodeWorkflowEdgeSchema
-          .extend({ types: z.array(z.string().min(1).max(128)).min(1).max(8).optional() })
+          .extend({
+            types: z.array(z.string().min(1).max(128)).min(1).max(8).optional(),
+          })
           .strict(),
       )
       .max(256),
@@ -274,7 +282,14 @@ const zcodeCreateWorkflowCausalityGraphDisplaySchema = z
     // 阶段流（docs/dynamic-workflow/presentation.md「Streams」）：两端互为 alongside 的 data 边，
     // 只有 {from, to}——不是 runs after，不进 phaseEdges、不带 back。与词汇表同进同退。
     phaseStreams: z
-      .array(z.object({ from: z.string().min(1).max(64), to: z.string().min(1).max(64) }).strict())
+      .array(
+        z
+          .object({
+            from: z.string().min(1).max(64),
+            to: z.string().min(1).max(64),
+          })
+          .strict(),
+      )
       .max(128)
       .optional(),
     // 还开着的留白，源码序（docs/dynamic-workflow/authoring.md「Holes」）；镜像 v4。
@@ -473,7 +488,10 @@ export const zcodeStorageStartupStateSchema = z
   .strict()
   .superRefine((state, context) => {
     if (state.phase === "failed" && !state.errorCode)
-      context.addIssue({ code: "custom", message: "failed requires errorCode" });
+      context.addIssue({
+        code: "custom",
+        message: "failed requires errorCode",
+      });
   });
 export type ZCodeStorageStartupState = z.infer<typeof zcodeStorageStartupStateSchema>;
 
@@ -908,7 +926,10 @@ export const zcodeMcpUiSamplingParamsSchema = z
   })
   .strict();
 export const zcodeMcpUiCancelSamplingParamsSchema = z
-  .object({ ...zcodeMcpUiPluginScopeShape, operationId: nonEmptyString.max(128) })
+  .object({
+    ...zcodeMcpUiPluginScopeShape,
+    operationId: nonEmptyString.max(128),
+  })
   .strict();
 export const zcodeMcpUiSamplingResultSchema = mcpAppsSamplingResultSchema;
 export type ZCodeMcpUiSamplingParams = z.infer<typeof zcodeMcpUiSamplingParamsSchema>;
@@ -933,7 +954,10 @@ export const zcodeMcpUiCancelCallResultSchema = z.object({ cancelled: z.boolean(
 export type ZCodeMcpUiCancelCallResult = z.infer<typeof zcodeMcpUiCancelCallResultSchema>;
 /** 页面发起的 resources/list、resources/templates/list、subscribe、unsubscribe 代理。 */
 export const zcodeMcpUiListResourcesParamsSchema = z
-  .object({ ...zcodeMcpUiPluginScopeShape, cursor: nonEmptyString.max(2048).optional() })
+  .object({
+    ...zcodeMcpUiPluginScopeShape,
+    cursor: nonEmptyString.max(2048).optional(),
+  })
   .strict();
 export type ZCodeMcpUiListResourcesParams = z.infer<typeof zcodeMcpUiListResourcesParamsSchema>;
 const zcodeMcpUiResourceDescriptorSchema = z
@@ -1005,7 +1029,9 @@ export type ZCodeMcpUiRegisterAppToolsParams = z.infer<
   typeof zcodeMcpUiRegisterAppToolsParamsSchema
 >;
 export const zcodeMcpUiRegisterAppToolsResultSchema = z
-  .object({ tools: z.array(z.object({ name: z.string(), modelName: z.string() }).strict()) })
+  .object({
+    tools: z.array(z.object({ name: z.string(), modelName: z.string() }).strict()),
+  })
   .strict();
 export type ZCodeMcpUiRegisterAppToolsResult = z.infer<
   typeof zcodeMcpUiRegisterAppToolsResultSchema
@@ -1039,7 +1065,9 @@ export const zcodeMcpUiResolveAppToolCallParamsSchema = z
     callId: nonEmptyString.max(MCP_APPS_APP_TOOL_CALL_ID_MAX_CHARS),
     result: mcpAppsAppToolCallResultSchema.optional(),
     error: z
-      .object({ message: z.string().max(MCP_APPS_APP_TOOL_ERROR_MESSAGE_MAX_CHARS) })
+      .object({
+        message: z.string().max(MCP_APPS_APP_TOOL_ERROR_MESSAGE_MAX_CHARS),
+      })
       .strict()
       .optional(),
   })
@@ -1174,8 +1202,15 @@ export const zcodeAccountAccessSchema = z.discriminatedUnion("planKind", [
 ]);
 export type ZCodeAccountAccess = z.infer<typeof zcodeAccountAccessSchema>;
 
-/** Active Model 固定的账号访问类别；当前商品和 Team scope 由账号服务在请求期解析。 */
-export const zcodeProviderAccountAccessSchema = z
+/**
+ * Active Model 固定的账号访问类别；当前商品和 Team scope 由账号服务在请求期解析。
+ *
+ * openai-oauth 是并行分支（ChatGPT 订阅，序列化形状见 resolver 的
+ * serializeRegistryProviderConfig）：只有 type/entitled，没有 apiKey 与任何 token。
+ * 旧客户端对 zhipu 分支的解析不受影响；UI 侧 safeParse 失败也只是少一个徽标，
+ * 不会拒绝整份快照（modelSelectionGroups 按分支降级）。
+ */
+export const zcodeZhipuProviderAccountAccessSchema = z
   .object({
     type: z.literal("zhipu-account"),
     accountType: z.enum(["zai", "bigmodel"]),
@@ -1191,7 +1226,28 @@ export const zcodeProviderAccountAccessSchema = z
     entitled: z.boolean(),
   })
   .strict();
-export type ZCodeProviderAccountAccess = z.infer<typeof zcodeProviderAccountAccessSchema>;
+export type ZCodeZhipuProviderAccountAccess = z.infer<typeof zcodeZhipuProviderAccountAccessSchema>;
+export const zcodeOpenAiOAuthProviderAccountAccessSchema = z
+  .object({
+    type: z.literal("openai-oauth"),
+    entitled: z.boolean(),
+  })
+  .strict();
+export type ZCodeOpenAiOAuthProviderAccountAccess = z.infer<
+  typeof zcodeOpenAiOAuthProviderAccountAccessSchema
+>;
+export const zcodeProviderAccountAccessSchema = z.discriminatedUnion("type", [
+  zcodeZhipuProviderAccountAccessSchema,
+  zcodeOpenAiOAuthProviderAccountAccessSchema,
+]);
+/**
+ * Registry/UI 解析用的联合分支类型。历史名 `ZCodeProviderAccountAccess`
+ * 保持 zhipu-only：请求作用域（contracts 的 ModelInvocationContext.accountAccess、
+ * runtime headers、adapters runner）只承载 Z.ai 账号身份；ChatGPT 的请求期
+ * Bearer 走 requestAuth source，不进入该上下文。
+ */
+export type ZCodeRegistryProviderAccountAccess = z.infer<typeof zcodeProviderAccountAccessSchema>;
+export type ZCodeProviderAccountAccess = ZCodeZhipuProviderAccountAccess;
 
 export type ZCodeSessionMode = z.infer<typeof zcodeSessionModeSchema>;
 export type ZCodeSessionKind = z.infer<typeof zcodeSessionKindSchema>;
@@ -3415,7 +3471,10 @@ export type ZCodeWorkflowsSaveResult = z.infer<typeof zcodeWorkflowsSaveResultSc
 // 因此会自动不再算数。
 /** 转写自对话的候选：模型用 `SaveWorkflow` 存过、并在入参里认领了这次 run。 */
 export const zcodeWorkflowsForRunCandidateSchema = z
-  .object({ name: nonEmptyString, scope: zcodeSavedWorkflowScopeSchema.optional() })
+  .object({
+    name: nonEmptyString,
+    scope: zcodeSavedWorkflowScopeSchema.optional(),
+  })
   .strict();
 export type ZCodeWorkflowsForRunCandidate = z.infer<typeof zcodeWorkflowsForRunCandidateSchema>;
 /** 候选上界：一次 run 在一段对话里被存过的次数远小于它。 */
@@ -4312,14 +4371,23 @@ export const zcodeStoragePreparationFrameSchema = z.discriminatedUnion("method",
     })
     .strict(),
   z
-    .object({ method: z.literal("startup/storagePrepared"), params: z.object({}).strict() })
+    .object({
+      method: z.literal("startup/storagePrepared"),
+      params: z.object({}).strict(),
+    })
     .strict(),
   z
-    .object({ method: z.literal("startup/storageState"), params: zcodeStorageStartupStateSchema })
+    .object({
+      method: z.literal("startup/storageState"),
+      params: zcodeStorageStartupStateSchema,
+    })
     .strict(),
 ]);
 export const zcodeStoragePathReadySchema = z
-  .object({ method: z.literal("startup/storagePathReady"), reuse: z.boolean().optional() })
+  .object({
+    method: z.literal("startup/storagePathReady"),
+    reuse: z.boolean().optional(),
+  })
   .strict();
 
 // 桌面本地 TTFT 的严格事实合同；检查点不能替代实际内容帧。

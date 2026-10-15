@@ -31,6 +31,7 @@ import { registerHostServiceResourceTelemetry } from "./hostServiceResourceTelem
 import { resolveResourceTelemetryEnvironmentKey } from "./hostResourceTelemetryEnvironment.js";
 import { reportHostSessionCreate } from "./hostSessionCreateTelemetry.js";
 import { createBrowserControlMainBridge } from "./browserControlMainBridge.js";
+import { createDesktopChatGptAccountBridges } from "./chatGptAccountBridge.js";
 import { materializeBrowserRecordingArtifact } from "./browserRecordingArtifactMaterializer.js";
 import {
   ServiceCollection,
@@ -2976,6 +2977,10 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
                 runtimeSurface: "desktop_local_host",
               },
               serviceAuthorityMode: "desktop-local",
+              // ChatGPT（Sign in with ChatGPT）：adapters 的 loopback+系统浏览器登录流程
+              // 以进程内桥注入本窗口 local services；server/remote 宿主不注入，
+              // beginLogin 保持 typed 不可用（fail-closed），不发网络请求。
+              chatGptAccount: createDesktopChatGptAccountBridges(),
               zcodeAgentSpawnFallbackCwd: msg.agentSpawnFallbackCwd,
               zcodeBuiltinProviderConfigFilePath: msg.zcodeBuiltinProviderConfigFilePath,
               processLifecycleReporter: runtimeProcessLifecycleReporter,

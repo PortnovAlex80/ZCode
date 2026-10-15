@@ -24,6 +24,7 @@ import type { ICuaPermissionService } from "./cua-permission-broker/cuaPermissio
 import type { IBotsService } from "./bots/bots.js";
 import type { IFileWatcherService } from "./fileWatcher/fileWatcher.js";
 import type { IOAuthService } from "./oauth/oauth.js";
+import type { IChatGptAccountService } from "./model-provider/chatGptAccountService.js";
 import type {
   IModelSelectionService,
   IProviderSettingsService,
@@ -77,6 +78,11 @@ export interface IServiceAccessor {
   readonly botsService: IBotsService;
   readonly fileWatcherService: IFileWatcherService;
   readonly oauthService: IOAuthService;
+  /**
+   * ChatGPT（Sign in with ChatGPT）账号服务；本地 Desktop Host 提供，
+   * 旧测试 double / 远端 host 可不提供（UI 据此隐藏订阅入口）。
+   */
+  readonly chatGptAccountService?: IChatGptAccountService;
   /** 当前 Environment 的 Provider 配置与设置视图。 */
   readonly providerSettingsService: IProviderSettingsService;
   /** 当前 Environment Registry 发布的唯一模型选择 View。 */

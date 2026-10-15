@@ -21,7 +21,7 @@ import {
   zcodeProviderAccountAccessSchema,
   type OfficialMcpAuthFailureReason,
   type ZCodeAccountAccess,
-  type ZCodeProviderAccountAccess,
+  type ZCodeZhipuProviderAccountAccess,
 } from "@zcode/shared";
 import type { ModelSelectionView } from "@zcode/provider";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
@@ -93,7 +93,9 @@ let lastCredentialResolvedLogKey: string | undefined;
 
 export interface OfficialMcpCredentialResolverDeps {
   accountRequestAuthService: {
-    resolveAccessCurrent(access: ZCodeProviderAccountAccess): Promise<ZCodeAccountAccess | null>;
+    resolveAccessCurrent(
+      access: ZCodeZhipuProviderAccountAccess,
+    ): Promise<ZCodeAccountAccess | null>;
   };
   credentialService: { load(key: string): Promise<string | null | undefined> };
   modelSelectionService: {
@@ -135,7 +137,7 @@ type SelectedPlan = {
 
 type SelectedProvider = {
   providerId: string;
-  access: ZCodeProviderAccountAccess;
+  access: ZCodeZhipuProviderAccountAccess;
 };
 
 function fail(reason: OfficialMcpAuthFailureReason): {
@@ -154,7 +156,10 @@ function resolveSelectedProvider(
 ): { ok: true; provider: SelectedProvider } | { ok: false; reason: OfficialMcpAuthFailureReason } {
   const candidates = registry.providers.flatMap((provider) => {
     const parsed = zcodeProviderAccountAccessSchema.safeParse(provider.config.access);
+    // openai-oauth（ChatGPT 订阅）是合法的 registry access 分支，但不参与
+    // Z.ai Coding Plan 的 MCP 凭据解析；先按分支收敛再读 mode。
     return parsed.success &&
+      parsed.data.type === "zhipu-account" &&
       (parsed.data.mode === "individual-coding-plan" || parsed.data.mode === "team-coding-plan")
       ? [{ providerId: provider.providerId, access: parsed.data }]
       : [];
@@ -209,7 +214,10 @@ function resolveSelectedPlan(
 
 /** 非秘密的选择指纹，用于解析前后比对，防止把切换前后的两代凭证拼进同一请求。 */
 function createSelectionFingerprint(registry: ModelSelectionView): string {
-  return JSON.stringify({ revision: registry.revision, providers: registry.providers });
+  return JSON.stringify({
+    revision: registry.revision,
+    providers: registry.providers,
+  });
 }
 
 type OfficialMcpIdentitySnapshot = {
@@ -421,7 +429,11 @@ export interface OfficialMcpAuthHeadersRequestContext {
   mcpKey: string;
   pluginId: string;
   targetOrigin: string;
-  workspace: { workspaceIdentity?: string; workspaceKey: string; workspacePath: string };
+  workspace: {
+    workspaceIdentity?: string;
+    workspaceKey: string;
+    workspacePath: string;
+  };
 }
 
 export type OfficialMcpAuthHeadersOutcome =
@@ -451,7 +463,10 @@ export function createOfficialMcpAuthHeadersResolver(deps: OfficialMcpCredential
       const inFlight = (async (): Promise<OfficialMcpAuthHeadersOutcome> => {
         const outcome = await resolveOfficialMcpCredentials(deps);
         if (!outcome.ok) return { ok: false, reason: outcome.reason };
-        return { ok: true, headers: buildOfficialMcpAuthHeaders(outcome.snapshot) };
+        return {
+          ok: true,
+          headers: buildOfficialMcpAuthHeaders(outcome.snapshot),
+        };
       })();
       pending = inFlight;
       // 用双 handler 的 then 而非 finally：finally 会派生一个同样 reject 的 promise，

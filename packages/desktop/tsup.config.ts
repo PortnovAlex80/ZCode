@@ -357,6 +357,11 @@ export default defineConfig([
       "@zcode/provider",
       "@zcode/provider-node",
       "@zcode/zcode-cua",
+      // ChatGPT 登录桥在 host 进程内直跑 agent 侧 adapters/auth（loopback + 系统浏览器）。
+      // electron-builder 会排除 node_modules/@zcode，这里不内联会在安装包里 ERR_MODULE_NOT_FOUND；
+      // auth 子树运行时只依赖 node 内建、@zcode/shared 与 @zcode/contracts（zod），可安全内联。
+      "@zcode/adapters",
+      "@zcode/contracts",
     ],
     define: createSharedDefines(),
     // 与 main 保持一致的 chunk 隔离策略，避免 host/main 产物相互覆盖。

@@ -731,7 +731,10 @@ function buildSessionCreateParams(
  * 写——mode 单独出现对 CLI 没有意义。旧 CLI strict schema 不认时经 compat 省略，按 alwaysOn 行事。
  */
 function buildDynamicWorkflowModeField(
-  params: { dynamicWorkflowEnabled?: boolean; dynamicWorkflowMode?: DynamicWorkflowMode },
+  params: {
+    dynamicWorkflowEnabled?: boolean;
+    dynamicWorkflowMode?: DynamicWorkflowMode;
+  },
   omittedFields: ReadonlySet<SessionCreateCompatField | SessionResumeCompatField>,
 ): { dynamicWorkflowMode?: DynamicWorkflowMode } {
   return params.dynamicWorkflowEnabled === true &&
@@ -1024,10 +1027,17 @@ interface CreateZCodeAgentServiceOptions extends Omit<
       mcpKey: string;
       pluginId: string;
       targetOrigin: string;
-      workspace: { workspaceIdentity?: string; workspaceKey: string; workspacePath: string };
+      workspace: {
+        workspaceIdentity?: string;
+        workspaceKey: string;
+        workspacePath: string;
+      };
     }): Promise<
       | { ok: true; headers: Record<string, string> }
-      | { ok: false; reason: "official_auth_unavailable" | "official_auth_plan_required" }
+      | {
+          ok: false;
+          reason: "official_auth_unavailable" | "official_auth_plan_required";
+        }
     >;
   };
   /**
@@ -1256,7 +1266,10 @@ export function createZCodeAgentService(
   >();
   // v4 conversation 帧 fan-out：workspace 级 emitter，renderer 侧按 topic 自行路由。
   const conversationFrameEmitters = new Map<string, Emitter<ConversationTopicWireCandidate>>();
-  const localTtftFactsEmitter = new Emitter<{ workspaceKey: string; facts: LocalTtftFacts }>();
+  const localTtftFactsEmitter = new Emitter<{
+    workspaceKey: string;
+    facts: LocalTtftFacts;
+  }>();
   const conversationTelemetryFactEmitters = new Map<string, Emitter<ConversationTelemetryFact>>();
   const cuaPermissionObservationEmitter = new Emitter<ZCodeAgentCuaPermissionObservation>();
   // sessions-index 帧 fan-out：与 conversation 同一 conversationFrame 通知，按 topic 前缀分流到此 emitter。
@@ -1386,13 +1399,17 @@ export function createZCodeAgentService(
   async function resolveAccountRequestAuth(
     request: ZCodeProviderRuntimeHeadersRequestParams,
   ): Promise<AccountRequestAuthMaterial | undefined> {
-    if (!request.accountAccess || !accountRequestAuthService) {
+    // openai-oauth（ChatGPT 订阅）不走 Runtime Headers 账号解析：请求期 Bearer 由
+    // agent 侧 requestAuth source 提供，这里只处理 zhipu 分支。
+    const zhipuAccountAccess =
+      request.accountAccess?.type === "zhipu-account" ? request.accountAccess : undefined;
+    if (!zhipuAccountAccess || !accountRequestAuthService) {
       return undefined;
     }
     return accountRequestAuthService.resolveCurrent({
       providerId: request.providerId,
       modelId: request.modelSelection.modelId,
-      accountAccess: request.accountAccess,
+      accountAccess: zhipuAccountAccess,
       expectedAccountScope: request.expectedAccountScope,
       rejectedProjectTokenFingerprint: request.rejectedProjectTokenFingerprint,
       reason: request.reason,
@@ -2316,7 +2333,9 @@ export function createZCodeAgentService(
             }
             await client.respond(request.id, configuration);
           })().catch((error) =>
-            logger.debug(undefined, "Subagent 配置响应发送失败", { error: String(error) }),
+            logger.debug(undefined, "Subagent 配置响应发送失败", {
+              error: String(error),
+            }),
           );
           return;
         }
@@ -2536,6 +2555,8 @@ export function createZCodeAgentService(
           if (
             accountRequestAuthService &&
             accountAccess &&
+            // ChatGPT（openai-oauth）分支没有 mode，也不参与签名校验判定。
+            accountAccess.type === "zhipu-account" &&
             !requiresRequestVerification(accountAccess)
           ) {
             // Account API Key / Team Runtime Key 不需要 Renderer 交互。Host 按 Model
@@ -3349,7 +3370,10 @@ export function createZCodeAgentService(
           },
         );
       }
-      throw createProviderNotReadyError({ snapshot: readinessSnapshot, workspace: params });
+      throw createProviderNotReadyError({
+        snapshot: readinessSnapshot,
+        workspace: params,
+      });
     }
 
     const entry = await getOrStartReadOnlyClient(params);
@@ -3439,9 +3463,14 @@ export function createZCodeAgentService(
       if (!isReusableActiveClientEntry(active.workspace, active)) {
         continue;
       }
-      return { client: active.client, workspace: buildWorkspaceRef(active.workspace) };
+      return {
+        client: active.client,
+        workspace: buildWorkspaceRef(active.workspace),
+      };
     }
-    const managementWorkspace = { workspacePath: ensurePluginManagementWorkspacePath() };
+    const managementWorkspace = {
+      workspacePath: ensurePluginManagementWorkspacePath(),
+    };
     const client = await getPluginManagementClient();
     return { client, workspace: buildWorkspaceRef(managementWorkspace) };
   }
@@ -3452,7 +3481,10 @@ export function createZCodeAgentService(
     params: ZCodeAgentSavedWorkflowTarget,
   ): Promise<{ client: ZCodeProtocolClient; workspace: ZCodeWorkspaceRef }> {
     if (savedWorkflowTargetHasWorkspace(params)) {
-      return { client: await getReadOnlyClient(params), workspace: buildWorkspaceRef(params) };
+      return {
+        client: await getReadOnlyClient(params),
+        workspace: buildWorkspaceRef(params),
+      };
     }
     return resolveGlobalSavedWorkflowCarrier();
   }
@@ -3603,7 +3635,11 @@ export function createZCodeAgentService(
           zcodeProtocolMethods.workspaceUpdateDynamicWorkflowPolicy,
           // mode 与布尔同行（launch.md「On demand: activation」）；只认布尔的旧 CLI 的 strict
           // schema 会拒绝 mode，走下面的 warn 分支保持缺省关闭——与其它非 -32601 错误同判。
-          { workspace: buildWorkspaceRef(entry.workspace), enabled, ...(enabled ? { mode } : {}) },
+          {
+            workspace: buildWorkspaceRef(entry.workspace),
+            enabled,
+            ...(enabled ? { mode } : {}),
+          },
           zcodeWorkspaceUpdateDynamicWorkflowPolicyResultSchema,
         );
         entry.dynamicWorkflowPolicyMode = mode;
@@ -3816,7 +3852,11 @@ export function createZCodeAgentService(
       try {
         const snapshot = await client.request(
           zcodeProtocolMethods.sessionCreate,
-          buildSessionCreateParams({ ...params, offPeakToolEnabled, ...dynamicWorkflowFlags }),
+          buildSessionCreateParams({
+            ...params,
+            offPeakToolEnabled,
+            ...dynamicWorkflowFlags,
+          }),
           zcodeSessionStateSnapshotSchema,
           sessionTraceId ? { trace: { traceId: sessionTraceId } } : undefined,
         );
@@ -3928,7 +3968,11 @@ export function createZCodeAgentService(
       try {
         const snapshot = await client.request(
           zcodeProtocolMethods.sessionResume,
-          buildSessionResumeParams({ ...params, offPeakToolEnabled, ...dynamicWorkflowFlags }),
+          buildSessionResumeParams({
+            ...params,
+            offPeakToolEnabled,
+            ...dynamicWorkflowFlags,
+          }),
           zcodeSessionStateSnapshotSchema,
         );
         const sessionTraceId = rememberSessionTrace(params, snapshot) ?? cachedTraceId;
@@ -4644,7 +4688,12 @@ export function createZCodeAgentService(
       const { client, workspace } = await resolveSavedWorkflowCarrier(params);
       return client.request(
         zcodeProtocolMethods.workflowsUpdateMeta,
-        { workspace, name: params.name, meta: params.meta, ...savedWorkflowScopeParam(params) },
+        {
+          workspace,
+          name: params.name,
+          meta: params.meta,
+          ...savedWorkflowScopeParam(params),
+        },
         zcodeWorkflowsUpdateMetaResultSchema,
       );
     },
@@ -4750,7 +4799,11 @@ export function createZCodeAgentService(
               zcodeProtocolMethods.processChildProcesses,
               {},
               zcodeProcessChildProcessesResultSchema,
-              { timeoutMs: CHILD_PROCESSES_REQUEST_TIMEOUT_MS, lifecycle: "observation", signal },
+              {
+                timeoutMs: CHILD_PROCESSES_REQUEST_TIMEOUT_MS,
+                lifecycle: "observation",
+                signal,
+              },
             );
             children = result.processes;
           } catch {
@@ -5543,7 +5596,10 @@ export function createZCodeAgentService(
         pending.protocolRequestId,
         requestAuth
           ? { headersApplied: true, requestAuth }
-          : { headersApplied: false, errorMessage: "Provider request auth is missing" },
+          : {
+              headersApplied: false,
+              errorMessage: "Provider request auth is missing",
+            },
       );
       const logContext = {
         modelId: pending.request.modelSelection.modelId,

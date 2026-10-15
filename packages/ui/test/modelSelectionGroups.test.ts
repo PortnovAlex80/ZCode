@@ -5,8 +5,22 @@ import { buildRegistryModelSelectGroups } from "../src/lib/modelSelectionGroups.
 
 describe("model selection groups", () => {
   it.each([
-    [{ type: "zhipu-account", accountType: "zai", mode: "individual-coding-plan" }, false],
-    [{ type: "zhipu-account", accountType: "bigmodel", mode: "team-coding-plan" }, false],
+    [
+      {
+        type: "zhipu-account",
+        accountType: "zai",
+        mode: "individual-coding-plan",
+      },
+      false,
+    ],
+    [
+      {
+        type: "zhipu-account",
+        accountType: "bigmodel",
+        mode: "team-coding-plan",
+      },
+      false,
+    ],
     [{ type: "zhipu-coding-plan-api-key" }, false],
     [{ type: "zhipu-account", accountType: "zai", mode: "start-plan" }, false],
     [{ type: "zhipu-account", accountType: "bigmodel", mode: "start-plan" }, false],
@@ -42,8 +56,18 @@ describe("model selection groups", () => {
       providers: [
         {
           providerId: "aggregator",
-          config: { api: { type: "openai-chat-completions", baseUrl: "https://example.test/v1" } },
-          models: [{ modelId, config: { properties: { inputFormat: { supportsImage: true } } } }],
+          config: {
+            api: {
+              type: "openai-chat-completions",
+              baseUrl: "https://example.test/v1",
+            },
+          },
+          models: [
+            {
+              modelId,
+              config: { properties: { inputFormat: { supportsImage: true } } },
+            },
+          ],
         },
       ],
     };
@@ -168,6 +192,47 @@ describe("model selection groups", () => {
             key: `registry-provider:${providerId}:GLM-5.2`,
             value: "custom:account%3Abigmodel-team-coding-plan:GLM-5.2",
             name: "GLM-5.2",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("openai-oauth 分支渲染为「OpenAI — ChatGPT 订阅」分组并带徽标", () => {
+    const selectionView: ModelSelectionView = {
+      revision: 9,
+      providers: [
+        {
+          providerId: "account:chatgpt",
+          providerName: "ChatGPT",
+          config: {
+            access: { type: "openai-oauth", entitled: true },
+            api: {
+              type: "openai-responses",
+              baseUrl: "https://api.openai.com/v1",
+            },
+          },
+          models: [{ modelId: "gpt-6.1-sol", config: {} }],
+        },
+      ],
+    };
+
+    expect(
+      buildRegistryModelSelectGroups("glm", selectionView, {
+        openAiFamilyLabel: "OpenAI",
+        openAiSubscriptionBadgeLabel: "ChatGPT",
+      }),
+    ).toEqual([
+      {
+        key: "registry-provider:account:chatgpt",
+        label: "OpenAI",
+        labelBadge: "ChatGPT",
+        directItems: true,
+        items: [
+          {
+            key: "registry-provider:account:chatgpt:gpt-6.1-sol",
+            value: "custom:account%3Achatgpt:gpt-6.1-sol",
+            name: "gpt-6.1-sol",
           },
         ],
       },

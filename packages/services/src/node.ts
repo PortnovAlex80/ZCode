@@ -163,6 +163,27 @@ export {
   createCodingPlanFamilyAvailabilityResolver,
   resolveCurrentAccountAccess,
 } from "./model-provider/accountProviderConnectionResolver.js";
+export {
+  createChatGptAwareAccountProviderSource,
+  readChatGptAccountProviderOverlay,
+} from "./model-provider/chatGptAccountProjection.js";
+export type {
+  ChatGptAwareAccountProviderSource,
+  ChatGptAccountCredentialReader,
+  CreateChatGptAwareAccountProviderSourceOptions,
+} from "./model-provider/chatGptAccountProjection.js";
+export {
+  createChatGptAccountService,
+  IChatGptAccountService,
+} from "./model-provider/chatGptAccountService.js";
+export type {
+  ChatGptAccountLoginBridge,
+  ChatGptAccountLogoutBridge,
+  ChatGptAccountRuntimeObservation,
+  ChatGptBeginLoginResult,
+  ChatGptDisconnectResult,
+  CreateChatGptAccountServiceOptions,
+} from "./model-provider/chatGptAccountService.js";
 export { bindAccountProviderInvalidation } from "./model-provider/accountProviderInvalidation.js";
 export type {
   AccountProviderConfigSourceOptions,
@@ -400,6 +421,11 @@ import {
   createCodingPlanFamilyAvailabilityResolver,
   resolveCurrentAccountAccess,
 } from "./model-provider/accountProviderConnectionResolver.js";
+import { createChatGptAwareAccountProviderSource } from "./model-provider/chatGptAccountProjection.js";
+import {
+  createChatGptAccountService,
+  IChatGptAccountService,
+} from "./model-provider/chatGptAccountService.js";
 import { bindAccountProviderInvalidation } from "./model-provider/accountProviderInvalidation.js";
 import { AccountProviderApiClient } from "./model-provider/accountProviderApiClient.js";
 import { createAccountProjectTokenClient } from "./model-provider/accountProjectTokenClient.js";
@@ -647,9 +673,11 @@ const providerProvisioningTriggerDisposers = new WeakMap<
 // 与其它侧表一样按 ServiceCollection 登记并在 dispose 时统一 close。
 const sharedSqliteRepos = new WeakMap<ServiceCollection, ReadonlyArray<{ close(): void }>>();
 const accountRequestAuthServices = new WeakMap<ServiceCollection, IAccountRequestAuthService>();
-export type OffPeakRequestAuthBuilder = (
-  ticketId: string,
-) => Promise<{ apiKey: string; headers: Record<string, string>; accountScope?: string }>;
+export type OffPeakRequestAuthBuilder = (ticketId: string) => Promise<{
+  apiKey: string;
+  headers: Record<string, string>;
+  accountScope?: string;
+}>;
 const offPeakRequestAuthBuilders = new WeakMap<ServiceCollection, OffPeakRequestAuthBuilder>();
 
 /** Local Host 进程内能力；不会随 ServiceCollection 暴露到通用 RPC Channel。 */
@@ -1148,6 +1176,16 @@ export function createLocalServices(options: {
     automation: ZCodeAutomation;
     run: ZCodeAutomationRun;
   }) => Promise<void>;
+  /**
+   * ChatGPT（Sign in with ChatGPT）登录/登出桥：由能依赖 agent 侧 adapters
+   * 实现的装配层注入（loopback + PKCE + JWKS 全在 adapters/chatgpt）。
+   * 未注入时 ChatGptAccountService 的 beginLogin 返回 typed 不可用结果，
+   * 状态投影与 disconnect（本地清空）仍然可用；不发起任何网络请求。
+   */
+  chatGptAccount?: {
+    loginBridge?: () => Promise<void>;
+    logoutBridge?: () => Promise<{ revoked: boolean }>;
+  };
   /** 闲时任务翻 schedulable 后请求宿主立即唤醒 scheduler（desktop host 注入 parentPort 转发）。 */
   onOffPeakSchedulerWakeRequested?: () => void;
   // 注入点：默认 resolver 已能覆盖 dev/桌面/SSH 远端三类形态；
@@ -1404,7 +1442,9 @@ export function createLocalServices(options: {
         }),
     },
     onZCodeBuiltinRefreshError: (error) => {
-      providerConfigLog.warn(undefined, "ZCode Built-in Config 远端刷新失败", { error });
+      providerConfigLog.warn(undefined, "ZCode Built-in Config 远端刷新失败", {
+        error,
+      });
     },
     onPersonalConfigRecovery: (event) => {
       providerConfigLog.warn(
@@ -1425,7 +1465,7 @@ export function createLocalServices(options: {
     // Repository 仅在新 Personal 配置不存在时导入，并保留旧文件以便回滚。
     readLegacyProviders: () => readLegacyZCodeConfigProviders(),
   });
-  const accountProviderConfigSource = createAccountProviderConfigSource({
+  const zhipuAccountProviderConfigSource = createAccountProviderConfigSource({
     configSource: providerConfigRuntime.configService,
     readSettings: readAccountProviderSettings,
     async loadCodingPlanApiKey(providerId, family, accountIdentity, forceRefresh) {
@@ -1442,6 +1482,25 @@ export function createLocalServices(options: {
       apiClient,
       credentialService,
     }),
+  });
+  // ChatGPT（openai-oauth）凭据是本机事实：包一层 ChatGPT-aware 投影源，
+  // 把 entitlement + /v1/models 缓存并入第三层 Account Overlay，并监听共享
+  // 凭据文件实现 login/logout 热更新。zhipu 账号事实仍由上面的源唯一拥有。
+  const accountProviderConfigSource = createChatGptAwareAccountProviderSource({
+    source: zhipuAccountProviderConfigSource,
+    loadCredential: (key) => credentialService.load(key),
+    configSource: providerConfigRuntime.configService,
+    credentialFilePath: resolveCredentialFilePath(resolveAppConfigDir()),
+  });
+  const chatGptAccountService = createChatGptAccountService({
+    loadCredential: (key) => credentialService.load(key),
+    deleteCredential: (key) => credentialService.delete(key),
+    ...(options.chatGptAccount?.loginBridge
+      ? { loginBridge: options.chatGptAccount.loginBridge }
+      : {}),
+    ...(options.chatGptAccount?.logoutBridge
+      ? { logoutBridge: options.chatGptAccount.logoutBridge }
+      : {}),
   });
   const accountProviderRuntimeLog = createServiceLogger("account-provider-runtime");
   const modelSelectionConfiguredDefaultSource = new NodeModelSelectionConfigRepository({
@@ -1502,6 +1561,7 @@ export function createLocalServices(options: {
     disposeAccountSource: () => {
       disposeAccountProviderInvalidation();
       accountProviderRefreshErrorDispose();
+      chatGptAccountService.dispose();
       accountProviderConfigSource.dispose();
     },
   });
@@ -1662,7 +1722,9 @@ export function createLocalServices(options: {
             if (buffer.includes("\n")) {
               try {
                 const nl = buffer.indexOf("\n");
-                const reply = JSON.parse(buffer.slice(0, nl)) as { ok?: boolean };
+                const reply = JSON.parse(buffer.slice(0, nl)) as {
+                  ok?: boolean;
+                };
                 finish(reply.ok === true ? socketPath : null);
               } catch {
                 finish(null);
@@ -1716,7 +1778,10 @@ export function createLocalServices(options: {
       socketPath,
       exitLogPath: `${socketPath}.settings.exit.log`,
       ...(isCuaLocalDevelopmentRuntime(process.env)
-        ? { allowUnsignedLauncherLocalDev: true, allowExternalBrokerClientLocalDev: true }
+        ? {
+            allowUnsignedLauncherLocalDev: true,
+            allowExternalBrokerClientLocalDev: true,
+          }
         : {}),
     });
     try {
@@ -2312,8 +2377,11 @@ export function createLocalServices(options: {
       if (providers.length !== 1) return null;
       const provider = providers[0]!;
       const config = provider.config;
-      const staticAccess = zcodeProviderAccountAccessSchema.parse(config.access.toJSON());
-      const access = await accountRequestAuthService.resolveAccessCurrent(staticAccess);
+      const parsedStaticAccess = zcodeProviderAccountAccessSchema.parse(config.access.toJSON());
+      // openai-oauth（ChatGPT 订阅）分支不参与 Z.ai 账号请求期解析；上游 filter 已限定
+      // zhipu-account，这里只做类型收敛。
+      if (parsedStaticAccess.type !== "zhipu-account") return null;
+      const access = await accountRequestAuthService.resolveAccessCurrent(parsedStaticAccess);
       if (!access) return null;
       return {
         providerId: provider.providerId,
@@ -2422,6 +2490,7 @@ export function createLocalServices(options: {
     )
     .register(IFileWatcherService, createFileWatcherService())
     .register(IOAuthService, oauthService)
+    .register(IChatGptAccountService, chatGptAccountService)
     .register(
       IUsageStatsService,
       createUsageStatsService({
@@ -2544,7 +2613,9 @@ export function createLocalServices(options: {
         const resolveHighspeedLoginHeaders = async (): Promise<Record<string, string>> => {
           const jwt = (await credentialService.load("zcodejwttoken"))?.trim() ?? "";
           if (!jwt) throw new Error("highspeed request requires zcode jwt");
-          return { Authorization: /^Bearer\s/i.test(jwt) ? jwt : `Bearer ${jwt}` };
+          return {
+            Authorization: /^Bearer\s/i.test(jwt) ? jwt : `Bearer ${jwt}`,
+          };
         };
         const transport = mockScenario
           ? createHighspeedMockTransport({ scenario: mockScenario })

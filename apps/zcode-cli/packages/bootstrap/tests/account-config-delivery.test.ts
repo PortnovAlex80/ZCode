@@ -3,12 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProviderConfigMap, createAccountProviderConfigSnapshot } from "@zcode/provider";
+import {
+  OpenAiOAuthAccessConfig,
+  ProviderConfig,
+  ProviderConfigMap,
+  createAccountProviderConfigSnapshot,
+} from "@zcode/provider";
 import {
   ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV,
   ZCODE_PERSONAL_PROVIDER_CONFIG_FILE_ENV,
 } from "@zcode/provider-node";
-import { zcodeProtocolMethods } from "@zcode/shared";
+import { CHATGPT_PROVIDER_ID, zcodeProtocolMethods } from "@zcode/shared";
 import {
   startProcessProviderRegistryRuntime,
   parseProcessAccountProviderConfigSnapshot,
@@ -29,6 +34,8 @@ async function startRuntime() {
       new URL("../../../../../config/provider/zcode-builtin.json", import.meta.url),
     ),
     [ZCODE_PERSONAL_PROVIDER_CONFIG_FILE_ENV]: join(directory, "personal.json"),
+    // 隔离本机凭据存储：ChatGPT 本地投影在测试里稳定为 fail-closed。
+    ZCODE_DATA_BASE_DIR: directory,
   });
   cleanups.unshift(async () => started.dispose());
   return started;
@@ -60,7 +67,21 @@ describe("托管 Worker 账号交付", () => {
     ).toMatchObject({
       result: { receivedRevision: next.revision, providerCount: 0, status: "received" },
     });
-    expect((await started.accountSource.read()).revision).toBe(next.revision);
+    // Host 快照会被附加本机 ChatGPT（openai-oauth）fail-closed 投影后再入 Source。
+    const storedAccount = await started.accountSource.read();
+    expect(storedAccount.providers.get(CHATGPT_PROVIDER_ID)?.toJSON()).toEqual({
+      access: { type: "openai-oauth", entitled: false },
+    });
+    expect(storedAccount.revision).toBe(
+      createAccountProviderConfigSnapshot(
+        next.basedOnZCodeBuiltinRevision,
+        next.providers.set(
+          CHATGPT_PROVIDER_ID,
+          new ProviderConfig({ access: new OpenAiOAuthAccessConfig({ entitled: false }) }),
+        ),
+        next.states,
+      ).revision,
+    );
     expect(registry.getSnapshot()).toBe(previous);
 
     const config = await started.runtime.configService.read();
@@ -70,7 +91,16 @@ describe("托管 Worker 账号交付", () => {
       zcodeBuiltinRevision: "builtin-B",
     });
     await registry.refresh("配套配置到达");
-    expect(registry.getSnapshot()?.account.revision).toBe(next.revision);
+    expect(registry.getSnapshot()?.account.revision).toBe(
+      createAccountProviderConfigSnapshot(
+        next.basedOnZCodeBuiltinRevision,
+        next.providers.set(
+          CHATGPT_PROVIDER_ID,
+          new ProviderConfig({ access: new OpenAiOAuthAccessConfig({ entitled: false }) }),
+        ),
+        next.states,
+      ).revision,
+    );
     expect(registry.getSnapshot()?.config.zcodeBuiltinRevision).toBe("builtin-B");
   });
 
@@ -87,7 +117,21 @@ describe("托管 Worker 账号交付", () => {
     await expect(started.syncAccountProviderConfig(next)).rejects.toThrow("refresh failed");
     await expect(started.syncAccountProviderConfig(next)).resolves.toBe(false);
     expect(refresh).toHaveBeenCalledTimes(2);
-    expect(started.runtime.registryService.getSnapshot()?.account.revision).toBe(next.revision);
+    const snapshot = started.runtime.registryService.getSnapshot();
+    // 与上面同理：Registry 内的 account 快照含 ChatGPT fail-closed 投影。
+    expect(snapshot?.account.providers.get(CHATGPT_PROVIDER_ID)?.toJSON()).toEqual({
+      access: { type: "openai-oauth", entitled: false },
+    });
+    expect(snapshot?.account.revision).toBe(
+      createAccountProviderConfigSnapshot(
+        next.basedOnZCodeBuiltinRevision,
+        next.providers.set(
+          CHATGPT_PROVIDER_ID,
+          new ProviderConfig({ access: new OpenAiOAuthAccessConfig({ entitled: false }) }),
+        ),
+        next.states,
+      ).revision,
+    );
   });
 
   it("普通账号有权益却缺 current 时拒绝交付，不能宽松放行", () => {

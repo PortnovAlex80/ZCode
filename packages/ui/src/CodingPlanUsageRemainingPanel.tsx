@@ -2,7 +2,7 @@
 import type {
   UsageEntitlementSnapshot,
   ZCodeAccountAccess,
-  ZCodeProviderAccountAccess,
+  ZCodeZhipuProviderAccountAccess,
 } from "@zcode/shared";
 import {
   BIGMODEL_PROVIDER_ID,
@@ -29,7 +29,7 @@ import type {
 export interface CodingPlanUsageRemainingEntitlement {
   sourceId?: SidebarUsageCodingPlanSourceId;
   providerId: SidebarUsageCodingPlanProviderId;
-  accountAccess: ZCodeProviderAccountAccess | ZCodeAccountAccess;
+  accountAccess: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess;
   label?: string;
   snapshot: UsageEntitlementSnapshot | null;
   loading: boolean;
@@ -38,7 +38,7 @@ export interface CodingPlanUsageRemainingEntitlement {
 
 export interface CodingPlanUsageAvailableProvider {
   providerId: SidebarUsageCodingPlanProviderId;
-  accountAccess: ZCodeProviderAccountAccess | ZCodeAccountAccess;
+  accountAccess: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess;
   label: string;
 }
 

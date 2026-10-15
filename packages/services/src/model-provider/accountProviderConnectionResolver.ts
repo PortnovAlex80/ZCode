@@ -13,7 +13,7 @@ import {
   type ProviderFamilyConnectionSelectionSettings,
   type ProviderFamilyDomain,
   type ZCodeAccountAccess,
-  type ZCodeProviderAccountAccess,
+  type ZCodeZhipuProviderAccountAccess,
 } from "@zcode/shared";
 import type {
   CodingPlanAvailabilityProvider,
@@ -314,7 +314,7 @@ export function createCodingPlanFamilyAvailabilityResolver(
  * 每次请求重新读取当前选择；只有 family 与 mode 兼容时才返回动态访问事实。
  */
 export async function resolveCurrentAccountAccess(input: {
-  readonly access: ZCodeProviderAccountAccess;
+  readonly access: ZCodeZhipuProviderAccountAccess;
   readonly readSettings: () => Promise<AccountProviderConnectionSettings>;
   readonly loadAccountIdentity: (family: ProviderFamilyDomain) => Promise<string | null>;
 }): Promise<ZCodeAccountAccess | null> {
@@ -323,7 +323,11 @@ export async function resolveCurrentAccountAccess(input: {
   if (settings.providerFamilyDomain !== accountType) return null;
   if (mode === "start-plan") {
     if (!(await input.loadAccountIdentity(accountType))?.trim()) return null;
-    return { type: "zhipu-account", family: accountType, planKind: "start-plan" };
+    return {
+      type: "zhipu-account",
+      family: accountType,
+      planKind: "start-plan",
+    };
   }
   const selection = settings.selections[accountType];
   if (!selection) return null;

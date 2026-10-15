@@ -1,9 +1,12 @@
 import type { ProviderSettingsView } from "@zcode/services";
-import { type ZCodeProviderAccountAccess, zcodeProviderAccountAccessSchema } from "@zcode/shared";
+import {
+  type ZCodeZhipuProviderAccountAccess,
+  zcodeProviderAccountAccessSchema,
+} from "@zcode/shared";
 
 export interface EntitledAccountProviderAccess {
   readonly providerId: string;
-  readonly access: ZCodeProviderAccountAccess;
+  readonly access: ZCodeZhipuProviderAccountAccess;
   readonly label?: string;
 }
 
@@ -19,7 +22,13 @@ export function resolveEntitledAccountProviderAccess(
   // Registry Access 是静态 accountType/mode 约束，动态 planKind 与 Team scope
   // 只能由账号服务在请求期解析。旧 Schema 会把所有真实 Registry Provider 误判为空。
   const parsed = zcodeProviderAccountAccessSchema.safeParse(provider.effectiveConfig.access);
-  if (!parsed.success || parsed.data.entitled !== true) return null;
+  if (
+    !parsed.success ||
+    // openai-oauth（ChatGPT 订阅）是合法分支，但这里只解析 Z.ai 账号权益。
+    parsed.data.type !== "zhipu-account" ||
+    parsed.data.entitled !== true
+  )
+    return null;
   const label = provider.providerName?.trim();
   return {
     providerId,
@@ -57,7 +66,8 @@ export function resolveAccountProviderInspectionAccess(
   )
     return null;
   const parsed = zcodeProviderAccountAccessSchema.safeParse(provider.effectiveConfig.access);
-  if (!parsed.success || parsed.data.mode === "off-peak") return null;
+  if (!parsed.success || parsed.data.type !== "zhipu-account" || parsed.data.mode === "off-peak")
+    return null;
   if (!provider.accountState && parsed.data.entitled !== true) return null;
   return { providerId, access: parsed.data };
 }

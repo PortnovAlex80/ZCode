@@ -30,7 +30,7 @@ import {
   type ProviderFamilyDomain,
   type UsageEntitlementSnapshot,
   type ZCodeAccountAccess,
-  type ZCodeProviderAccountAccess,
+  type ZCodeZhipuProviderAccountAccess,
   type ZCodeConfigOption,
   type ZCodeProvider,
 } from "@zcode/shared";
@@ -39,7 +39,12 @@ import type {
   SessionPhase,
   SessionUsageState,
 } from "@zcode/shared/zcode-protocol-v4";
-import { ModelConfigSelect, type ModelSelectGroup } from "@/ModelConfigSelect.js";
+import {
+  ModelConfigSelect,
+  type ModelSelectFooterAction,
+  type ModelSelectGroup,
+} from "@/ModelConfigSelect.js";
+import { useChatGptAccount } from "@/hooks/useChatGptAccount.js";
 import { Button } from "@/components/ui/button.js";
 import { HighspeedModelIndicator } from "@/highspeed/HighspeedModelIndicator.js";
 import { formatHighspeedRemainingTime } from "@/highspeed/highspeedTime.js";
@@ -108,7 +113,9 @@ import {
 export { V4ComposerModeSwitch } from "@/v4/composer/V4ComposerModeControls.js";
 
 const V4_COMPOSER_INPUT_SELECTOR = `[data-testid="${TID_V4_COMPOSER_INPUT}"]`;
-const MODEL_SELECTION_LOADING_STATE: ModelSelectionState = { status: "loading" };
+const MODEL_SELECTION_LOADING_STATE: ModelSelectionState = {
+  status: "loading",
+};
 
 /** 稳定空回调（热键 hook 单实例只处理本组件拥有的选项，其余动作占位）。 */
 function noop(): void {}
@@ -265,7 +272,7 @@ function resolveContextTeamUsageSourceFromEntitlementSnapshot({
   accountAccess,
   snapshot,
 }: {
-  accountAccess?: ZCodeProviderAccountAccess | ZCodeAccountAccess | null;
+  accountAccess?: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess | null;
   snapshot?: UsageEntitlementSnapshot | null;
 }): CodingPlanUsageSource | null {
   if (snapshot?.context?.scope !== "team") {
@@ -322,7 +329,7 @@ function resolveContextTeamUsageSourceFromEntitlementSnapshot({
 }
 
 function resolveContextCodingPlanUsageSource(params: {
-  accountAccess?: ZCodeProviderAccountAccess | ZCodeAccountAccess | null;
+  accountAccess?: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess | null;
   cachedTeamSources?: readonly CodingPlanUsageSource[];
   entitlementSnapshot?: UsageEntitlementSnapshot | null;
   // 原类型/守卫硬绑 bigmodelCodingPlan，zai team 上下文永远返回 null。
@@ -475,6 +482,9 @@ function V4ComposerModelControlsImpl({
     suppressProviderFingerprintAutoRefresh: true,
   });
   const openSettingsTab = useTabStore((state) => state.openSettingsTab);
+  // ChatGPT 订阅入口：仅在未连接（或需重连）时作为选型菜单 footer action 出现；
+  // 已连接时模型分组+徽标即入口状态，卡片管理在 Manage models。
+  const chatGptAccount = useChatGptAccount();
   const modelTriggerRef = useRef<HTMLSpanElement | null>(null);
   const thoughtTriggerRef = useRef<HTMLSpanElement | null>(null);
   // Ctrl+M 热键：递增 openRequestKey 请求 ModelConfigSelect 打开菜单（旧 handleOpenModelMenuShortcut 语义）。
@@ -822,6 +832,12 @@ function V4ComposerModelControlsImpl({
       teamPlanFallbackLabel: intl.formatMessage({
         id: "settings.modelProvider.connectionMode.teamPlan",
       }),
+      openAiFamilyLabel: intl.formatMessage({
+        id: "chat.toolbar.model.openAiFamily",
+      }),
+      openAiSubscriptionBadgeLabel: intl.formatMessage({
+        id: "chat.toolbar.model.openAiSubscriptionBadge",
+      }),
     });
   }, [displayProvider, intl, modelSelectionView]);
 
@@ -830,6 +846,28 @@ function V4ComposerModelControlsImpl({
     setPendingSettingsSectionIntent("modelProvider");
     openSettingsTab();
   }, [openSettingsTab]);
+
+  const chatGptFooterActions = useMemo<ModelSelectFooterAction[]>(() => {
+    const status = chatGptAccount.status?.status;
+    // 已连接（含 plan-enabled）时不重复给入口；quota/restricted 状态在
+    // Manage models 卡片里解释，选型菜单保持轻量。
+    if (!status || status === "plan-enabled" || status === "connected") return [];
+    return [
+      {
+        key: "chatgpt-continue",
+        label: intl.formatMessage({
+          id: "chat.toolbar.model.continueWithChatGPT",
+        }),
+        onSelect: () => {
+          void chatGptAccount.beginLogin().then((result) => {
+            // 未配置登录桥（如旧 host）或登录失败时，把用户送到设置页的订阅卡片，
+            // 那里有完整状态与原因，不在选型菜单里弹第二条错误通道。
+            if (result.result !== "completed") handleOpenModelProviderSettings();
+          });
+        },
+      },
+    ];
+  }, [chatGptAccount, handleOpenModelProviderSettings, intl]);
   const showManageModelsAction = shouldShowManageModelsAction(handleOpenModelProviderSettings);
   const manageModelsLabel = intl.formatMessage({
     id: "chat.toolbar.model.manageModels",
@@ -1128,6 +1166,7 @@ function V4ComposerModelControlsImpl({
       ) : modelMenuVisible ? (
         <ModelConfigSelect
           modelGroups={modelSelectGroups}
+          footerActions={chatGptFooterActions}
           normalizedValue={normalizedModelValue}
           triggerLabel={modelTriggerDisplay.fullLabel}
           triggerLabelPrefix={modelTriggerDisplay.providerPrefix}

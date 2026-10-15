@@ -7,7 +7,7 @@ import {
   type ProviderFamilyConnectionSelection,
   type ProviderFamilyConnectionSelectionSettings,
   type ZCodeAccountAccess,
-  type ZCodeProviderAccountAccess,
+  type ZCodeZhipuProviderAccountAccess,
 } from "@zcode/shared";
 import {
   useUsageEntitlement,
@@ -131,13 +131,17 @@ function useProviderFamilyEntitlements(params: {
 }
 
 function resolveEntitlementAccountAccess(
-  access: ZCodeProviderAccountAccess | undefined,
+  access: ZCodeZhipuProviderAccountAccess | undefined,
   selection: ProviderFamilyConnectionSelection | undefined,
-): ZCodeProviderAccountAccess | ZCodeAccountAccess | undefined {
+): ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess | undefined {
   if (access?.mode !== "team-coding-plan" || selection?.kind !== "team-coding-plan") {
     // 展示查询针对这个套餐自身，不让执行期的 current 解析器改成当前另一套餐。
     return access && (access.mode === "start-plan" || access.mode === "individual-coding-plan")
-      ? { type: "zhipu-account", family: access.accountType, planKind: access.mode }
+      ? {
+          type: "zhipu-account",
+          family: access.accountType,
+          planKind: access.mode,
+        }
       : access;
   }
   return {

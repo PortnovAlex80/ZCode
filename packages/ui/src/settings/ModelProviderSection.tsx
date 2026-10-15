@@ -40,6 +40,8 @@ import {
 } from "./model-provider-section/constants.js";
 import { ModelProviderSectionDetail } from "./model-provider-section/Detail.js";
 import { ModelProviderSectionLayout } from "./model-provider-section/SectionLayout.js";
+import { ChatGptAccountCard } from "./model-provider-section/ChatGptAccountCard.js";
+import { useChatGptAccount } from "@/hooks/useChatGptAccount.js";
 import { ProviderTemplatePicker } from "./model-provider-section/ProviderTemplatePicker.js";
 import type { CodingPlanLoginOptions } from "./model-provider-section/codingPlanPricingCards.js";
 import { useModelProviderNavigation } from "./model-provider-section/useModelProviderNavigation.js";
@@ -251,6 +253,8 @@ export function ModelProviderSection({
   const confirmDialog = useConfirmDialog();
   const platform = usePlatform();
   const { modelSelectionService, oauthService, credentialService } = useServices();
+  // ChatGPT 订阅账号卡（sanitized 状态 + Continue/Disconnect）；旧 host 无服务时卡片自隐藏。
+  const chatGptAccount = useChatGptAccount();
   const {
     modelProviders,
     providerTemplates,
@@ -336,7 +340,9 @@ export function ModelProviderSection({
       if (!providerId) {
         // 未知 ID 不能只静默忽略：pending 指令不消费的话，外部输入错误会困住导航。
         // 仅显示错误，保留当前可操作页面和持久连接，后续合法导航/手动选择可恢复。
-        logger.warn("[ModelProviderSection] 无法打开目标供应商", { providerId: target.providerId });
+        logger.warn("[ModelProviderSection] 无法打开目标供应商", {
+          providerId: target.providerId,
+        });
         setInvalidProviderTarget(true);
         setTemplatePickerOpen(false);
         return true;
@@ -559,7 +565,10 @@ export function ModelProviderSection({
   const syncCodingPlanProviderOnce = useCallback(
     async (
       item: CodingPlanConnectionNavItem,
-      options: { userTransition?: boolean; refreshPlanSnapshots?: boolean } = {},
+      options: {
+        userTransition?: boolean;
+        refreshPlanSnapshots?: boolean;
+      } = {},
     ) => {
       const attemptKey = resolveCodingPlanProviderSyncAttemptKey({
         activeOAuthProvider,
@@ -846,7 +855,9 @@ export function ModelProviderSection({
           providerFamilyDomainUpdatedAt: Date.now(),
           providerFamilyDomainMigrated: true,
         });
-        await refreshCodingPlanPurchaseTokenState({ clearUserWhenLoggedOut: true });
+        await refreshCodingPlanPurchaseTokenState({
+          clearUserWhenLoggedOut: true,
+        });
         await refresh();
         // 解绑后 batch-preview 的订阅/鉴权态已经失效，套餐卡片内部缓存必须刷新，
         // 否则按钮会继续沿用解绑前的 purchased 或 authenticated 状态。
@@ -1095,111 +1106,129 @@ export function ModelProviderSection({
   }
 
   return (
-    <ModelProviderSectionLayout
-      description={intl.formatMessage({ id: "settings.modelProviderDescription" })}
-      refreshLabel={intl.formatMessage({ id: "settings.modelProvider.refresh" })}
-      loadingLabel={intl.formatMessage({ id: "common.loading" })}
-      presetLoading={presetLoading}
-      customLoading={customLoading}
-      onRefresh={() => {
-        void refreshModelProviderSection({
-          refresh,
-          // 手动刷新设置页时也要同时刷新 Z.ai / BigModel Team Plan 快照；
-          // 原来只刷新 BigModel，Z.ai Team Plan 购买或订阅变化后会继续显示旧项目。
-          refreshTeamPlanProducts: refreshAuthenticatedEnterpriseProducts,
-        });
-        refreshCodingPlanEntitlements();
-      }}
-      addProviderLabel={intl.formatMessage({ id: "settings.modelProvider.addProviderAction" })}
-      onAddProvider={() => setTemplatePickerOpen(true)}
-      navigationGroups={navigationGroups}
-      selectedNodeKey={selectedNodeKey}
-      onSelectNavItem={handleSelectNavItem}
-      onReorderProviderIds={handleReorderProviderIds}
-      reorderableProviderIds={reorderableProviderIds}
-    >
-      {(invalidProviderTarget || navigationUnavailable) && !templatePickerOpen ? (
-        <p role="alert" className="mb-3 text-ui-base text-destructive">
-          {intl.formatMessage({
-            id: invalidProviderTarget
-              ? "settings.modelProvider.navigationUnavailable"
-              : "settings.modelProvider.connectionUnavailable",
-          })}
-        </p>
-      ) : null}
-      {templatePickerOpen ? (
-        <ProviderTemplatePicker
-          templates={providerTemplates}
-          creating={creatingProvider}
-          onBack={() => setTemplatePickerOpen(false)}
-          onCreateFromTemplate={(templateId) => {
-            return handleCreateProvider({ templateId });
-          }}
-          onCreateCustom={(label) => {
-            return handleCreateProvider({ providerName: label });
-          }}
-        />
-      ) : (
-        <ModelProviderSectionDetail
-          connectionSelections={effectiveConnectionSelections}
-          providerSettingsView={providerSettingsView}
-          selectedNavItem={selectedNavItem}
-          navigationItems={navigationItems}
-          connectionSettingsFailed={familyConnectionSettingsFailed}
-          startPlanSubscriptionCount={(() => {
-            const providerId =
-              selectedNavItem && "presetId" in selectedNavItem ? selectedNavItem.presetId : null;
-            const family = providerId
-              ? resolveModelProviderFamilySpecByProviderId(providerId)
-              : null;
-            const entitlement = family ? codingPlanEntitlements[family.startPlanProviderId] : null;
-            // 只展示当前 Family 已查询到的权益，不用当前是否选中 Start 代替拥有数量。
-            return entitlement?.error
-              ? 0
-              : (entitlement?.snapshot?.subscription?.details.length ?? 0);
-          })()}
-          presetLoading={presetLoading}
-          codingPlanAuthError={oauthError}
-          codingPlanPurchaseTokenAuthenticatedByProviderId={
-            codingPlanPurchaseTokenAuthenticatedByProviderId
-          }
-          presetSubscriptionProviderId={presetSubscriptionProviderId}
-          codingPlanStatusSyncProviderId={codingPlanStatusSyncProviderId}
-          codingPlanDisconnectProviderId={codingPlanDisconnectProviderId}
-          onSave={handleSave}
-          onAddPersonalModel={addPersonalModel}
-          onSavePersonalModelDraft={savePersonalModelDraft}
-          onSetPersonalModelEnabled={setPersonalModelEnabled}
-          onDeletePersonalModel={deletePersonalModel}
-          onDelete={handleDelete}
-          // Provider 的左栏排序权限被误复用成模型排序门禁，导致 Built-in / Account
-          // Provider 的 Effective 模型无法写入 Personal modelOrder。模型调序独立于成员来源。
-          onReorderProviderModels={reorderProviderModels}
-          onTestModel={handleTestModel}
-          onCodingPlanLogin={handleCodingPlanLogin}
-          onRetryCodingPlan={() => {
-            // 取 Key 失败不等于登录失效；沿用 Host 手动刷新，不清除 OAuth 或重新登录。
-            logger.info("[ModelProviderSection] 重试获取套餐状态");
-            return refresh().then(() =>
-              refreshCodingPlanEntitlements({ force: true, reason: "manual" }),
-            );
-          }}
-          onCodingPlanDisconnect={handleCodingPlanDisconnect}
-          onOpenApiKeyUrl={handleOpenApiKeyUrl}
-          onSelectNavItem={handleSelectNavItem}
-          onOpenBigModelRegistration={() => {
-            // 未注册提示来自一次失败的 OAuth checking 状态；跳转注册后要恢复普通状态，避免提示卡住。
-            setOAuthError(null);
-            setPresetSubscriptionProviderId((current) =>
-              current === BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan ? null : current,
-            );
-            platform.openExternal(BIGMODEL_REGISTRATION_URL);
-          }}
-          onCodingPlanPurchaseComplete={async () => {
-            await refreshProviderPanelAfterAuthChange({ refreshReason: "purchase" });
-          }}
-        />
-      )}
-    </ModelProviderSectionLayout>
+    <div className="space-y-4">
+      <ChatGptAccountCard account={chatGptAccount} />
+      <ModelProviderSectionLayout
+        description={intl.formatMessage({
+          id: "settings.modelProviderDescription",
+        })}
+        refreshLabel={intl.formatMessage({
+          id: "settings.modelProvider.refresh",
+        })}
+        loadingLabel={intl.formatMessage({ id: "common.loading" })}
+        presetLoading={presetLoading}
+        customLoading={customLoading}
+        onRefresh={() => {
+          void refreshModelProviderSection({
+            refresh,
+            // 手动刷新设置页时也要同时刷新 Z.ai / BigModel Team Plan 快照；
+            // 原来只刷新 BigModel，Z.ai Team Plan 购买或订阅变化后会继续显示旧项目。
+            refreshTeamPlanProducts: refreshAuthenticatedEnterpriseProducts,
+          });
+          refreshCodingPlanEntitlements();
+        }}
+        addProviderLabel={intl.formatMessage({
+          id: "settings.modelProvider.addProviderAction",
+        })}
+        onAddProvider={() => setTemplatePickerOpen(true)}
+        navigationGroups={navigationGroups}
+        selectedNodeKey={selectedNodeKey}
+        onSelectNavItem={handleSelectNavItem}
+        onReorderProviderIds={handleReorderProviderIds}
+        reorderableProviderIds={reorderableProviderIds}
+      >
+        {(invalidProviderTarget || navigationUnavailable) && !templatePickerOpen ? (
+          <p role="alert" className="mb-3 text-ui-base text-destructive">
+            {intl.formatMessage({
+              id: invalidProviderTarget
+                ? "settings.modelProvider.navigationUnavailable"
+                : "settings.modelProvider.connectionUnavailable",
+            })}
+          </p>
+        ) : null}
+        {templatePickerOpen ? (
+          <ProviderTemplatePicker
+            templates={providerTemplates}
+            creating={creatingProvider}
+            onBack={() => setTemplatePickerOpen(false)}
+            onCreateFromTemplate={(templateId) => {
+              return handleCreateProvider({ templateId });
+            }}
+            onCreateCustom={(label) => {
+              return handleCreateProvider({ providerName: label });
+            }}
+          />
+        ) : (
+          <ModelProviderSectionDetail
+            connectionSelections={effectiveConnectionSelections}
+            providerSettingsView={providerSettingsView}
+            selectedNavItem={selectedNavItem}
+            navigationItems={navigationItems}
+            connectionSettingsFailed={familyConnectionSettingsFailed}
+            startPlanSubscriptionCount={(() => {
+              const providerId =
+                selectedNavItem && "presetId" in selectedNavItem ? selectedNavItem.presetId : null;
+              const family = providerId
+                ? resolveModelProviderFamilySpecByProviderId(providerId)
+                : null;
+              const entitlement = family
+                ? codingPlanEntitlements[family.startPlanProviderId]
+                : null;
+              // 只展示当前 Family 已查询到的权益，不用当前是否选中 Start 代替拥有数量。
+              return entitlement?.error
+                ? 0
+                : (entitlement?.snapshot?.subscription?.details.length ?? 0);
+            })()}
+            presetLoading={presetLoading}
+            codingPlanAuthError={oauthError}
+            codingPlanPurchaseTokenAuthenticatedByProviderId={
+              codingPlanPurchaseTokenAuthenticatedByProviderId
+            }
+            presetSubscriptionProviderId={presetSubscriptionProviderId}
+            codingPlanStatusSyncProviderId={codingPlanStatusSyncProviderId}
+            codingPlanDisconnectProviderId={codingPlanDisconnectProviderId}
+            onSave={handleSave}
+            onAddPersonalModel={addPersonalModel}
+            onSavePersonalModelDraft={savePersonalModelDraft}
+            onSetPersonalModelEnabled={setPersonalModelEnabled}
+            onDeletePersonalModel={deletePersonalModel}
+            onDelete={handleDelete}
+            // Provider 的左栏排序权限被误复用成模型排序门禁，导致 Built-in / Account
+            // Provider 的 Effective 模型无法写入 Personal modelOrder。模型调序独立于成员来源。
+            onReorderProviderModels={reorderProviderModels}
+            onTestModel={handleTestModel}
+            onCodingPlanLogin={handleCodingPlanLogin}
+            onRetryCodingPlan={() => {
+              // 取 Key 失败不等于登录失效；沿用 Host 手动刷新，不清除 OAuth 或重新登录。
+              logger.info("[ModelProviderSection] 重试获取套餐状态");
+              return refresh().then(() =>
+                refreshCodingPlanEntitlements({
+                  force: true,
+                  reason: "manual",
+                }),
+              );
+            }}
+            onCodingPlanDisconnect={handleCodingPlanDisconnect}
+            onOpenApiKeyUrl={handleOpenApiKeyUrl}
+            onSelectNavItem={handleSelectNavItem}
+            onOpenBigModelRegistration={() => {
+              // 未注册提示来自一次失败的 OAuth checking 状态；跳转注册后要恢复普通状态，避免提示卡住。
+              setOAuthError(null);
+              setPresetSubscriptionProviderId((current) =>
+                current === BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan
+                  ? null
+                  : current,
+              );
+              platform.openExternal(BIGMODEL_REGISTRATION_URL);
+            }}
+            onCodingPlanPurchaseComplete={async () => {
+              await refreshProviderPanelAfterAuthChange({
+                refreshReason: "purchase",
+              });
+            }}
+          />
+        )}
+      </ModelProviderSectionLayout>
+    </div>
   );
 }

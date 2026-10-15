@@ -1,4 +1,4 @@
-import { IGenUiService } from "@zcode/services";
+import { IChatGptAccountService, IGenUiService } from "@zcode/services";
 import { ProxyChannel, type IChannelClient } from "@zcode/rpc";
 import {
   IFileService,
@@ -80,6 +80,8 @@ export class RemoteServiceAccess implements IServiceAccessor {
   readonly botsService: IBotsService;
   readonly fileWatcherService: IFileWatcherService;
   readonly oauthService: IOAuthService;
+  /** ChatGPT 订阅账号服务；本地 host 注册，旧 host 未注册时 proxy 调用按 RPC 错误呈现。 */
+  readonly chatGptAccountService: IChatGptAccountService;
   readonly providerSettingsService: IProviderSettingsService;
   readonly modelSelectionService: IModelSelectionService;
   /** Host-only target proxy；不属于 IServiceAccessor，避免向 Renderer 暴露 Secret 写入接口。 */
@@ -173,6 +175,9 @@ export class RemoteServiceAccess implements IServiceAccessor {
     );
     this.oauthService = ProxyChannel.toService<IOAuthService>(
       channelClient.getChannel(IOAuthService.channelName),
+    );
+    this.chatGptAccountService = ProxyChannel.toService<IChatGptAccountService>(
+      channelClient.getChannel(IChatGptAccountService.channelName),
     );
     this.providerSettingsService = ProxyChannel.toService<IProviderSettingsService>(
       channelClient.getChannel(IProviderSettingsService.channelName),

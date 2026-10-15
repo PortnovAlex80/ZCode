@@ -1,12 +1,20 @@
 import {
   AccountProviderService,
   MutableAccountProviderConfigSource,
+  OpenAiOAuthAccessConfig,
+  ProviderConfig,
+  createAccountProviderConfigSnapshot,
   parseAccountProviderConfigMap,
   type AccountProviderConfigSnapshot,
   type AccountProviderStates,
+  type ProviderConfigMap,
 } from "@zcode/provider";
 import {
+  CHATGPT_CREDENTIAL_KEYS,
+  CHATGPT_PROVIDER_ID,
   isBuiltinModelProviderId,
+  parseChatGptCachedModelsJson,
+  parseChatGptSanitizedCredentialSnapshot,
   resolveRuntimeZCodeEndpointOrigin,
   ZCODE_VERSION,
 } from "@zcode/shared";
@@ -55,6 +63,44 @@ export async function startProcessProviderRegistryRuntime(
   const credentialStore = options.standalone
     ? (options.standalone.credentialStore ?? createSharedZCodeCredentialStore({ env: { ...env } }))
     : undefined;
+  // ChatGPT（openai-oauth）凭据是本机事实而非 Host 账号态：无论 standalone 还是
+  // Host 托管，都把 entitlement + /v1/models 缓存投影为第三层 Account Overlay。
+  // 移植自 nasone32/ZCode bd5171cb，凭据格式跟随本仓库单键记录；Host 侧同源
+  // 实现见 packages/services chatGptAccountProjection.ts（同一 shared 解析器）。
+  const chatGptOverlayStore = credentialStore ?? createSharedZCodeCredentialStore({ env: { ...env } });
+  const readChatGptOverlay = async (): Promise<ProviderConfig> => {
+    const raw = await chatGptOverlayStore.load(CHATGPT_CREDENTIAL_KEYS.credentials);
+    const snapshot = parseChatGptSanitizedCredentialSnapshot(raw);
+    if (!snapshot) {
+      return new ProviderConfig({ access: new OpenAiOAuthAccessConfig({ entitled: false }) });
+    }
+    const models = parseChatGptCachedModelsJson(
+      await chatGptOverlayStore.load(CHATGPT_CREDENTIAL_KEYS.models),
+    );
+    return new ProviderConfig({
+      access: new OpenAiOAuthAccessConfig({ entitled: true }),
+      // 空目录合法：Provider 从 Registry 退出，不用 seed 名单顶替（计划 §3 备注 5）。
+      ...(models ? { builtinModelIds: models.map((model) => model.slug) } : {}),
+    });
+  };
+  const applyChatGptOverlay = async (
+    snapshot: AccountProviderConfigSnapshot,
+    configuredProviders?: ProviderConfigMap,
+  ): Promise<AccountProviderConfigSnapshot> => {
+    // 只有当前 Built-in 实际声明了 ChatGPT Provider 时才投影；否则保持 Host 快照
+    // 原样（revision 不变），托管 Worker 的账号交付语义不受本机登录态影响。
+    const builtinProviders =
+      configuredProviders ?? (await runtime.configService.read()).zcodeBuiltinProviders;
+    if (!builtinProviders.has(CHATGPT_PROVIDER_ID)) return snapshot;
+    const providers = snapshot.providers.set(CHATGPT_PROVIDER_ID, await readChatGptOverlay());
+    return createAccountProviderConfigSnapshot(
+      snapshot.basedOnZCodeBuiltinRevision,
+      providers,
+      snapshot.states,
+    );
+  };
+  // Host 模式：记录最近一次 Host 快照，凭据变化时重投影 ChatGPT Overlay。
+  let lastHostAccountSnapshot: AccountProviderConfigSnapshot | undefined;
   let standaloneAccount: AccountProviderService | undefined;
   const bundledFile = options.standalone
     ? env[ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE_ENV]?.trim()
@@ -100,9 +146,15 @@ export async function startProcessProviderRegistryRuntime(
                     providers: configuredProviders,
                   },
                 );
+                // Standalone 进程自己也投影 ChatGPT（与 Host 同一凭据文件）；
+                // standalone-credentials-changed 的 refresh 会带着新登录态重投影。
+                const withChatGpt = await applyChatGptOverlay(
+                  snapshot,
+                  configuredProviders,
+                );
                 return {
-                  providers: snapshot.providers,
-                  states: snapshot.states ?? {},
+                  providers: withChatGpt.providers,
+                  states: withChatGpt.states ?? {},
                 };
               },
             });
@@ -147,6 +199,18 @@ export async function startProcessProviderRegistryRuntime(
     await standaloneAccount!.refresh("standalone-credentials-changed");
     await runtime.registryService.refresh("standalone-credentials-barrier");
   });
+  // Host 模式没有 standalone Account Service；ChatGPT 凭据变化需要在此重投影
+  // 最近一次 Host 快照并刷新 Registry，否则桌面托管进程看不到 login/logout。
+  const disposeChatGptOverlaySubscription = credentialStore
+    ? undefined
+    : chatGptOverlayStore.onDidChange?.(async () => {
+        const hostSnapshot = lastHostAccountSnapshot;
+        if (!hostSnapshot) return;
+        const next = await applyChatGptOverlay(hostSnapshot);
+        if (accountSource.replace(next, "chatgpt-credentials-changed")) {
+          await runtime.registryService.refresh("chatgpt-credentials-changed");
+        }
+      });
   try {
     await runtime.start();
     const snapshot = runtime.registryService.getSnapshot()!;
@@ -160,13 +224,16 @@ export async function startProcessProviderRegistryRuntime(
         async syncAccountProviderConfig(next: AccountProviderConfigSnapshot): Promise<boolean> {
           if (standaloneAccount)
             throw new Error("Standalone Account 由本进程管理，不接收 Host 覆盖");
-          const changed = accountSource.replace(next, "host-account-config");
+          lastHostAccountSnapshot = next;
+          const withChatGptOverlay = await applyChatGptOverlay(next);
+          const changed = accountSource.replace(withChatGptOverlay, "host-account-config");
           // Source 去重只证明收过，不证明上次刷新成功。重交时仍刷新；配套配置未到
           // 则由 Registry 保留完整旧快照，不能把接收确认冒充应用确认。
           await runtime.registryService.refresh("host-account-config");
           return changed;
         },
         dispose() {
+          disposeChatGptOverlaySubscription?.();
           disposeCredentialSubscription?.();
           standaloneHeaders?.clearProjectTokens();
           disposeRecovery?.();
@@ -190,6 +257,7 @@ export async function startProcessProviderRegistryRuntime(
       throw error;
     }
   } catch (error) {
+    disposeChatGptOverlaySubscription?.();
     disposeCredentialSubscription?.();
     disposeRecovery?.();
     standaloneAccount?.dispose();

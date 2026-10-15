@@ -120,6 +120,8 @@ export const ServiceChannels = {
   FileWatcher: "file-watcher",
   /** OAuth 认证服务 */
   OAuth: "oauth",
+  /** ChatGPT（Sign in with ChatGPT）账号服务：sanitized 状态投影 + begin/disconnect */
+  ChatGptAccount: "chatgpt-account",
   /** 新 Provider Config 的设置读写 Facade */
   ProviderSettings: "provider-settings",
   /** 新 Provider Registry 的模型选择 Facade */

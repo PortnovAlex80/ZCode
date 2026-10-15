@@ -2,8 +2,8 @@ import {
   isZCodeAgentProvider,
   resolveModelProviderFamilySpecByProviderId,
   zcodeProviderAccountAccessSchema,
-  type ZCodeProviderAccountAccess,
   type ZCodeProvider,
+  type ZCodeZhipuProviderAccountAccess,
 } from "@zcode/shared";
 import type { ModelSelectionView } from "@zcode/services";
 import type { ModelSelectGroup } from "@/ModelConfigSelect.js";
@@ -19,6 +19,8 @@ export interface ModelProviderGroupLabelOptions {
   startPlanBadgeLabel?: string;
   teamPlanBadgeLabel?: string;
   teamPlanFallbackLabel?: string;
+  openAiFamilyLabel?: string;
+  openAiSubscriptionBadgeLabel?: string;
 }
 
 function supportsRegistryApiFormat(
@@ -27,6 +29,8 @@ function supportsRegistryApiFormat(
 ): boolean {
   if (!apiFormat) return false;
   // 仅剩 glm（ZCode Agent）provider；三方 CLI 的 api format 差异已随 provider 下线。
+  // openai-responses（ChatGPT 订阅）由同一 agent runtime 执行（model-execution 的
+  // openai 分支），进入 registry 后同样经此门禁渲染。
   return isZCodeAgentProvider(selectedProvider);
 }
 
@@ -42,7 +46,13 @@ export function buildRegistryModelSelectGroups(
 
     const accountAccess = zcodeProviderAccountAccessSchema.safeParse(provider.config.access);
     const accountPresentation = accountAccess.success
-      ? getRegistryAccountProviderGroupPresentation(provider.providerId, accountAccess.data, labels)
+      ? accountAccess.data.type === "openai-oauth"
+        ? getRegistryOpenAiOAuthGroupPresentation(labels)
+        : getRegistryAccountProviderGroupPresentation(
+            provider.providerId,
+            accountAccess.data,
+            labels,
+          )
       : null;
 
     return [
@@ -70,18 +80,31 @@ export function buildRegistryModelSelectGroups(
 
 function getRegistryAccountProviderGroupPresentation(
   providerId: string,
-  access: ZCodeProviderAccountAccess,
+  access: ZCodeZhipuProviderAccountAccess,
   labels: ModelProviderGroupLabelOptions,
 ): Pick<ModelSelectGroup, "label" | "labelBadge"> {
   const familySpec = resolveModelProviderFamilySpecByProviderId(providerId);
   const label = familySpec?.label ?? providerId;
   if (access.mode === "start-plan") {
-    return { label: "Start Plan", labelBadge: labels.startPlanBadgeLabel ?? "Free" };
+    return {
+      label: "Start Plan",
+      labelBadge: labels.startPlanBadgeLabel ?? "Free",
+    };
   }
   if (access.mode === "team-coding-plan") {
     return { label, labelBadge: labels.teamPlanBadgeLabel ?? "Team" };
   }
   return { label, labelBadge: labels.codingPlanBadgeLabel ?? "Individual" };
+}
+
+/** ChatGPT（openai-oauth）订阅分组：OpenAI 家族 + 订阅徽标，与 Z.ai 账号分组并列。 */
+function getRegistryOpenAiOAuthGroupPresentation(
+  labels: ModelProviderGroupLabelOptions,
+): Pick<ModelSelectGroup, "label" | "labelBadge"> {
+  return {
+    label: labels.openAiFamilyLabel ?? "OpenAI",
+    labelBadge: labels.openAiSubscriptionBadgeLabel ?? "ChatGPT",
+  };
 }
 
 export function resolveModelDisplayName(

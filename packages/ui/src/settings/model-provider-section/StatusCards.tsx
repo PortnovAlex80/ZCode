@@ -7,7 +7,7 @@ import {
   type UsageEntitlementSubscriptionDetail,
   type UsageQuotaLimit,
   type ZCodeAccountAccess,
-  type ZCodeProviderAccountAccess,
+  type ZCodeZhipuProviderAccountAccess,
 } from "@zcode/shared";
 import { InfoIcon, Loader2Icon } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -214,7 +214,7 @@ export function CodingPlanStatusPanel({
   teamPlanAvailabilityReason?: TeamPlanAvailabilityReason;
   /** Team Plan 必须传完整连接 key，避免与同 provider 的个人套餐共享重置状态。 */
   quotaResetSourceKey?: string;
-  quotaResetAccountAccess?: ZCodeProviderAccountAccess | ZCodeAccountAccess;
+  quotaResetAccountAccess?: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess;
   onQuotaResetEntitlementRefresh?: () => void | Promise<void>;
 }) {
   const { intl } = useZCodeIntl();
@@ -729,7 +729,7 @@ function CodingPlanUsageSummaryCards({
   mcpQuotaLimit: UsageQuotaLimit | null;
   sourceKey: string;
   preferredProviderId: string;
-  accountAccess?: ZCodeProviderAccountAccess | ZCodeAccountAccess;
+  accountAccess?: ZCodeZhipuProviderAccountAccess | ZCodeAccountAccess;
   onEntitlementRefresh?: () => void | Promise<void>;
 }) {
   const { intl, locale } = useZCodeIntl();
