@@ -22,6 +22,7 @@ import type {
 import type { RegistryModelConfig, RegistryProviderConfig } from "@zcode/provider";
 import {
   AiSdkModelExecution,
+  isOpenAiOAuthAccess,
   type AiSdkResolvedModel,
   type AiSdkNetworkConfig,
   type AiSdkModelExecutionConfig,
@@ -177,10 +178,15 @@ export class AiSdkModelAdapter {
       // §2.2）经 modelExecution.requestAuth 下发到执行作用域 Source。若门禁只认 off-peak，highspeed
       // 会落到下面的账号 runtime-header 刷新分支，把整包 requestAuth（含卡 ID）丢弃，加速请求因缺卡 ID/
       // 错误鉴权被 /api/v1/highspeed 网关判 401。两种派生免签模式必须同样消费执行作用域 Source。
+      // ChatGPT OAuth（openai-oauth）同属执行作用域 Source：Bearer access token 由本进程
+      // 凭据 store 解析并按需刷新，缺失时同样 fail-closed（model_request_auth_missing）；
+      // 但它绝不能进入 off-peak 的 refreshOffPeakRequestAuth 分支——那是 Z.ai 账号
+      // runtime-header 语义，下面的 zhipu-account 条件已把它排除在外。
       const requestAuthRequired =
-        options.providerConfig.access.type === "zhipu-account" &&
-        (options.providerConfig.access.mode === "off-peak" ||
-          options.providerConfig.access.mode === "highspeed");
+        isOpenAiOAuthAccess(options.providerConfig.access) ||
+        (options.providerConfig.access.type === "zhipu-account" &&
+          (options.providerConfig.access.mode === "off-peak" ||
+            options.providerConfig.access.mode === "highspeed"));
       // 调用级 runtime header Port 只服务绑定完整 Account Access 的账号型 Model；
       // 普通 API-key Model 若也消费该 Port，会把静态鉴权误送到 Host 刷新并在请求前失败。
       // 派生模式保留执行作用域票据/卡身份；Off-Peak 的 PAT 仍逐请求向原账号 owner 刷新。

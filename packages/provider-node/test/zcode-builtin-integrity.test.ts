@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   ApiKeyAccessConfig,
   ModelConfigRules,
+  OpenAiOAuthAccessConfig,
   ProviderConfig,
   ProviderApiConfig,
   ProviderConfigMap,
@@ -96,8 +97,9 @@ describe("ZCode Built-in Provider Config 完整性", () => {
         builtinProviderModelRules: expect.any(Array),
       });
       expect(rawRelease.config.modelConfigRules).not.toHaveProperty("matchRules");
+      // 层 revision 在源 revision 之上还带有本地 ChatGPT 增补指纹（GPT-00 路径 A）。
       expect(snapshot.revision).toMatch(
-        new RegExp(`^zcode-builtin:${rawRelease.revision}:[a-f0-9]{64}$`, "u"),
+        new RegExp(`^zcode-builtin:${rawRelease.revision}:[a-f0-9]{64}(:chatgpt-[a-f0-9]{12})?$`, "u"),
       );
       const apiTemplateIds = [
         "zai-api",
@@ -531,6 +533,7 @@ describe("ZCode Built-in Provider Config 完整性", () => {
 
     try {
       const snapshot = await source.read();
+      // account:chatgpt 由 GPT-00 路径 A 在本地增补进层快照，Bundled JSON 本身不携带。
       expect(snapshot.providers.keys()).toEqual([
         "account:zai-individual-coding-plan",
         "account:zai-team-coding-plan",
@@ -542,6 +545,7 @@ describe("ZCode Built-in Provider Config 完整性", () => {
         "account:bigmodel-offpeak-idle-plan",
         "account:zai-highspeed-card",
         "account:bigmodel-highspeed-card",
+        "account:chatgpt",
       ]);
       expect(snapshot.providerTemplates?.keys()).toEqual([
         "zai-api",
@@ -942,6 +946,15 @@ describe("ZCode Built-in Provider Config 完整性", () => {
             providerId,
             new ProviderConfig({
               access: new ZhipuAccountAccessConfig({ entitled: true }),
+            }),
+          ]);
+        }
+        // ChatGPT（openai-oauth）同样是账号型 Provider，需要 entitled Overlay 补全访问形态。
+        if (provider.access?.type === "openai-oauth") {
+          accountProviders.push([
+            providerId,
+            new ProviderConfig({
+              access: new OpenAiOAuthAccessConfig({ entitled: true }),
             }),
           ]);
         }

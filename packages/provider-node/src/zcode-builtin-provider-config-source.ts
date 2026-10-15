@@ -10,6 +10,7 @@ import {
   serializeZCodeBuiltinRelease,
   type ZCodeBuiltinRelease,
 } from "./zcode-builtin-release.js";
+import { augmentZCodeBuiltinLayer } from "./chatgpt-builtin-augmentation.js";
 
 export interface NodeZCodeBuiltinProviderConfigSourceOptions {
   readonly bundledFilePath: string;
@@ -209,11 +210,17 @@ function snapshotFromRelease(
   release: ZCodeBuiltinRelease,
   sourceKey: string,
 ): ProviderConfigLayerSnapshot {
+  // GPT-00 路径 A：只在快照出口做本地增补；Active/Remote 文件与 revision 比较
+  // 始终基于未增补的原始 Release，CDN 更新不受影响。
+  const augmentation = augmentZCodeBuiltinLayer(
+    release.config.providers,
+    release.config.modelConfigRules,
+  );
   return Object.freeze({
-    revision: `zcode-builtin:${release.revision}:${sourceKey}`,
-    providers: release.config.providers,
+    revision: `zcode-builtin:${release.revision}:${sourceKey}${augmentation.revisionFingerprint ? `:chatgpt-${augmentation.revisionFingerprint}` : ""}`,
+    providers: augmentation.providers,
     providerTemplates: release.config.providerTemplates,
-    models: release.config.modelConfigRules,
+    models: augmentation.models,
   });
 }
 

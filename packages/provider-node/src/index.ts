@@ -1,4 +1,5 @@
 export * from "./zcode-builtin-provider-config-source.js";
+export * from "./chatgpt-builtin-augmentation.js";
 export * from "./zcode-builtin-release.js";
 export * from "./zcode-builtin-download.js";
 export * from "./zcode-builtin-remote-synchronizer.js";

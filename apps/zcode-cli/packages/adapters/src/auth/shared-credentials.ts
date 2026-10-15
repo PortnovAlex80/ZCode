@@ -48,6 +48,15 @@ export interface SharedZCodeCredentialStore {
   clearZaiLoginCredentials(): Promise<void>;
   delete(key: string): Promise<void>;
   deleteIfValue(key: string, expectedValue: string): Promise<boolean>;
+  /**
+   * 条件事务保存：`key` 当前值等于 `expectedValue`（null 表示 key 不存在）才写入 `value`。
+   *
+   * OAuth refresh 轮换的持久化需要 generation CAS：刷新在网络往返期间，另一条路径
+   * （例如并发的重新登录）可能已经替换了整份记录；无条件 `save` 会用旧会话的轮换结果
+   * 覆盖新会话。比较与写入在 `mutateRawCredentialRecord` 的同一把文件锁内完成，
+   * 与 `deleteIfValue` 一样是单事务，不存在 delete+write 的中间窗口。
+   */
+  saveIfValue(key: string, expectedValue: string | null, value: string): Promise<boolean>;
   deleteIfValues(
     expectedValues: Readonly<Record<string, string>>,
   ): Promise<Record<string, boolean>>;
@@ -203,6 +212,29 @@ export function createSharedZCodeCredentialStore(
       await mutateRawCredentialRecord(filePath, (rawCredentials) => {
         rawCredentials[validatedKey] = encryptedValue;
       });
+    },
+
+    async saveIfValue(
+      key: string,
+      expectedValue: string | null,
+      value: string,
+    ): Promise<boolean> {
+      const validatedKey = validateCredentialKey(key);
+      const validatedValue = cipher.encrypt(validateCredentialValue(value));
+      const validatedExpectedValue =
+        expectedValue === null ? null : validateCredentialValue(expectedValue);
+      let saved = false;
+      await mutateRawCredentialRecord(filePath, (rawCredentials) => {
+        const encryptedCurrent = rawCredentials[validatedKey];
+        const currentValue =
+          encryptedCurrent === undefined ? null : cipher.decrypt(encryptedCurrent);
+        // 与 deleteIfValue 相同的单锁 compare-and-set：expected 为 null 表示「key 不存在」
+        // （合法 value 永远非空，null 不会与任何真实值混淆）。
+        if (currentValue !== validatedExpectedValue) return;
+        rawCredentials[validatedKey] = validatedValue;
+        saved = true;
+      });
+      return saved;
     },
 
     async saveMany(entries: Readonly<Record<string, string>>): Promise<void> {

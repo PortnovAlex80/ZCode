@@ -226,10 +226,35 @@ describe("ProviderRuntime", () => {
       watch: false,
     });
 
+    // GPT-00 路径 A：空 Release 也会本地增补 account:chatgpt；未登录 fail-closed
+    // 只出现在 Settings 视图（entitled:false、无模型），不进入 Model Selection Registry。
+    const chatGptFailClosedConfig = {
+      access: { type: "openai-oauth", entitled: false },
+      api: { type: "openai-responses", baseUrl: "https://api.openai.com/v1" },
+      builtinModelIds: [],
+      group: "openai-family",
+      logo: { type: "builtin", key: "openai" },
+    };
     await expect(
       Promise.all([runtime.providerSettings.getView(), runtime.modelSelection.getView()]),
     ).resolves.toEqual([
-      { revision: 1, providerTemplates: [], providerOrder: [], providers: [] },
+      {
+        revision: 1,
+        providerTemplates: [],
+        providerOrder: [],
+        providers: [
+          {
+            providerId: "account:chatgpt",
+            providerName: "ChatGPT",
+            enabled: true,
+            executable: false,
+            issues: [],
+            models: [],
+            effectiveBuiltinConfig: chatGptFailClosedConfig,
+            effectiveConfig: chatGptFailClosedConfig,
+          },
+        ],
+      },
       { revision: 1, providers: [] },
     ]);
 

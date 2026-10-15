@@ -26,6 +26,7 @@ import { createAnthropicCompatFetch } from "./anthropic-stream-compat.js";
 import { createModelRequestSecurityState } from "./request-security-edition/index.js";
 import type { ModelRequestSecurityState, ModelRequestSecurityPort } from "./request-security.js";
 import { createOpenAIResponsesJsonCompatFetch } from "./openai-responses-json-compat.js";
+import { createChatGptResponsesCompatFetch } from "./chatgpt-responses-compat.js";
 import { createModelOptionMapFetch, type RawRequestBodyCapture } from "./model-option-map-fetch.js";
 import { createNetworkProxyFetch } from "../network/proxy-fetch.js";
 import { createProviderEndpointRoutingFetch } from "./provider-endpoint-routing-fetch.js";
@@ -303,15 +304,24 @@ export class AiSdkModelExecution {
       providerId,
       providerKind: providerConfig.kind,
     });
+    // ChatGPT 计划用量（openai-oauth）要求 store:false/stream:true 且不支持
+    // max_output_tokens 等字段；必须在 option-map 之后清理，故插在 optionFetch 内层。
+    // namespace 改写（复审意见 #4）默认关闭，live 验证（GPT-07）前仅可通过
+    // ZCODE_CHATGPT_TOOL_NAMESPACE 显式开启。
+    const chatGptCompatFetch = isOpenAiOAuthAccess(providerConfig.access)
+      ? createChatGptResponsesCompatFetch(fetch, {
+          toolNamespace: readChatGptToolNamespaceFlag(this.env),
+        })
+      : fetch;
     const optionFetch =
       optionMaps && optionValues
         ? createModelOptionMapFetch({
             capture: rawRequestBodyCapture,
-            fetch,
+            fetch: chatGptCompatFetch,
             maps: optionMaps,
             values: optionValues,
           })
-        : fetch;
+        : chatGptCompatFetch;
 
     switch (providerConfig.kind) {
       case "openai": {
@@ -380,14 +390,33 @@ interface AiSdkModelSnapshot {
   readonly modelId: ModelId;
 }
 
+/**
+ * ChatGPT 计划用量 access（`openai-oauth`）判定。
+ *
+ * 该 access-union 由 provider 包的 GPT 集成（区 1）扩展；此处沿用
+ * `isApiKeyAccess` 的字符串化判型样式，让 Responses 适配（区 2）在区 1
+ * 合入前后行为一致、可独立编译测试。区 1 合入后不需要调整本函数。
+ */
+export function isOpenAiOAuthAccess<T extends { readonly type: string }>(
+  access: T | null | undefined,
+): boolean {
+  return access?.type === "openai-oauth";
+}
+
 function toAiSdkProviderConfig(
   providerId: string,
   config: RegistryProviderConfig,
 ): AiSdkProviderConfig {
   const common = {
-    ...(config.access.type !== "zhipu-account" && config.access.apiKey
-      ? { apiKey: config.access.apiKey }
-      : {}),
+    // 静态 apiKey 只对两个 key 型 access 存在；账号型（zhipu-account、
+    // openai-oauth）不携带任何静态凭据，Bearer 只能来自执行作用域 requestAuth，
+    // 避免序列化配置或回退环境变量时泄漏/误用旧凭据。
+    ...(
+      (config.access.type === "api-key" || config.access.type === "zhipu-coding-plan-api-key") &&
+      config.access.apiKey
+        ? { apiKey: config.access.apiKey }
+        : {}
+    ),
     baseURL: config.api.baseUrl,
     ...(config.api.headers ? { headers: { ...config.api.headers } } : {}),
     providerOptions: { apiFormat: config.api.type },
@@ -411,8 +440,9 @@ function applyModelRequestAuth(
   if (!requestAuth) return providerConfig;
   const staticHeaders = withoutRequestVerificationHeaders(providerConfig.headers);
   // 账号动态身份头必须先清理静态认证头，避免 SDK 优先使用旧凭据。
+  // openai-oauth 与 zhipu-account 同理：ChatGPT 的 Bearer 只来自 requestAuth。
   const headers =
-    providerConfig.access.type === "zhipu-account"
+    providerConfig.access.type === "zhipu-account" || isOpenAiOAuthAccess(providerConfig.access)
       ? withoutModelAuthHeaders(staticHeaders)
       : staticHeaders;
   return {
@@ -1108,4 +1138,23 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * ChatGPT function tool namespace 开关（复审意见 #4）：默认关闭。
+ *
+ * SIWC preview-limitations 对 top-level function tools 的真实接受形式未经
+ * live 验证（GPT-07 关闭前不得默认启用）。值本身即 namespace（如 `zcode`），
+ * 出站 `tools[].name` 会变为 `zcode.<name>`，SSE 回包的 function_call.name
+ * 会还原去前缀。非法值按未设置处理，保持现状 wire 形式。
+ */
+const ENV_CHATGPT_TOOL_NAMESPACE = "ZCODE_CHATGPT_TOOL_NAMESPACE";
+const CHATGPT_TOOL_NAMESPACE_PATTERN = /^[A-Za-z0-9_-]+$/u;
+
+function readChatGptToolNamespaceFlag(env: EnvRecord): string | undefined {
+  const value = env[ENV_CHATGPT_TOOL_NAMESPACE]?.trim();
+  if (!value || !CHATGPT_TOOL_NAMESPACE_PATTERN.test(value)) {
+    return undefined;
+  }
+  return value;
 }
