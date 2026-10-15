@@ -51,8 +51,41 @@ admission. A real SessionPane regression verifies rejection and native payload/d
 preservation. Focused checks passed: metadata service 18, UI/editor/tree 12,
 discussion/context/thread 16, real SessionPane continuity 22 (68 total). Typecheck
 passed; lint 63 existing warnings/0 errors; changed architecture 0 violations.
-Production/isolated GUI verification is in progress; live model/title acceptance,
-actual ODN requisites, PDF layout and AH-05 portability are not claimed.
+Isolated Electron GUI passed: real Host/RPC read/save, three inherited sources,
+preview refresh after a disk edit and durable activation. No model request was
+sent; the saved discussion used a fixture parent and does not prove live inference.
+Screenshots remain local in `.tmp/artifact-context-gui.png` and
+`.tmp/artifact-document-gui.png`.
+
+Installed a ready-to-open example into the existing ODN project:
+`D:\Development\ODN-Foundation-Document-Pilot\harness-title-pilot\docs\title-sheet.md`.
+Five new training files and three scoped passports were added through the metadata
+service (there was no prior project.json). Existing documents, source calculations,
+MCP settings and original states were not overwritten. Logical references were
+adjusted to the parent project's root. Requisites remain explicitly fictional.
+
+Production packaging completed: `node scripts/spec-harness-production.mjs build`
+and `Build-Installer.cmd fast`, code revision `a8a0c5ac`. Packaged GUI repeated the
+same Host/RPC save, three-scope preview, disk refresh and durable activation smoke
+successfully, again with zero model prompts and an isolated profile. The installer
+was not executed; the sole Desktop ZCode shortcut already targets the updated
+`packages/desktop/dist/win-unpacked/ZCode.exe`. Production identity and compiled
+auto-update-off policy are retained. Installer:
+`packages/desktop/dist/ZCode-3.15.1-win-x64.exe`, 170141545 bytes;
+SHA-256 `1ee68dc16242c52f5f48414dc5b999a7aff6fd0f70216937ddc2b467372ff092`.
+
+- [x] MVP passport editor, ancestor collection, explicit activation, native send
+  preparation and ODN training fixture delivered and verified as bounded above.
+- [ ] Live agent edits the title and preserves author prose using actual project
+  requisites; no model request or human acceptance is fabricated by this smoke.
+- [ ] PDF layout, engineering qualification, automatic checks/workflow execution,
+  rename/copy/import and AH-05 portability remain outside this delivery.
+
+Full related-test sweep was not repeated per the user's explicit affected-tests-only
+instruction. Current push uses the completed targeted tests/typecheck/lint/architecture
+instead of rerunning the default hook's locale-wide related-test expansion; permanent
+Git hooks/config are unchanged. Independent review's only blocker (slash-command
+bypass) was repaired and covered by a real SessionPane regression.
 
 ### ChatGPT provider panel repair — 2026-10-15
 
