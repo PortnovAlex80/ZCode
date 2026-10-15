@@ -24,6 +24,20 @@ export const PROJECT_METADATA_TYPES = [
 ] as const;
 export type ProjectMetadataType = (typeof PROJECT_METADATA_TYPES)[number];
 
+/** 描述性步骤；连接、权限及真实执行由现有工具运行时负责。 */
+export interface ProjectMetadataStep {
+  title: string;
+  instruction: string;
+  tool?: {
+    transport: "file" | "mcp" | "rest";
+    connection?: string;
+    operation: string;
+  };
+  input?: string;
+  expected?: string;
+  onFailure?: string;
+}
+
 export interface ProjectMetadataEntry {
   /** 稳定记录 id；仅在首次创建时生成，编辑不变。 */
   id: string;
@@ -38,6 +52,10 @@ export interface ProjectMetadataEntry {
   links: string[];
   /** Методики/правила——名称或链接引用。 */
   methods: string[];
+  instructions?: string;
+  skills?: string[];
+  checklist?: string[];
+  steps?: ProjectMetadataStep[];
   /** 最近一次保存的 ISO-8601 时间。 */
   updatedAt: string;
 }
@@ -47,6 +65,13 @@ export type ProjectMetadataInput = Omit<ProjectMetadataEntry, "id" | "updatedAt"
 
 /** 护照表：键为规范化相对路径（如 `docs/расчёт.md`）。 */
 export type ProjectMetadataEntries = Record<string, ProjectMetadataEntry>;
+
+export interface ProjectMetadataContext {
+  path: string;
+  revision: string;
+  entries: { path: string; entry: ProjectMetadataEntry }[];
+  text: string;
+}
 
 /** 存储损坏：UI 显示明确读错误，而不是崩溃或静默重写。 */
 export class ProjectMetadataCorruptError extends Error {
@@ -62,6 +87,8 @@ export interface IProjectMetadataService {
    * `ProjectMetadataCorruptError`。
    */
   read(params: { workspacePath: string }): Promise<ProjectMetadataEntries>;
+  /** 每次读取当前护照，仅继承根与祖先目录；不读取引用文件或执行工具。 */
+  resolve(params: { workspacePath: string; path: string }): Promise<ProjectMetadataContext>;
   /**
    * 按规范化路径 upsert 一条护照：已有键保留其稳定 `id`。返回写入后的整表。
    * 保存前重读文件，外部手工编辑与未知 top-level 键不被覆盖。

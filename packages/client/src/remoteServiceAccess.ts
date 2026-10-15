@@ -3,6 +3,7 @@ import { ProxyChannel, type IChannelClient } from "@zcode/rpc";
 import {
   IFileService,
   ISpecDocumentService,
+  IProjectMetadataService,
   IMediaPreviewService,
   IGitService,
   IGitCheckpointService,
@@ -60,6 +61,7 @@ import {
 export class RemoteServiceAccess implements IServiceAccessor {
   readonly fileService: IFileService;
   readonly specDocumentService: ISpecDocumentService;
+  readonly projectMetadataService: IProjectMetadataService;
   readonly mediaPreviewService: IMediaPreviewService;
   readonly gitService: IGitService;
   readonly gitCheckpointService: IGitCheckpointService;
@@ -114,6 +116,9 @@ export class RemoteServiceAccess implements IServiceAccessor {
   readonly promptAttachmentTransferService: IPromptAttachmentTransferService;
 
   constructor(channelClient: IChannelClient) {
+    this.projectMetadataService = ProxyChannel.toService<IProjectMetadataService>(
+      channelClient.getChannel(IProjectMetadataService.channelName),
+    );
     this.specDocumentService = ProxyChannel.toService<ISpecDocumentService>(
       channelClient.getChannel(ISpecDocumentService.channelName),
     );

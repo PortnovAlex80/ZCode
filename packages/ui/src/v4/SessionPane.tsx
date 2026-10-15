@@ -356,6 +356,8 @@ export interface SessionPaneProps {
   selectionSideChat?: boolean;
   /** Transform only the first plain-text input of an explicitly bound empty native session. */
   prepareFirstText?: (text: string) => string;
+  /** Resolve explicitly enabled artifact context for every send, before admission. */
+  prepareText?: (text: string) => Promise<string>;
   /** 主会话划词动作只投递到 Side Pane 当前激活的辅助 child。 */
   activeSelectionSideChatSessionId?: string | null;
   workspacePath: string;
@@ -593,6 +595,7 @@ export function SessionPane({
   allowWorkspaceFileRewind = false,
   selectionSideChat = false,
   prepareFirstText,
+  prepareText,
   activeSelectionSideChatSessionId = null,
   workspacePath,
   workspaceIdentity,
@@ -3456,6 +3459,11 @@ export function SessionPane({
       let slashCommand = parseV4VisibleSlashCommand(text, readyAttachments, {
         contextAttachmentCount,
       });
+      if (prepareText && slashCommand && slashCommand.kind !== "planShortcut") {
+        throw new Error(
+          "Artifact context supports ordinary messages and /plan tasks. Use a regular message in this discussion.",
+        );
+      }
 
       // `/plan` 首版只消费纯文本。必须在 provider readiness 和任何 command admission 之前
       // 拒绝附件/context，否则原始 `/plan ...` 会退化成普通 prompt，既绕过产品边界又清空草稿。
@@ -3497,6 +3505,10 @@ export function SessionPane({
             })
           : null;
       if (sessionId && selectionSideSlashCommand) {
+        if (prepareText)
+          throw new Error(
+            "Artifact context cannot be attached to a command that opens another conversation. Use a regular message here.",
+          );
         const created = await handleOpenSelectionSideConversationWithPrompt(
           selectionSideSlashCommand.text,
           options?.telemetrySeed,
@@ -3799,12 +3811,31 @@ export function SessionPane({
         currentFirstInput.queue.items.length === 0 &&
         !firstTextAdmissionSessionIds.current.has(sessionId) &&
         pendingCommandRegistry.list(sessionId).length === 0;
+      // 护照读取可失败；成功之前不占用首次发送标记，重试仍保留文档绑定。
+      const outgoingText = applyFirstText ? preparedFirstText.prepared : effectiveText;
+      const preparedText = prepareText ? await prepareText(outgoingText) : outgoingText;
+      if (prepareText) {
+        const afterPreparation = snapshotRef.current;
+        if (
+          afterPreparation?.sessionId !== sessionId ||
+          (applyFirstText &&
+            (afterPreparation.rows.totalCount !== 0 ||
+              afterPreparation.rows.window.length !== 0 ||
+              afterPreparation.rows.firstRowId !== null ||
+              afterPreparation.queue.items.length !== 0 ||
+              firstTextAdmissionSessionIds.current.has(sessionId) ||
+              pendingCommandRegistry.list(sessionId).length !== 0))
+        )
+          throw new Error(
+            "Discussion changed while preparing artifact context. Review it and send again.",
+          );
+      }
       if (applyFirstText) firstTextAdmissionSessionIds.current.add(sessionId);
 
       const ack = await dispatchSubmissionCommand(
         "sendText",
         {
-          text: applyFirstText ? preparedFirstText.prepared : effectiveText,
+          text: preparedText,
           ...submission,
           ...(options?.requestedDelivery ? { requestedDelivery: options.requestedDelivery } : {}),
           conversationQuotes: options?.conversationQuotes,
@@ -3843,6 +3874,7 @@ export function SessionPane({
     },
     [
       dispatchCommand,
+      prepareText,
       recommendStartPlan,
       baseWorkspaceServices,
       captureAcceptedModelSelection,

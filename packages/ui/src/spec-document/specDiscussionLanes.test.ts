@@ -13,7 +13,12 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import ts from "typescript";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CommandAck, CommandEnvelope, ConversationSnapshot } from "@zcode/shared/zcode-protocol-v4";
+import type {
+  CommandAck,
+  CommandEnvelope,
+  ConversationSnapshot,
+} from "@zcode/shared/zcode-protocol-v4";
+import type { IProjectMetadataService } from "@zcode/services";
 import { SpecDiscussionPane } from "./SpecDiscussionPane.js";
 import {
   changeSpecQuestionDraft,
@@ -27,6 +32,7 @@ const lanes = vi.hoisted(() => ({
   layer: null as unknown as ReturnType<typeof createFakeLayer>,
   sendCommand: null as unknown as (envelope: CommandEnvelope) => Promise<CommandAck>,
   sessionPanes: [] as Record<string, unknown>[],
+  metadataService: null as IProjectMetadataService | null,
 }));
 
 /**
@@ -139,6 +145,11 @@ vi.mock("../v4/SessionPane.js", () => ({
     return createElement("div", { "data-native-composer-stub": String(props.sessionId ?? "") });
   },
 }));
+vi.mock("../hooks/useServices.js", () => ({
+  useOptionalServices: () => ({ projectMetadataService: lanes.metadataService }),
+}));
+// Metadata editor has separate real-component coverage; this suite observes native dispatch.
+vi.mock("./ArtifactMetadataControls.js", () => ({ ArtifactMetadataControls: () => null }));
 
 /** 父会话执行白名单快照：含一个不得进入讨论载荷的额外字段。 */
 const PARENT_CONFIG = {
@@ -206,8 +217,7 @@ function renderDiscussionPane(options: {
     if (!thread) throw new Error("thread disappeared from the durable store");
     return {
       thread,
-      update: (next: SpecThread) =>
-        store.update((current) => mergeSpecThreadUpdate(current, next)),
+      update: (next: SpecThread) => store.update((current) => mergeSpecThreadUpdate(current, next)),
       updateQuestionDraft: (threadId: string, question: string, expected?: string) =>
         store.update((current) => changeSpecQuestionDraft(current, threadId, question, expected)),
       workspacePath: options.workspacePath,
@@ -239,6 +249,7 @@ describe("D-02 three context lanes stay separate at the payload level", () => {
     cleanup();
     localStorage.clear();
     lanes.sessionPanes.length = 0;
+    lanes.metadataService = null;
     lanes.layer = createFakeLayer();
     lanes.layer.seed("parent-1", "live", parentSnapshot("parent-1"));
     sent = [];
@@ -254,6 +265,71 @@ describe("D-02 three context lanes stay separate at the payload level", () => {
     };
   });
 
+  it("enabled native discussion prepares fresh artifact context for subsequent sends without parent history", async () => {
+    const thread: SpecThread = {
+      id: "metadata-native",
+      documentPath: DOCUMENT_PATH,
+      parentSessionId: "parent-1",
+      sessionId: "metadata-child",
+      discussionStartRowId: 1,
+      anchor: ANCHOR,
+      metadataEnabled: true,
+    };
+    let text = "passport revision 1";
+    const resolve = vi.fn(async () => ({ text }));
+    lanes.metadataService = { resolve } as unknown as IProjectMetadataService;
+    lanes.layer.seed("metadata-child", "live", childSnapshot("metadata-child"));
+    const identity = "metadata-native-identity";
+    seedThread(thread, identity, specThreadStorageKey(WORKSPACE_PATH, identity));
+    const { unsubscribe } = renderDiscussionPane({
+      threadId: thread.id,
+      workspacePath: WORKSPACE_PATH,
+      workspaceIdentity: identity,
+    });
+    await waitFor(() => expect(lanes.sessionPanes.at(-1)?.prepareText).toBeTypeOf("function"));
+    const prepare = lanes.sessionPanes.at(-1)!.prepareText as (text: string) => Promise<string>;
+    expect(await prepare("Update title")).toBe("Update title\n\npassport revision 1");
+    text = "passport revision 2";
+    expect(await prepare("Update again")).toBe("Update again\n\npassport revision 2");
+    expect(resolve).toHaveBeenLastCalledWith({
+      workspacePath: WORKSPACE_PATH,
+      path: DOCUMENT_PATH,
+    });
+    expect(sent).toEqual([]);
+    unsubscribe();
+  });
+
+  it("failed metadata resolution blocks restored initial input and retains the saved question", async () => {
+    const thread: SpecThread = {
+      id: "metadata-error",
+      documentPath: DOCUMENT_PATH,
+      parentSessionId: "parent-1",
+      sessionId: "metadata-error-child",
+      anchor: ANCHOR,
+      metadataEnabled: true,
+      initialQuestion: "Preserve this question",
+      executionConfig: { ...PARENT_CONFIG, followupMode: "queue" },
+    };
+    lanes.metadataService = {
+      resolve: vi.fn().mockRejectedValue(new Error("Passport unavailable")),
+    } as unknown as IProjectMetadataService;
+    lanes.layer.seed("metadata-error-child", "live", childSnapshot("metadata-error-child"));
+    const identity = "metadata-error-identity";
+    seedThread(thread, identity, specThreadStorageKey(WORKSPACE_PATH, identity));
+    const { store, unsubscribe } = renderDiscussionPane({
+      threadId: thread.id,
+      workspacePath: WORKSPACE_PATH,
+      workspaceIdentity: identity,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("Passport unavailable"),
+    );
+    expect(sent).toEqual([]);
+    expect(store.get()[0]?.initialQuestion).toBe("Preserve this question");
+    expect(store.get()[0]?.pending).toBeUndefined();
+    unsubscribe();
+  });
+
   it("fresh discussion: createSession carries only the explicit project binding and the whitelisted config; no parent history, no whole document", async () => {
     const thread: SpecThread = {
       id: "thread-fresh-1",
@@ -262,7 +338,11 @@ describe("D-02 three context lanes stay separate at the payload level", () => {
       anchor: ANCHOR,
     };
     lanes.layer.seed("child-1", "live", childSnapshot("child-1"));
-    seedThread(thread, WORKSPACE_IDENTITY, specThreadStorageKey(WORKSPACE_PATH, WORKSPACE_IDENTITY));
+    seedThread(
+      thread,
+      WORKSPACE_IDENTITY,
+      specThreadStorageKey(WORKSPACE_PATH, WORKSPACE_IDENTITY),
+    );
     const { store, unsubscribe } = renderDiscussionPane({
       threadId: thread.id,
       workspacePath: WORKSPACE_PATH,
@@ -497,9 +577,9 @@ describe("D-02 three context lanes stay separate at the payload level", () => {
         parentArgument && ts.isIdentifier(parentArgument),
         `side chat dispatch must name its parent session operand: ${call.getText(source)}`,
       ).toBe(true);
-      expect(
-        parentArgument && ts.isIdentifier(parentArgument) && parentArgument.text,
-      ).toMatch(/^[a-zA-Z]*[Pp]arent[a-zA-Z]*$|^sessionId$/);
+      expect(parentArgument && ts.isIdentifier(parentArgument) && parentArgument.text).toMatch(
+        /^[a-zA-Z]*[Pp]arent[a-zA-Z]*$|^sessionId$/,
+      );
     }
   });
 });

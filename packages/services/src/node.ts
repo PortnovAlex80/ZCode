@@ -379,6 +379,8 @@ import { IPromptAttachmentTransferService } from "./prompt-attachment-transfer/p
 import { createFileService } from "./file/fileService.js";
 import { ISpecDocumentService } from "./spec-document/specDocument.js";
 import { createSpecDocumentService } from "./spec-document/specDocumentService.js";
+import { IProjectMetadataService } from "./spec-document/projectMetadata.js";
+import { createProjectMetadataService } from "./spec-document/projectMetadataService.js";
 import { createMediaPreviewService } from "./media-preview/mediaPreview.js";
 import type { WorkspaceFileSearchFilter } from "./file/workspaceFileMentionFilter.js";
 import { createGitService } from "./git/gitService.js";
@@ -1186,7 +1188,10 @@ export function createLocalServices(options: {
     loginBridge?: () => Promise<void>;
     logoutBridge?: () => Promise<{ revoked: boolean }>;
     refreshModelsBridge?: () => Promise<
-      Exclude<Awaited<ReturnType<IChatGptAccountService["refreshModels"]>>, { result: "unavailable" }>
+      Exclude<
+        Awaited<ReturnType<IChatGptAccountService["refreshModels"]>>,
+        { result: "unavailable" }
+      >
     >;
   };
   /** 闲时任务翻 schedulable 后请求宿主立即唤醒 scheduler（desktop host 注入 parentPort 转发）。 */
@@ -2479,6 +2484,12 @@ export function createLocalServices(options: {
       }),
     )
     .register(IMediaPreviewService, mediaPreviewService)
+    .register(
+      IProjectMetadataService,
+      createProjectMetadataService({
+        desktopLocal: options?.serviceAuthorityMode === "desktop-local",
+      }),
+    )
     .register(
       ICloudContentService,
       createCloudContentService({

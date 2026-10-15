@@ -5,7 +5,9 @@ import type { ConversationSnapshot } from "@zcode/shared/zcode-protocol-v4";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { pendingCommandRegistry, type PendingCommandEntry } from "@/v4/pendingCommandRegistry.js";
-import { SessionPane } from "@/v4/SessionPane.js";
+import { SessionPane, type SessionPaneProps } from "@/v4/SessionPane.js";
+import type { ConversationComposerSendOptions } from "@/v4/ConversationComposer.js";
+import { persistV4ComposerDraft, readV4ComposerDraft } from "@/v4/composer/composerDraftStore.js";
 import { useModelSelectionServiceView } from "@/hooks/useModelSelectionView.js";
 
 type ProjectionState = {
@@ -53,20 +55,7 @@ const scrollFocus = vi.hoisted(() => ({
     onOpenRunningBackgroundWorks?: () => void;
     onSendText: (
       text: string,
-      options?: {
-        heldQueueDisposition?: "clearQueueAndSend" | "keepQueueAndSend";
-        expectedHeldQueueItemIds?: readonly string[];
-        requestedDelivery?: "startNow" | "queue" | "guide";
-        sharedContextRefs?: Array<{ kind: "shared_context_import"; context_id: string }>;
-        submission?: {
-          mode: "build";
-          modelSelection: {
-            providerId: string;
-            modelId: string;
-            options: { reasoningLevel: string };
-          };
-        };
-      },
+      options?: ConversationComposerSendOptions,
     ) => Promise<"sent" | "blocked" | "confirmationRequired">;
   },
   queueProps: null as null | {
@@ -510,7 +499,11 @@ function installMinimalDom() {
   return createMinimalElement(documentMock, "div");
 }
 
-function renderPane(root: Root, sessionId: string | null): void {
+function renderPane(
+  root: Root,
+  sessionId: string | null,
+  props: Partial<SessionPaneProps> = {},
+): void {
   act(() => {
     root.render(
       createElement(
@@ -520,6 +513,7 @@ function renderPane(root: Root, sessionId: string | null): void {
           paneId: "workspace-main",
           sessionId,
           workspacePath: "/workspace",
+          ...props,
         }),
       ),
     );
@@ -567,6 +561,129 @@ afterEach(() => {
 });
 
 describe("SessionPane composer continuity", () => {
+  it("prepares artifact text inside the native send while preserving attachments and submission flags", async () => {
+    const root = createRoot(installMinimalDom());
+    mountedRoots.push(root);
+    const sessionId = "artifact-options";
+    projectionState.current!.snapshot = { ...makeDraftSnapshot(), sessionId };
+    const prepareText = vi.fn(
+      async (text: string) => `${text}\n\nResolved project/file instructions`,
+    );
+    renderPane(root, sessionId, { prepareText, selectionSideChat: true });
+    conversationMock.sendCommand.mockClear();
+    const options: ConversationComposerSendOptions = {
+      requestedDelivery: "startNow",
+      heldQueueDisposition: "keepQueueAndSend",
+      expectedHeldQueueItemIds: ["held-1"],
+      attachments: [
+        { ref: "attachment-ready", fileName: "requisites.txt", mime: "text/plain", bytes: 12 },
+      ],
+      sharedContextRefs: [{ kind: "shared_context_import", context_id: "context-1" }],
+      source: { kind: "pluginUi", pluginId: "title-plugin", toolCallId: "title-call" },
+      submission: {
+        mode: "build",
+        modelSelection: {
+          providerId: "provider-deepseek",
+          modelId: "deepseek-v4-flash",
+          options: { reasoningLevel: "medium" },
+        },
+      },
+    };
+    await act(async () => {
+      await expect(scrollFocus.composerProps!.onSendText("Update title", options)).resolves.toBe(
+        "sent",
+      );
+    });
+    expect(prepareText).toHaveBeenCalledExactlyOnceWith("Update title");
+    expect(conversationMock.sendCommand).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        type: "sendText",
+        sessionId,
+        payload: expect.objectContaining({
+          text: "Update title\n\nResolved project/file instructions",
+          ...options.submission,
+          requestedDelivery: options.requestedDelivery,
+          heldQueueDisposition: options.heldQueueDisposition,
+          expectedHeldQueueItemIds: options.expectedHeldQueueItemIds,
+          attachments: options.attachments,
+          context_refs: options.sharedContextRefs,
+          source: options.source,
+        }),
+      }),
+    );
+  });
+
+  it("refuses failed artifact preparation without admitting or clearing a draft and preserves first document binding on retry", async () => {
+    const root = createRoot(installMinimalDom());
+    mountedRoots.push(root);
+    const storage = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          storage.set(key, value);
+        },
+        removeItem: (key: string) => {
+          storage.delete(key);
+        },
+      },
+    });
+    const sessionId = "artifact-failed-first";
+    const draft = { text: "Preserve author draft", editorStateJson: '{"editor":"author"}' };
+    persistV4ComposerDraft("/workspace", undefined, sessionId, draft);
+    const storedDraft = readV4ComposerDraft("/workspace", undefined, sessionId);
+    projectionState.current!.snapshot = { ...makeDraftSnapshot(), sessionId };
+    const prepareText = vi
+      .fn<(text: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("Corrupt artifact passport"))
+      .mockImplementation(async (text) => `${text}\n\nCurrent metadata`);
+    const prepareFirstText = vi.fn(
+      (text: string) => `Document: docs/title.md\nFragment: original title\n${text}`,
+    );
+    renderPane(root, sessionId, { prepareText, prepareFirstText, selectionSideChat: true });
+    conversationMock.sendCommand.mockClear();
+    await act(async () => {
+      await expect(scrollFocus.composerProps!.onSendText(draft.text)).rejects.toThrow(
+        "Corrupt artifact passport",
+      );
+    });
+    expect(conversationMock.sendCommand).not.toHaveBeenCalled();
+    expect(pendingCommandRegistry.list(sessionId)).toEqual([]);
+    expect(readV4ComposerDraft("/workspace", undefined, sessionId)).toEqual(storedDraft);
+    await act(async () => {
+      await expect(scrollFocus.composerProps!.onSendText(draft.text)).resolves.toBe("sent");
+    });
+    const boundText = `Document: docs/title.md\nFragment: original title\n${draft.text}`;
+    expect(prepareText).toHaveBeenNthCalledWith(1, boundText);
+    expect(prepareText).toHaveBeenNthCalledWith(2, boundText);
+    expect(conversationMock.sendCommand).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        type: "sendText",
+        sessionId,
+        payload: expect.objectContaining({ text: `${boundText}\n\nCurrent metadata` }),
+      }),
+    );
+  });
+
+  it("refuses a typed goal shortcut before native dispatch when artifact context is enabled", async () => {
+    const root = createRoot(installMinimalDom());
+    mountedRoots.push(root);
+    const sessionId = "artifact-typed-goal";
+    projectionState.current!.snapshot = { ...makeDraftSnapshot(), sessionId };
+    const prepareText = vi.fn(async (text: string) => `${text}\n\nMetadata`);
+    renderPane(root, sessionId, { prepareText, selectionSideChat: true });
+    conversationMock.sendCommand.mockClear();
+    await act(async () => {
+      await expect(scrollFocus.composerProps!.onSendText("/goal Fill the title")).rejects.toThrow(
+        "Artifact context supports ordinary messages and /plan tasks",
+      );
+    });
+    expect(prepareText).not.toHaveBeenCalled();
+    expect(conversationMock.sendCommand).not.toHaveBeenCalled();
+    expect(pendingCommandRegistry.list(sessionId)).toEqual([]);
+  });
+
   it.each(["group", "project", "session"] as const)(
     "%s 首发只在 accepted 后报告，打开和后续发送不报告",
     async (source) => {

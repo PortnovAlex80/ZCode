@@ -2,6 +2,16 @@
 
 ## 3.15.1 fork — 2026-10-15
 
+### Added
+
+- Edit artifact passports for files, folders and project roots. Bind instructions,
+  sources, skills, checklists and descriptive file/MCP/REST steps to a document.
+- Opt into artifact context in document discussions, inspect inherited sources and
+  resolve a fresh passport snapshot before each message through the native send path.
+  Metadata errors preserve the draft and prevent incomplete submissions.
+- Include an ODN title-sheet example with MD/TXT inputs, a local skill and a
+  documented manual acceptance procedure using fictional training data.
+
 ### Fixed
 
 - Show ChatGPT Subscription as its own provider in Model settings, including when

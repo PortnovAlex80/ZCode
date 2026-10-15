@@ -33,6 +33,27 @@ recheck those items before restoring their accepted status.
 
 ## Exclusive write assignments
 
+### Artifact harness MD/TXT implementation — 2026-10-15
+
+User requested recording the full concept, implementing it and packaging the fork.
+Scope: [MVP contract](ARTIFACT-HARNESS-MVP.md), AH-01..AH-03 plus instructional
+AH-04 and ODN title-sheet pilot. Root owns integration, native send transform,
+spec/checklist/example/release. Agent `artifact_service` exclusively owns
+`packages/services/src/spec-document/projectMetadata*`. Agent `artifact_ui`
+exclusively owns new artifact metadata UI/hooks/tests and its locale keys.
+Agents do not commit/push. Independent review follows the stable integration.
+Existing running user sessions are preserved; smoke uses an isolated profile.
+
+Implemented: additive v1 metadata fields and root support, service RPC, file/folder
+context action, discussion opt-in/preview and per-send preparation. Core review found
+a typed `/goal` bypass; enabled metadata now refuses unsupported slash actions before
+admission. A real SessionPane regression verifies rejection and native payload/draft
+preservation. Focused checks passed: metadata service 18, UI/editor/tree 12,
+discussion/context/thread 16, real SessionPane continuity 22 (68 total). Typecheck
+passed; lint 63 existing warnings/0 errors; changed architecture 0 violations.
+Production/isolated GUI verification is in progress; live model/title acceptance,
+actual ODN requisites, PDF layout and AH-05 portability are not claimed.
+
 ### ChatGPT provider panel repair — 2026-10-15
 
 User shut ZCode down and requested a dedicated subscription provider with model

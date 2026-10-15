@@ -24,7 +24,8 @@ The user requested recording the next stage: [artifact passports and portable
 working context](ARTIFACT-HARNESS-PLAN.md). This extends U-02 from file/folder
 metadata to artifact-specific skills, sources, checks and explicit portability.
 AH-01..AH-06 describe planned work; the existing storage service is only a partial
-baseline. This request records the concept and does not start implementation.
+baseline. Implementation is now authorized: [MD/TXT MVP](ARTIFACT-HARNESS-MVP.md)
+defines activation, instruction/tool references and the ODN title-sheet pilot.
 
 ### GPT по подписке ChatGPT (план от 2026-10-15)
 

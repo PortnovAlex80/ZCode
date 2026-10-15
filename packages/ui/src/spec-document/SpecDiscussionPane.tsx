@@ -1,12 +1,15 @@
 import { Trash2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button.js";
+import { useOptionalServices } from "@/hooks/useServices.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import { SessionPane } from "@/v4/SessionPane.js";
 import { V4PaneConversationProvider } from "@/v4/V4ConversationContext.js";
 import { useCombinedPresentationVisibility } from "@/v4/usePresentationVisibility.js";
 import { useSpecDiscussion } from "./useSpecDiscussion.js";
 import { documentQuestion, type SpecThread } from "./specThread.js";
+import { ArtifactMetadataControls } from "./ArtifactMetadataControls.js";
+import { prepareArtifactText } from "./artifactContextSend.js";
 import {
   activateNativeDiscussionOwner,
   claimNativeDiscussionOwner,
@@ -41,6 +44,7 @@ export function SpecDiscussionPane({
   onActivate?: () => void;
 }) {
   const question = thread.questionDraft || "";
+  const metadataService = useOptionalServices()?.projectMetadataService;
   // 复核 #2 发现 2/3：讨论可见性 = 宿主（本组件所在文档；popout realm 里即 popout
   // 文档）∧ 宿主侧 visible 判定。下方所有可见期消费（原生准备、telemetry、
   // presentation、interactionDialogs）统一使用该值；非激活保留线程由宿主传
@@ -134,6 +138,15 @@ export function SpecDiscussionPane({
       }}
     >
       <div className="border-b border-border p-3">
+        {metadataService ? (
+          <ArtifactMetadataControls
+            workspacePath={workspacePath}
+            path={thread.documentPath}
+            enabled={thread.metadataEnabled === true}
+            onEnabledChange={(metadataEnabled) => update({ ...thread, metadataEnabled })}
+            disabled={ownedElsewhere || Boolean(thread.pending) || native.dispatching}
+          />
+        ) : null}
         <div className="flex items-center justify-between gap-2">
           <div className="mb-1 text-ui-xs text-foreground-subtle">
             Selected fragment ·{" "}
@@ -223,6 +236,18 @@ export function SpecDiscussionPane({
               selectionSideChat
               isDesktop
               prepareFirstText={(text) => documentQuestion(thread, text, workspacePath)}
+              prepareText={
+                thread.metadataEnabled
+                  ? (text) =>
+                      prepareArtifactText({
+                        service: metadataService,
+                        workspacePath,
+                        path: thread.documentPath,
+                        enabled: thread.metadataEnabled === true,
+                        text,
+                      })
+                  : undefined
+              }
               workspacePath={workspacePath}
               workspaceIdentity={workspaceIdentity}
               readOnly={!nativeInteractive}

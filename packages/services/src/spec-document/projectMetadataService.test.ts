@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -253,4 +253,304 @@ test("non-local hosts cannot touch the passport store", async () => {
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
+});
+
+async function withWorkspace(run: (workspace: string) => Promise<void>): Promise<void> {
+  const workspace = await mkdtemp(join(tmpdir(), "artifact-context-"));
+  try {
+    await run(workspace);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+test("version 1 old entries stay additive and root/procedure fields round-trip without reading references", async () => {
+  await withWorkspace(async (workspace) => {
+    const service = createProjectMetadataService({ desktopLocal: true });
+    await service.save({ workspacePath: workspace, path: "old.txt", entry: sampleEntry() });
+    await service.save({
+      workspacePath: workspace,
+      path: ".",
+      entry: sampleEntry({
+        kind: "folder",
+        instructions: "Use only verified requisites.",
+        skills: ["skills/nonexistent.md"],
+        checklist: ["Mark missing fields"],
+        steps: [
+          {
+            title: "Read requisites",
+            instruction: "Read the source with existing tools.",
+            tool: { transport: "mcp", connection: "odn", operation: "project.read" },
+            input: "Project ID",
+            expected: "Requisites",
+            onFailure: "Stop and report missing data",
+          },
+          {
+            title: "Fill title",
+            instruction: "Preserve author edits.",
+            tool: { transport: "file", operation: "document.edit" },
+          },
+          {
+            title: "Optional service",
+            instruction: "Use only if configured.",
+            tool: { transport: "rest", connection: "existing-odn", operation: "requisites.read" },
+          },
+        ],
+      }),
+    });
+    const fresh = createProjectMetadataService({ desktopLocal: true });
+    const entries = await fresh.read({ workspacePath: workspace });
+    assert.equal(entries["old.txt"]?.instructions, undefined);
+    assert.equal(entries["."]?.steps?.[0]?.tool?.connection, "odn");
+    const context = await fresh.resolve({ workspacePath: workspace, path: "old.txt" });
+    assert.deepEqual(
+      context.entries.map((item) => item.path),
+      [".", "old.txt"],
+    );
+    assert.match(context.text, /skills\/nonexistent\.md/);
+    assert.match(context.text, /not read/);
+    assert.match(context.text, /descriptive/);
+    assert.equal(
+      JSON.parse(await readFile(join(workspace, ".harness/project.json"), "utf8")).version,
+      1,
+    );
+  });
+});
+
+test("resolve inherits only exact folder ancestors in root-folder-file order and isolates workspaces", async () => {
+  await withWorkspace(async (workspace) =>
+    withWorkspace(async (other) => {
+      const service = createProjectMetadataService({ desktopLocal: true });
+      for (const [path, kind] of [
+        [".", "folder"],
+        ["docs", "folder"],
+        ["docs/sub", "folder"],
+        ["docs/sub/title.md", "document"],
+        ["docs/sub/sibling.txt", "document"],
+        ["doc", "folder"],
+        ["other", "folder"],
+      ] as const) {
+        await service.save({
+          workspacePath: workspace,
+          path,
+          entry: sampleEntry({ kind, purpose: path }),
+        });
+      }
+      const context = await service.resolve({
+        workspacePath: workspace,
+        path: ".\\docs\\sub\\title.md",
+      });
+      assert.equal(context.path, "docs/sub/title.md");
+      assert.deepEqual(
+        context.entries.map((item) => item.path),
+        [".", "docs", "docs/sub", "docs/sub/title.md"],
+      );
+      assert.ok(!context.text.includes("sibling.txt"));
+      assert.deepEqual(
+        (await service.resolve({ workspacePath: workspace, path: "." })).entries.map(
+          (item) => item.path,
+        ),
+        ["."],
+      );
+      assert.deepEqual(await service.resolve({ workspacePath: other, path: "docs/sub/title.md" }), {
+        path: "docs/sub/title.md",
+        revision: (await service.resolve({ workspacePath: other, path: "docs/sub/title.md" }))
+          .revision,
+        entries: [],
+        text: "",
+      });
+      await service.save({
+        workspacePath: workspace,
+        path: "docs",
+        entry: sampleEntry({ kind: "document" }),
+      });
+      assert.deepEqual(
+        (
+          await service.resolve({ workspacePath: workspace, path: "docs/sub/title.md" })
+        ).entries.map((item) => item.path),
+        [".", "docs/sub", "docs/sub/title.md"],
+      );
+    }),
+  );
+});
+
+test("context revision is stable, changes on current inherited metadata, and ignores sibling changes", async () => {
+  await withWorkspace(async (workspace) => {
+    const service = createProjectMetadataService({ desktopLocal: true });
+    await service.save({
+      workspacePath: workspace,
+      path: ".",
+      entry: sampleEntry({ kind: "folder", instructions: "First" }),
+    });
+    const first = await service.resolve({ workspacePath: workspace, path: "title.md" });
+    assert.equal(
+      (await service.resolve({ workspacePath: workspace, path: "title.md" })).revision,
+      first.revision,
+    );
+    await service.save({ workspacePath: workspace, path: "sibling.txt", entry: sampleEntry() });
+    assert.equal(
+      (await service.resolve({ workspacePath: workspace, path: "title.md" })).revision,
+      first.revision,
+    );
+    const target = join(workspace, ".harness/project.json");
+    const external = JSON.parse(await readFile(target, "utf8"));
+    external.entries["."].instructions = "Changed externally";
+    await writeFile(target, JSON.stringify(external));
+    const next = await service.resolve({ workspacePath: workspace, path: "title.md" });
+    assert.notEqual(next.revision, first.revision);
+    assert.match(next.text, /Changed externally/);
+  });
+});
+
+test("known invalid fields, root kind and procedure overflow fail without rewriting valid storage", async () => {
+  await withWorkspace(async (workspace) => {
+    const service = createProjectMetadataService({ desktopLocal: true });
+    await service.save({ workspacePath: workspace, path: "title.md", entry: sampleEntry() });
+    const target = join(workspace, ".harness/project.json");
+    const before = await readFile(target, "utf8");
+    const invalid = [
+      { instructions: "x".repeat(8001) },
+      { skills: ["x".repeat(301)] },
+      { checklist: ["\0"] },
+      { steps: [{ title: "", instruction: "Work" }] },
+      {
+        steps: [
+          { title: "Read", instruction: "Work", tool: { transport: "shell", operation: "run" } },
+        ],
+      },
+      { steps: Array.from({ length: 33 }, () => ({ title: "Read", instruction: "Work" })) },
+      { type: "invented" },
+      { kind: "invented" },
+    ];
+    for (const fields of invalid) {
+      await assert.rejects(
+        service.save({
+          workspacePath: workspace,
+          path: "title.md",
+          entry: { ...sampleEntry(), ...fields } as ProjectMetadataInput,
+        }),
+      );
+      assert.equal(await readFile(target, "utf8"), before);
+    }
+    await assert.rejects(
+      service.save({ workspacePath: workspace, path: ".", entry: sampleEntry() }),
+    );
+    for (const fields of invalid) {
+      const corrupt = JSON.parse(before);
+      Object.assign(corrupt.entries["title.md"], fields);
+      await writeFile(target, JSON.stringify(corrupt));
+      await assert.rejects(service.read({ workspacePath: workspace }), ProjectMetadataCorruptError);
+      await assert.rejects(
+        service.resolve({ workspacePath: workspace, path: "title.md" }),
+        ProjectMetadataCorruptError,
+      );
+    }
+  });
+});
+
+test("invalid stored keys cannot inject paths and prototype-named keys remain ordinary entries", async () => {
+  await withWorkspace(async (workspace) => {
+    const service = createProjectMetadataService({ desktopLocal: true });
+    await service.save({ workspacePath: workspace, path: "__proto__", entry: sampleEntry() });
+    const entries = await service.read({ workspacePath: workspace });
+    assert.equal(Object.getPrototypeOf(entries), Object.prototype);
+    assert.equal(Object.hasOwn(entries, "__proto__"), true);
+    const target = join(workspace, ".harness/project.json");
+    const before = await readFile(target, "utf8");
+    for (const key of ["../outside.md", "/outside.md", "C:\\outside.md", "docs//title.md", ""]) {
+      const parsed = JSON.parse(before);
+      parsed.entries = Object.fromEntries([[key, entries["__proto__"]]]);
+      const raw = JSON.stringify(parsed);
+      await writeFile(target, raw);
+      await assert.rejects(service.read({ workspacePath: workspace }), ProjectMetadataCorruptError);
+      await assert.rejects(
+        service.save({ workspacePath: workspace, path: "title.md", entry: sampleEntry() }),
+      );
+      assert.equal(await readFile(target, "utf8"), raw);
+    }
+  });
+});
+
+test("oversized assembled context refuses instead of silently truncating an inherited procedure", async () => {
+  await withWorkspace(async (workspace) => {
+    const service = createProjectMetadataService({ desktopLocal: true });
+    await service.save({
+      workspacePath: workspace,
+      path: ".",
+      entry: sampleEntry({
+        kind: "folder",
+        steps: Array.from({ length: 9 }, (_, index) => ({
+          title: `Step ${index}`,
+          instruction: "x".repeat(8000),
+        })),
+      }),
+    });
+    await assert.rejects(
+      service.resolve({ workspacePath: workspace, path: "title.md" }),
+      /context exceeds/,
+    );
+    assert.equal((await service.read({ workspacePath: workspace }))["."]?.steps?.length, 9);
+  });
+});
+
+test("a linked .harness directory refuses reads and writes without touching the destination", async () => {
+  await withWorkspace(async (workspace) =>
+    withWorkspace(async (outside) => {
+      await writeFile(join(outside, "keep.txt"), "unchanged");
+      await symlink(
+        outside,
+        join(workspace, ".harness"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      const service = createProjectMetadataService({ desktopLocal: true });
+      await assert.rejects(service.read({ workspacePath: workspace }), /Linked/);
+      await assert.rejects(
+        service.resolve({ workspacePath: workspace, path: "title.md" }),
+        /Linked/,
+      );
+      await assert.rejects(
+        service.save({ workspacePath: workspace, path: "title.md", entry: sampleEntry() }),
+        /Linked/,
+      );
+      assert.deepEqual(await readdir(outside), ["keep.txt"]);
+    }),
+  );
+});
+
+test("a linked project.json refuses all operations and leaves its external target untouched", async (context) => {
+  await withWorkspace(async (workspace) =>
+    withWorkspace(async (outside) => {
+      const target = join(outside, "project.json");
+      const raw = JSON.stringify({ version: 1, entries: {} });
+      await writeFile(target, raw);
+      await mkdir(join(workspace, ".harness"));
+      try {
+        await symlink(target, join(workspace, ".harness/project.json"), "file");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EPERM") {
+          context.skip(
+            true,
+            "File symlink creation requires Windows Developer Mode or link privilege.",
+          );
+          return;
+        }
+        throw error;
+      }
+      const service = createProjectMetadataService({ desktopLocal: true });
+      await assert.rejects(service.read({ workspacePath: workspace }), /Linked/);
+      await assert.rejects(
+        service.resolve({ workspacePath: workspace, path: "title.md" }),
+        /Linked/,
+      );
+      await assert.rejects(
+        service.save({ workspacePath: workspace, path: "title.md", entry: sampleEntry() }),
+        /Linked/,
+      );
+      await assert.rejects(
+        service.remove({ workspacePath: workspace, path: "title.md" }),
+        /Linked/,
+      );
+      assert.equal(await readFile(target, "utf8"), raw);
+    }),
+  );
 });

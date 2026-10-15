@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- 文件树行集中维护拖拽、打开方式、Git 状态与上下文菜单交互。 */
 import type { EditorInfo, OpenInEditorRemoteTarget } from "@zcode/shared";
-import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
+import { useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { AlertCircle, ChevronRight, LoaderCircle } from "lucide-react";
 import { TID_WORKSPACE_FILE_TREE_ROW, testId } from "@zcode/shared";
 import { cn } from "@/components/lib/utils.js";
@@ -15,9 +15,13 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu.js";
 import { toast } from "@/components/ui/toast.js";
+import { Dialog } from "@/components/ui/dialog.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useFileContextActions } from "@/hooks/useFileContextActions.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
+import { useOptionalServices } from "@/hooks/useServices.js";
+import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { ArtifactMetadataEditor } from "@/spec-document/ArtifactMetadataEditor.js";
 import { FileDisplayIcon, resolveFileDisplayDescriptor } from "@/lib/fileDisplay.js";
 import { logger } from "@/logger.js";
 import { resolveWorkspaceFileManagerEditor } from "@/lib/workspaceEditorSelection.js";
@@ -95,6 +99,9 @@ export function WorkspaceFileTreeRowView({
   onKeyDown: (event: KeyboardEvent<HTMLDivElement>, row: WorkspaceFileTreeRow) => void;
 }) {
   const platform = usePlatform();
+  const { intl } = useZCodeIntl();
+  const metadataService = useOptionalServices()?.projectMetadataService;
+  const [metadataTarget, setMetadataTarget] = useState<string | null>(null);
   const { isDragging, setIsDragging } = useWorkspaceFileTreeRowDragState();
   const fileActions = useFileContextActions({
     canOpenLocalFileManager,
@@ -104,6 +111,9 @@ export function WorkspaceFileTreeRowView({
   const relativePath = getWorkspaceFileRelativePath(workspacePath, row.path);
   const isDirectory = row.type === "directory";
   const isDeletedFile = isWorkspaceFileTreeDeletedFile(row, gitStatus);
+  const metadataTargetKey = `${workspacePath}\0${relativePath}`;
+  const canEditMetadata = Boolean(metadataService) && !isRemoteWorkspaceFileTree && !isDeletedFile;
+  const metadataOpen = canEditMetadata && metadataTarget === metadataTargetKey;
   const wslFileManagerEditor = resolveWorkspaceFileManagerEditor(installedEditors, remoteTarget);
   const rowStyle = {
     ...style,
@@ -391,8 +401,33 @@ export function WorkspaceFileTreeRowView({
           <ContextMenuItem onSelect={() => dispatchWorkspaceFileAddToChat(workspaceFilePayload)}>
             {contextMenuLabels.addToChat}
           </ContextMenuItem>
+          {canEditMetadata ? (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={() => setMetadataTarget(metadataTargetKey)}>
+                {intl.formatMessage({ id: "artifactMetadata.edit" })}
+              </ContextMenuItem>
+            </>
+          ) : null}
         </ContextMenuContent>
       </ContextMenu>
+      {/* 菜单关闭会卸载 Content；护照编辑器必须由行持有，不能放进菜单内容。 */}
+      <Dialog
+        open={metadataOpen}
+        onOpenChange={(open) => {
+          if (!open) setMetadataTarget(null);
+        }}
+      >
+        {metadataOpen && (
+          <ArtifactMetadataEditor
+            key={metadataTargetKey}
+            workspacePath={workspacePath}
+            path={relativePath}
+            kind={isDirectory ? "folder" : "document"}
+            onClose={() => setMetadataTarget(null)}
+          />
+        )}
+      </Dialog>
     </div>
   );
 }

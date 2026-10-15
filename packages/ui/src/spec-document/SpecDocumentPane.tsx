@@ -78,6 +78,7 @@ import {
   type DocumentPresentationState,
 } from "./specDocumentPresentationState.js";
 import { SpecDocumentPicker } from "./specDocumentPicker.js";
+import { ArtifactMetadataControls } from "./ArtifactMetadataControls.js";
 import {
   SpecPopoutIconButton,
   SpecPopoutRegionPortal,
@@ -126,7 +127,7 @@ function Documents({
   onDocumentOpen,
 }: SpecDocumentPaneProps) {
   const nativeDiscussionWindows = Boolean(useOptionalPlatform()?.openConversationPopout);
-  const { specDocumentService: documentService, fileWatcherService } =
+  const { specDocumentService: documentService, fileWatcherService, projectMetadataService } =
     useServices();
   // Capture this pane's project in every IO request; no shared mutable workspace.
   const documents = useMemo(
@@ -978,6 +979,14 @@ function Documents({
               : "A document operation is in progress…"
           }
         />
+        {document && projectMetadataService ? (
+          <ArtifactMetadataControls
+            key={`${workspacePath}:${document.path}`}
+            workspacePath={workspacePath}
+            path={document.path}
+            disabled={ioPending}
+          />
+        ) : null}
       </div>
       {error ? (
         <div

@@ -57,6 +57,15 @@ export {
 // File service — IFileService is both a type (interface) and value (descriptor)
 export { IFileService } from "./file/file.js";
 export { ISpecDocumentService, type SpecDocumentSnapshot } from "./spec-document/specDocument.js";
+export {
+  IProjectMetadataService,
+  PROJECT_METADATA_TYPES,
+  type ProjectMetadataEntry,
+  type ProjectMetadataInput,
+  type ProjectMetadataEntries,
+  type ProjectMetadataStep,
+  type ProjectMetadataContext,
+} from "./spec-document/projectMetadata.js";
 export { IMediaPreviewService } from "./media-preview/mediaPreview.js";
 export { ICloudContentService } from "#src/cloud-content/cloudContent.js";
 export { IMarketingTouchService } from "#src/marketing-touch/marketingTouch.js";

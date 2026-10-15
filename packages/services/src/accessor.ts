@@ -5,6 +5,7 @@ import type { IPluginUiBridgeService } from "./plugin-ui-bridge/contract.js";
 import type { IPluginUiSamplingService } from "./plugin-ui-bridge/samplingContract.js";
 import type { IPluginUiAppToolsService } from "./plugin-ui-bridge/appToolsContract.js";
 import type { ISpecDocumentService } from "./spec-document/specDocument.js";
+import type { IProjectMetadataService } from "./spec-document/projectMetadata.js";
 
 import type { IFileService } from "./file/file.js";
 import type { IMediaPreviewService } from "./media-preview/mediaPreview.js";
@@ -55,6 +56,7 @@ import type { IConversationShareService } from "./conversation-share/conversatio
 export interface IServiceAccessor {
   readonly fileService: IFileService;
   readonly specDocumentService?: ISpecDocumentService;
+  readonly projectMetadataService?: IProjectMetadataService;
   readonly mediaPreviewService?: IMediaPreviewService;
   readonly cloudContentService?: ICloudContentService;
   readonly marketingTouchService?: IMarketingTouchService;

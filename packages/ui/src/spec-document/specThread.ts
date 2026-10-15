@@ -24,6 +24,8 @@ export interface SpecThread {
   executionConfig?: CommandPayloadMap["createSession"]["config"];
   questionDraft?: string;
   submittedQuestionDraft?: string;
+  /** Explicit opt-in; accepted context stays in native conversation history. */
+  metadataEnabled?: boolean;
 }
 
 export function mergeSpecThreadUpdate(threads: SpecThread[], next: SpecThread): SpecThread[] {
@@ -190,6 +192,7 @@ export function loadSpecThreads(key: string, workspaceKey: string): SpecThread[]
       (item.questionDraft !== undefined && typeof item.questionDraft !== "string") ||
       (item.submittedQuestionDraft !== undefined &&
         typeof item.submittedQuestionDraft !== "string") ||
+      (item.metadataEnabled !== undefined && typeof item.metadataEnabled !== "boolean") ||
       (item.discussionStartRowId !== undefined && !Number.isInteger(item.discussionStartRowId))
     ) {
       throw new Error("Invalid Documents thread binding. No model request was sent.");

@@ -2,6 +2,8 @@
    （specDiscussionRemoveRefusal），文件略超 400 行；与 SpecDocumentPane.tsx 同属
    文档会话控制模块，按既有先例保留在同一文件以避免第二真相来源。 */
 import { useEffect, useState } from "react";
+import { useOptionalServices } from "@/hooks/useServices.js";
+import { prepareArtifactText } from "./artifactContextSend.js";
 import type {
   CommandAck,
   CommandEnvelope,
@@ -45,8 +47,7 @@ export function specDiscussionRemoveRefusal(input: {
   snapshot: ConversationSnapshot | null;
   optimisticCommandCount: number;
 }): string | null {
-  if (input.pending)
-    return "Deletion waits while native command admission is still being checked.";
+  if (input.pending) return "Deletion waits while native command admission is still being checked.";
   if (input.dispatching) return "Deletion waits for the in-flight native command to settle.";
   if (input.sessionId) {
     if (input.projectionStatus !== "live" || !input.snapshot)
@@ -98,7 +99,8 @@ export function useSpecWriteGuard(sessionIds: string[]): {
       if (
         previous?.blocked === blocked &&
         Object.keys(phases).every((id) => previous.phases[id] === phases[id])
-      ) return;
+      )
+        return;
       published = { blocked, phases };
       setGuard(published);
     };
@@ -121,6 +123,7 @@ export function useSpecDiscussion(
   visible = false,
 ) {
   const { layer, sendCommand } = useV4Conversation();
+  const metadataService = useOptionalServices()?.projectMetadataService;
   const [lease, setLease] = useState<SessionLease | null>(null);
   const [error, setError] = useState("");
   const [dispatching, setDispatching] = useState(false);
@@ -264,11 +267,24 @@ export function useSpecDiscussion(
         nativeSessionHasWriters(snapshot)
       )
         return;
+      let prepared: string;
+      try {
+        prepared = await prepareArtifactText({
+          service: metadataService,
+          workspacePath,
+          path: thread.documentPath,
+          enabled: thread.metadataEnabled === true,
+          text: question.trim(),
+        });
+      } catch (cause) {
+        setError(String(cause));
+        return;
+      }
       await dispatch(
         createCommandEnvelope({
           type: "sendText",
           sessionId: thread.sessionId,
-          payload: { text: question.trim() },
+          payload: { text: prepared },
         }),
         { ...thread, submittedQuestionDraft: question },
       );
@@ -330,20 +346,35 @@ export function useSpecDiscussion(
         );
         return;
       }
-      void dispatch(
-        createCommandEnvelope({
-          type: "sendText",
-          sessionId: thread.sessionId,
-          payload: { text: documentQuestion(thread, thread.initialQuestion, workspacePath) },
-        }),
-        {
-          ...thread,
-          discussionStartRowId:
-            thread.discussionStartRowId ?? (snapshot.rows.window.at(-1)?.rowId ?? 0) + 1,
+      // 恢复旧 initialQuestion 路径也使用同一个护照解析器；重放只查询已保存 envelope。
+      setDispatching(true);
+      void prepareArtifactText({
+        service: metadataService,
+        workspacePath,
+        path: thread.documentPath,
+        enabled: thread.metadataEnabled === true,
+        text: documentQuestion(thread, thread.initialQuestion, workspacePath),
+      }).then(
+        (text) =>
+          dispatch(
+            createCommandEnvelope({
+              type: "sendText",
+              sessionId: thread.sessionId!,
+              payload: { text },
+            }),
+            {
+              ...thread,
+              discussionStartRowId:
+                thread.discussionStartRowId ?? (snapshot.rows.window.at(-1)?.rowId ?? 0) + 1,
+            },
+          ),
+        (cause: unknown) => {
+          setError(String(cause));
+          setDispatching(false);
         },
       );
     }
-  }, [thread, dispatching, error, projection.status, snapshot, workspacePath]);
+  }, [thread, dispatching, error, projection.status, snapshot, workspacePath, metadataService]);
   async function reconcile() {
     const envelope = thread.pending;
     if (!envelope || dispatching) return;
