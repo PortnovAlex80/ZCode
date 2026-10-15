@@ -1,5 +1,35 @@
 # UI Render Stability Optimization
 
+## 2026-10-15 document guard and plugin publication repair
+
+The integrated completed-turn cache and linear plugin turn lookup are already present.
+Two additional publication paths still caused unchanged consumers to render on every
+stream frame:
+
+- `useSpecWriteGuard` recreated `{ blocked, phases }` for every subscribed session
+  notification. It now reads all sessions as before, and publishes only a changed
+  control result. Session lease changes always establish a fresh result; disconnection,
+  pending commands, writer/queue changes and phase changes remain observed.
+- The plugin instance store recreated every card's disposition snapshot. It now shares
+  equivalent disposition objects and notifies only when a disposition changes or is
+  removed. Tool/resource events retain their existing independent delivery path.
+
+Regression evidence: the guard test reproduced 200 unnecessary React owner renders
+  before the repair and zero afterwards; the plugin test reproduced 100 unnecessary
+  broadcasts before the repair and zero afterwards. Changed controls, card removals,
+  session isolation and frozen publication inputs are covered.
+
+`node scripts/perf/run-guard-publication-replay.mjs` compares the guard at `c3a256c0`
+with the working tree using a minimal React/jsdom owner, three sessions, 30 warmup
+frames and 1,000 measured frames per trial. Three alternating trials on Node 24.13.1
+recorded baseline/candidate wall times of 95.65/1.46, 62.46/1.21 and 54.64/0.94 ms.
+Each trial recorded 1,000/0 owner renders. Process CPU samples were 156/0, 78/0 and
+47/0 ms; candidate CPU is below the Windows sampling resolution, not literally zero.
+Build/test activity was paused for this measurement; unrelated background services
+were not controlled. These results measure subscription and minimal React publication
+only, not document rendering, Electron startup, layout, frame rate or user-visible
+latency. They do not establish the cause of severe idle-home lag.
+
 ## Background
 
 The 2026-06-27 DevTools trace for the big session branch shows that most of the selected main-thread time is DevTools/Inspector overhead (`CpuProfiler::StartProfiling`, `V8Console::runTask`, `v8::Debugger::*`). Project-attributed self time is much smaller, but the React Components track still shows repeated workspace-level render bursts.

@@ -768,6 +768,14 @@ export const hostLocalMediaPreviewPathAuthorizeResultMessageSchema = z
   })
   .strict();
 
+const hostChatGptBrowserOpenResultSchema = z
+  .object({
+    type: z.literal("chatgpt-browser-open-result"),
+    requestId: nonEmptyStringSchema,
+    ok: z.boolean(),
+  })
+  .strict();
+
 /** main → host：插件 UI 沙箱登记结果（PluginSandboxRegisterResultPayload）。 */
 export const hostPluginSandboxRegisterResultMessageSchema = z
   .object({
@@ -866,6 +874,7 @@ export const hostIncomingMessageSchema = z.discriminatedUnion("type", [
   hostOffPeakRunMessageSchema,
   hostBrowserExecuteResultMessageSchema,
   hostLocalMediaPreviewPathAuthorizeResultMessageSchema,
+  hostChatGptBrowserOpenResultSchema,
   hostPluginSandboxRegisterResultMessageSchema,
   hostCuaPipFocusChangedMessageSchema,
   hostProviderProvisioningExecuteMessageSchema,
@@ -1289,6 +1298,14 @@ export const hostLocalMediaPreviewPathAuthorizeRequestResponseSchema = z
   })
   .strict();
 
+const hostChatGptBrowserOpenRequestSchema = z
+  .object({
+    type: z.literal("chatgpt-browser-open-request"),
+    requestId: nonEmptyStringSchema,
+    url: z.string().url().max(32768),
+  })
+  .strict();
+
 /** host → main：登记已校验的插件 UI HTML。 */
 export const hostPluginSandboxRegisterRequestResponseSchema = z
   .object({
@@ -1446,6 +1463,7 @@ export const hostResponseMessageSchema = z.discriminatedUnion("type", [
   hostFeedbackLogArchiveRequestResponseSchema,
   hostBrowserExecuteRequestResponseSchema,
   hostLocalMediaPreviewPathAuthorizeRequestResponseSchema,
+  hostChatGptBrowserOpenRequestSchema,
   hostPluginSandboxRegisterRequestResponseSchema,
   hostNetworkTelemetryBatchResponseSchema,
   hostProviderProvisioningSourceChangedResponseSchema,

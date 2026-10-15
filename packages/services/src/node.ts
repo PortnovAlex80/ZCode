@@ -1496,10 +1496,22 @@ export function createLocalServices(options: {
     loadCredential: (key) => credentialService.load(key),
     deleteCredential: (key) => credentialService.delete(key),
     ...(options.chatGptAccount?.loginBridge
-      ? { loginBridge: options.chatGptAccount.loginBridge }
+      ? {
+          loginBridge: async () => {
+            await options.chatGptAccount!.loginBridge!();
+            // 文件 watcher 可能尚未建立；登录完成必须主动刷新模型目录。
+            await accountProviderConfigSource.refresh("chatgpt-login");
+          },
+        }
       : {}),
     ...(options.chatGptAccount?.logoutBridge
-      ? { logoutBridge: options.chatGptAccount.logoutBridge }
+      ? {
+          logoutBridge: async () => {
+            const result = await options.chatGptAccount!.logoutBridge!();
+            await accountProviderConfigSource.refresh("chatgpt-logout");
+            return result;
+          },
+        }
       : {}),
   });
   const accountProviderRuntimeLog = createServiceLogger("account-provider-runtime");

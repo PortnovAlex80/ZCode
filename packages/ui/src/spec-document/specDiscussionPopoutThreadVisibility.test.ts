@@ -46,7 +46,7 @@ describe("discussion popout per-thread visibility routing (review 2 / finding 2)
     const asideIndex = source.indexOf('aria-label="Fragment discussions"');
     expect(asideIndex).toBeGreaterThan(-1);
     const wrapperSlice = source
-      .slice(asideIndex, asideIndex + 6000)
+      .slice(asideIndex, source.indexOf("</aside>", asideIndex))
       .replace(/\s+/g, " ");
     expect(wrapperSlice).toContain(
       'thread.id === activeThreadId ? "flex min-h-0 flex-1 flex-col" : "hidden"',

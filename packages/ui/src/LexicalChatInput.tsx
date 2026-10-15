@@ -27,6 +27,7 @@ import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { PresentationDocumentPlugin } from "@/prompt-editor/PresentationDocumentPlugin.js";
 import {
   $createParagraphNode,
   $createTextNode,
@@ -1486,6 +1487,7 @@ export function LexicalChatInput({
   return (
     <div className="relative flex-1">
       <LexicalComposer initialConfig={initialConfig}>
+        <PresentationDocumentPlugin />
         <div className="relative">
           <PlainTextPlugin contentEditable={contentEditable} ErrorBoundary={LexicalErrorBoundary} />
           <HistoryPlugin />

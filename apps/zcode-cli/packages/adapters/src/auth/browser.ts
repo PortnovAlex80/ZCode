@@ -47,7 +47,18 @@ function browserOpenCommand(
   }
 
   if (platform === "win32") {
-    return { executable: "cmd.exe", args: ["/c", "start", "", url] };
+    // cmd /c start 会把 OAuth URL 中的 & 当作命令分隔符，截断 state/PKCE。
+    // URL 作为单引号字面量编码传递，不经过 cmd，也不会展开 $ 或反引号。
+    const script = `Start-Process -FilePath '${url.replaceAll("'", "''")}' -ErrorAction Stop`;
+    return {
+      executable: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+    };
   }
 
   return { executable: "xdg-open", args: [url] };
@@ -66,7 +77,7 @@ function waitForBrowserSpawn(
       settled = true;
       clearTimeout(timeout);
       child.removeAllListeners("error");
-      child.removeAllListeners("spawn");
+      child.removeAllListeners("exit");
       if (result.opened) {
         child.unref();
       }
@@ -76,8 +87,12 @@ function waitForBrowserSpawn(
       settle({ command, opened: true });
     }, timeoutMs);
 
-    child.once("spawn", () => {
-      settle({ command, opened: true });
+    child.once("exit", (code) => {
+      settle(
+        code === 0
+          ? { command, opened: true }
+          : { command, opened: false, reason: `Browser launcher exited with code ${code}.` },
+      );
     });
     child.once("error", (error) => {
       settle({

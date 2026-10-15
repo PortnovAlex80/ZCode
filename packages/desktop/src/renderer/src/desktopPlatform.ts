@@ -3,11 +3,13 @@ import { DesktopCommandIds, buildLocalMediaPreviewUrl, type IPlatformService } f
 
 import { desktopBrowserPlatformBridge } from "./desktopBrowserPlatformBridge.js";
 import { createDesktopPluginSandboxPlatform } from "./plugin-sandbox/desktopPluginSandboxPlatform.js";
+import { openNativeConversationPopout } from "./nativeConversationPopout.js";
 
 export function createDesktopPlatform(options: {
   isLocalDevelopmentRuntime: boolean;
 }): IPlatformService {
   return {
+    openConversationPopout: openNativeConversationPopout,
     canSelectFilePath: true,
     pluginSandbox: createDesktopPluginSandboxPlatform(),
     createLocalMediaPreviewUrl: buildLocalMediaPreviewUrl,

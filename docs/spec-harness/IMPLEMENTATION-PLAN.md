@@ -18,6 +18,27 @@ not competing implementation plans.
 
 ## Goal and the meaning of the fork
 
+### GPT по подписке ChatGPT (план от 2026-10-15)
+
+По запросу пользователя подготовлен [план интеграции ChatGPT subscription](CHATGPT-SUBSCRIPTION-PLAN.md)
+на русском: официальный Sign in with ChatGPT, собственная регистрация ZCode Harness,
+GPT в штатном селекторе и существующий ZCode runtime. Интеграция добавляется в этот
+единственный поддерживаемый fork; отдельный постоянный Preview-продукт не нужен.
+План определяет соблюдение допуска, scopes и лимитов, исключает обходы и не обещает
+нулевой риск блокировки. Задачи GPT-00..GPT-08 находятся в checklist и пока открыты.
+Это документация будущей реализации; текущий runtime gate не изменён.
+
+### Current desktop-window refinement (2026-10-15)
+
+For U-06/U-07, [FLOATING-WINDOWS-REFACTOR-PLAN.md](FLOATING-WINDOWS-REFACTOR-PLAN.md)
+is the current bounded plan, replacing earlier PiP-only/shared-slot requirements.
+The requested chat/discussion windows are native desktop surfaces attached to the
+existing Host, movable across monitors, with explicit UI-state/ownership handoff.
+The 2026-10-13 retirement remains historical: this narrow new work does not restore
+project-window commands or Office/CAD integrations. Earlier references below to those
+retired capabilities do not expand the new task. Implementation and live acceptance
+remain open. Planning does not authorize launch, install, profile access or merge.
+
 Deliver **one maintained ZCODE application**, built directly from this fork, with our
 document workflow, detachable views and native document integrations. Keep the actual
 ZCODE agent engine, providers, permissions, CLI history, workflows and project catalog.
@@ -227,8 +248,8 @@ Do not repeat unrelated suites when no new change or failure justifies it.
 
 ## Windows installer delivery
 
-`Build-Harness.cmd` currently compiles production output for source-checkout launch;
-it does **not** create an installer. Upstream already provides
+`Build-Harness.cmd` must rebuild and stage the current Agent CLI together with official plugins and their native runtime closure before compiling production output for source-checkout launch; its freshness receipt covers CLI sources as well as desktop sources. A UI-only rebuild must not silently retain an old authentication/inference runtime. The complete agent preparation entrypoint must restore plugin dependencies after CLI staging clears the bundle directory.
+It does **not** create an installer. Upstream already provides
 `packages/desktop/scripts/bundle.mjs` and `electron-builder.config.js`, including a
 Windows x64 NSIS target, runtime-dependency validation and artifact-size audit.
 The existing command shape is `pnpm bundle:desktop -- --os win --arch x64`.

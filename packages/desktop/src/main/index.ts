@@ -116,6 +116,7 @@ import {
   type AppShutdownKind,
 } from "./appShutdownPolicy.js";
 import { createPrimaryWindowCoordinator } from "./primaryWindowCoordinator.js";
+import { isNativeConversationPopout } from "./nativeConversationPopouts.js";
 import { createTempTextAttachment } from "./tempTextAttachment.js";
 import { flushMainE2ECoverage } from "./e2eCoverage.js";
 import { resolveStartupWindowBootstrap, type StartupWindowBootstrap } from "./startupWorkspace.js";
@@ -1601,14 +1602,15 @@ function resolveFocusedDesktopZoomLevel(): number {
 
 function getApplicationWindowsExcludingCuaIndicator(): BrowserWindow[] {
   return BrowserWindow.getAllWindows().filter(
-    (win) => !win.isDestroyed() && !windowsCuaOperationIndicator.ownsWindow(win),
+    (win) =>
+      !win.isDestroyed() &&
+      !windowsCuaOperationIndicator.ownsWindow(win) &&
+      !isNativeConversationPopout(win),
   );
 }
 
 function getMainApplicationWindows(): BrowserWindow[] {
-  return getApplicationWindowsExcludingCuaIndicator().filter(
-    (win) => win !== updateStatusWindow,
-  );
+  return getApplicationWindowsExcludingCuaIndicator().filter((win) => win !== updateStatusWindow);
 }
 
 function isUpdateStatusWindowCloseLocked(state: UpdateStatePayload) {

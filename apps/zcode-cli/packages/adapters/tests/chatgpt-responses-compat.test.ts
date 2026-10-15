@@ -67,9 +67,7 @@ describe("ChatGPT Responses body compliance", () => {
       ],
     });
     expect(body.instructions).toBe("You are ZCode.");
-    expect(body.input).toEqual([
-      { role: "user", content: [{ type: "input_text", text: "hi" }] },
-    ]);
+    expect(body.input).toEqual([{ role: "user", content: [{ type: "input_text", text: "hi" }] }]);
   });
 
   it("merges multiple system items and preserves existing instructions", () => {
@@ -91,7 +89,7 @@ describe("ChatGPT Responses body compliance", () => {
     expect(body.input).toEqual([{ role: "developer", content: "dev" }]);
     expect(body.instructions).toBeUndefined();
     const stringInput = sanitizeChatGptResponsesBody({ input: "plain prompt" });
-    expect(stringInput.input).toBe("plain prompt");
+    expect(stringInput.input).toEqual([{ role: "user", content: "plain prompt" }]);
   });
 });
 
@@ -161,28 +159,37 @@ describe("ChatGPT Responses function tool namespace (review remark #4)", () => {
       },
       { toolNamespace: "zcode" },
     );
-    expect(body.tools).toEqual([
-      { type: "function", name: "zcode.get_weather", parameters: { type: "object" } },
-      { type: "function", name: "zcode.already_prefixed", parameters: { type: "object" } },
-      { type: "web_search_preview" },
-    ]);
+    expect(body.tools).toEqual([{ type: "web_search_preview" }]);
     expect(body.tool_choice).toEqual({ type: "function", name: "zcode.get_weather" });
     expect(body.input).toEqual([
+      {
+        type: "additional_tools",
+        role: "developer",
+        tools: [
+          { type: "function", name: "zcode.get_weather", parameters: { type: "object" } },
+          { type: "function", name: "zcode.already_prefixed", parameters: { type: "object" } },
+        ],
+      },
       { type: "function_call", call_id: "call_1", name: "zcode.get_weather", arguments: "{}" },
       // function_call_output 只按 call_id 关联，wire 上无 name 字段，不改写。
       { type: "function_call_output", call_id: "call_1", output: "sunny" },
     ]);
   });
 
-  it("leaves tools untouched when the namespace flag is off (default wire form)", () => {
+  it("sends local tools through additional_tools by default, preserving names and tool choice", () => {
     const body = sanitizeChatGptResponsesBody({
       model: "m",
       input: [],
       tools: [{ type: "function", name: "get_weather", parameters: { type: "object" } }],
       tool_choice: { type: "function", name: "get_weather" },
     });
-    expect(body.tools).toEqual([
-      { type: "function", name: "get_weather", parameters: { type: "object" } },
+    expect(body.tools).toEqual([]);
+    expect(body.input).toEqual([
+      {
+        type: "additional_tools",
+        role: "developer",
+        tools: [{ type: "function", name: "get_weather", parameters: { type: "object" } }],
+      },
     ]);
     expect(body.tool_choice).toEqual({ type: "function", name: "get_weather" });
   });
@@ -301,7 +308,9 @@ describe("ChatGPT Responses function tool namespace (review remark #4)", () => {
     const second = "\nevent: response.completed\ndata: ";
     const third = JSON.stringify({
       type: "response.completed",
-      response: { output: [{ type: "function_call", call_id: "call_1", name: "zcode.get_weather" }] },
+      response: {
+        output: [{ type: "function_call", call_id: "call_1", name: "zcode.get_weather" }],
+      },
     });
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {

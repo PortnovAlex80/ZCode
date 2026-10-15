@@ -1,105 +1,122 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, test } from "vitest";
-import {
-  resolveSpecDocumentWorkspace,
-  type SpecDocumentWorkspaceCandidate,
-} from "./specDocumentWorkspace.js";
+import { createSpecDocumentService } from "../../../services/src/spec-document/specDocumentService.js";
+import { resolveSpecDocumentWorkspace } from "./specDocumentWorkspace.js";
 
-// U-15（活体反馈 2026-10-14）：文档选择器的根必须是「对话所在项目」的 workspace，
-// 不是 ZCODE 托管的对话后备 workspace（启动根）。两个不同的根同时在场时——
-// 启动根（conversation）活跃 + 项目 tab 已打开——必须选中项目根。
-const LAUNCH_ROOT = "C:\\Users\\user\\.zcode\\workspace\\default";
-const PROJECT_ROOT = "D:\\Development\\MyProject";
+const APP_ROOT = "D:\\Development\\ZCode-Harness";
+const A = "D:\\Projects\\A";
+const B = "D:\\Projects\\B";
+const common = {
+  shellWorkspacePath: APP_ROOT,
+  workspaceTabs: [{ workspacePath: APP_ROOT }, { workspacePath: B }, { workspacePath: A }],
+};
 
-function tab(
-  overrides: Partial<SpecDocumentWorkspaceCandidate> = {},
-): SpecDocumentWorkspaceCandidate {
-  return { workspacePath: PROJECT_ROOT, ...overrides };
-}
-
-describe("resolveSpecDocumentWorkspace (U-15 picker root)", () => {
-  test("two different roots: conversation launch root active, project tab open — project root selected", () => {
-    const resolved = resolveSpecDocumentWorkspace({
-      shellWorkspacePath: LAUNCH_ROOT,
-      workspaceTabs: [
-        tab({ workspacePath: LAUNCH_ROOT, workspacePurpose: "conversation" }),
-        tab({ workspacePath: PROJECT_ROOT }),
-      ],
-    });
-    assert.equal(resolved.workspacePath, PROJECT_ROOT);
-    assert.equal(resolved.workspaceIdentity, undefined);
+describe("U-15 conversation-owned document workspace", () => {
+  test("active session metadata wins over shell root and topmost project", () => {
+    assert.deepEqual(
+      resolveSpecDocumentWorkspace({
+        ...common,
+        activeTaskId: "a",
+        activeTaskMeta: { taskId: "a", workspacePath: A },
+      }),
+      { workspacePath: A, sessionId: "a" },
+    );
+    assert.deepEqual(
+      resolveSpecDocumentWorkspace({
+        ...common,
+        activeTaskId: "b",
+        activeTaskMeta: { taskId: "b", workspacePath: B },
+      }),
+      { workspacePath: B, sessionId: "b" },
+    );
   });
-
-  test("project workspace active — stays on the project root and keeps shell identity", () => {
-    const resolved = resolveSpecDocumentWorkspace({
-      shellWorkspacePath: PROJECT_ROOT,
-      shellWorkspaceIdentity: "  ",
-      workspaceTabs: [tab({ workspacePath: LAUNCH_ROOT, workspacePurpose: "conversation" }), tab()],
-    });
-    assert.equal(resolved.workspacePath, PROJECT_ROOT);
-    // 空白 identity 不透传（与 workspaceKey 归一规则一致）。
-    assert.equal(resolved.workspaceIdentity, undefined);
+  test("missing or stale session metadata never falls back to launch root", () => {
+    assert.equal(resolveSpecDocumentWorkspace({ ...common, activeTaskId: "a" }), null);
+    assert.equal(
+      resolveSpecDocumentWorkspace({
+        ...common,
+        activeTaskId: "b",
+        activeTaskMeta: { taskId: "a", workspacePath: A },
+      }),
+      null,
+    );
   });
-
-  test("remote shell workspace keeps its identity untouched", () => {
-    const resolved = resolveSpecDocumentWorkspace({
-      shellWorkspacePath: "/home/dev/repo",
-      shellWorkspaceIdentity: "ssh://host/home/dev/repo",
-      workspaceTabs: [
-        tab({
-          workspacePath: "/home/dev/repo",
-          workspaceIdentity: "ssh://host/home/dev/repo",
-          remoteSessionId: "rs-1",
-        }),
-      ],
-    });
-    assert.deepEqual(resolved, {
-      workspacePath: "/home/dev/repo",
-      workspaceIdentity: "ssh://host/home/dev/repo",
-    });
+  test("focused cross-project pane wins over primary conversation metadata", () => {
+    assert.deepEqual(
+      resolveSpecDocumentWorkspace({
+        ...common,
+        activeTaskId: "a",
+        activeTaskMeta: { taskId: "a", workspacePath: A },
+        focusedBinding: { sessionId: "b", workspaceScope: { workspacePath: B } },
+      }),
+      { workspacePath: B, sessionId: "b" },
+    );
   });
-
-  test("no project tab at all — conversation launch root kept as explicit degradation", () => {
-    const resolved = resolveSpecDocumentWorkspace({
-      shellWorkspacePath: LAUNCH_ROOT,
-      workspaceTabs: [tab({ workspacePath: LAUNCH_ROOT, workspacePurpose: "conversation" })],
-    });
-    assert.equal(resolved.workspacePath, LAUNCH_ROOT);
+  test("remote or unvalidated focus cannot enumerate a local path", () => {
+    for (const focusedBinding of [
+      {
+        sessionId: "remote",
+        workspaceScope: { workspacePath: A, workspaceIdentity: "ssh://host/A" },
+      },
+      { sessionId: "old", workspaceScope: { workspacePath: B }, restoredUnvalidated: true },
+    ])
+      assert.equal(
+        resolveSpecDocumentWorkspace({ ...common, activeTaskId: "a", focusedBinding }),
+        null,
+      );
   });
-
-  test("remote and unavailable project tabs are not candidates", () => {
-    const resolved = resolveSpecDocumentWorkspace({
-      shellWorkspacePath: LAUNCH_ROOT,
-      workspaceTabs: [
-        tab({ workspacePath: LAUNCH_ROOT, workspacePurpose: "conversation" }),
-        tab({
-          workspacePath: "ssh://host/opt/proj",
-          workspaceIdentity: "ssh://host/opt/proj",
-          remoteSessionId: "rs-2",
-        }),
-        tab({ workspacePath: "E:\\Gone", availability: "unavailable-local-directory" }),
-      ],
-    });
-    assert.equal(resolved.workspacePath, LAUNCH_ROOT);
+  test("draft uses its selected project, not another project tab", () => {
+    assert.deepEqual(
+      resolveSpecDocumentWorkspace({ ...common, shellWorkspacePath: A, activeTaskId: null }),
+      { workspacePath: A, sessionId: null },
+    );
   });
-
-  test("multiple project tabs — the topmost (most recently opened) wins", () => {
-    const resolved = resolveSpecDocumentWorkspace({
-      shellWorkspacePath: LAUNCH_ROOT,
-      workspaceTabs: [
-        tab({ workspacePath: LAUNCH_ROOT, workspacePurpose: "conversation" }),
-        tab({ workspacePath: "D:\\Second" }),
-        tab({ workspacePath: PROJECT_ROOT }),
-      ],
-    });
-    assert.equal(resolved.workspacePath, "D:\\Second");
+  test("managed conversation draft does not guess a project", () => {
+    assert.equal(
+      resolveSpecDocumentWorkspace({
+        ...common,
+        activeTaskId: null,
+        workspaceTabs: [
+          { workspacePath: APP_ROOT, workspacePurpose: "conversation" },
+          { workspacePath: A },
+        ],
+      }),
+      null,
+    );
   });
-
-  test("unknown active tab (not in the list) keeps current behavior", () => {
-    const resolved = resolveSpecDocumentWorkspace({
-      shellWorkspacePath: "D:\\Standalone",
-      workspaceTabs: [tab({ workspacePath: LAUNCH_ROOT, workspacePurpose: "conversation" }), tab()],
-    });
-    assert.equal(resolved.workspacePath, "D:\\Standalone");
+  test("real picker IO resolves A and B while process cwd stays in the application repo", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "spec-picker-project-binding-"));
+    const a = join(directory, "project-a");
+    const b = join(directory, "project-b");
+    const cwd = process.cwd();
+    try {
+      await mkdir(join(a, "docs"), { recursive: true });
+      await mkdir(join(b, "notes"), { recursive: true });
+      await writeFile(join(a, "docs", "selected.md"), "A document");
+      await writeFile(join(b, "notes", "selected.txt"), "B document");
+      const service = createSpecDocumentService({ desktopLocal: true });
+      const workspaceTabs = [{ workspacePath: cwd }, { workspacePath: b }, { workspacePath: a }];
+      for (const [taskId, workspacePath, expected, content] of [
+        ["a", a, "docs/selected.md", "A document"],
+        ["b", b, "notes/selected.txt", "B document"],
+      ] as const) {
+        const target = resolveSpecDocumentWorkspace({
+          shellWorkspacePath: cwd,
+          workspaceTabs,
+          activeTaskId: taskId,
+          activeTaskMeta: { taskId, workspacePath },
+        });
+        assert.ok(target);
+        assert.notEqual(target.workspacePath, cwd);
+        assert.deepEqual(await service.list(target), [expected]);
+        assert.equal((await service.read({ ...target, path: expected })).content, content);
+      }
+      assert.equal(process.cwd(), cwd);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

@@ -54,7 +54,7 @@ export interface ChatGptResponsesCompatFetchOptions {
    * （GPT-07 关闭前不开启）：启用后出站 `tools[].name`、`tool_choice.name`
    * 与 input 中 function_call 项会加 `"<namespace>."` 前缀，SSE 回包里的
    * `function_call.name` 会去前缀还原，AI SDK 才能匹配本地工具。
-   * 默认 undefined = 不改写，按现状发送 top-level function tools。
+   * 默认使用 additional_tools input item，保持本地工具名称与调用历史一致。
    */
   readonly toolNamespace?: string;
 }
@@ -79,7 +79,8 @@ export function patchResponsesRequestInit(
   init: RequestInit | undefined,
   options: ChatGptResponsesCompatFetchOptions = {},
 ): RequestInit | undefined {
-  const method = init?.method ?? (typeof input !== "string" && "method" in input ? input.method : "GET");
+  const method =
+    init?.method ?? (typeof input !== "string" && "method" in input ? input.method : "GET");
   if (method.toUpperCase() !== "POST") {
     return init;
   }
@@ -126,7 +127,24 @@ export function sanitizeChatGptResponsesBody(
   if (options.toolNamespace) {
     applyFunctionToolNamespace(result, options.toolNamespace);
   }
+  // SIWC 不接受顶层 function/custom 定义；additional_tools 是官方支持的
+  // 输入类型，保留名称可直接复用 SDK 的 tool call/result 与多轮回放。
+  moveLocalToolsToInput(result);
   return result;
+}
+
+function moveLocalToolsToInput(body: Record<string, unknown>): void {
+  if (typeof body.input === "string") {
+    body.input = [{ role: "user", content: body.input }];
+  }
+  if (!Array.isArray(body.tools)) return;
+  const localTools = body.tools.filter(
+    (tool) => isRecord(tool) && (tool.type === "function" || tool.type === "custom"),
+  );
+  if (localTools.length === 0) return;
+  body.tools = body.tools.filter((tool) => !localTools.includes(tool));
+  const input = Array.isArray(body.input) ? body.input : [];
+  body.input = [{ type: "additional_tools", role: "developer", tools: localTools }, ...input];
 }
 
 /**
@@ -152,8 +170,10 @@ function moveSystemInputItemsToInstructions(body: Record<string, unknown>): void
       ? body.instructions
       : undefined;
   body.input = input;
-  body.instructions = [...(existingInstructions ? [existingInstructions] : []), ...systemTexts]
-    .join("\n\n");
+  body.instructions = [
+    ...(existingInstructions ? [existingInstructions] : []),
+    ...systemTexts,
+  ].join("\n\n");
 }
 
 function readInputItemText(content: unknown): string | undefined {

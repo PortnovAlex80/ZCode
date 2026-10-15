@@ -22,6 +22,8 @@ import type {
   ConversationSnapshot,
 } from "@zcode/shared/zcode-protocol-v4";
 import { ServiceProvider } from "../hooks/useServices.js";
+import { PlatformProvider } from "../hooks/usePlatform.js";
+import type { IPlatformService } from "@zcode/shared";
 import { SpecDocumentPane } from "./SpecDocumentPane.js";
 import { getSpecThreadStore, type SpecThread } from "./specThread.js";
 import { specThreadStorageKey } from "./nativeDiscussionHandoff.js";
@@ -212,6 +214,8 @@ interface RenderOptions {
   activeThreadId?: string | null;
   path?: string;
   parentSessionId?: string | null;
+  platform?: IPlatformService;
+  discussionMode?: "floating" | "docked";
 }
 
 function renderDocumentPane(options: RenderOptions, documents = createDocumentsService()) {
@@ -222,10 +226,10 @@ function renderDocumentPane(options: RenderOptions, documents = createDocumentsS
     editing: options.editing ?? false,
     discussionsVisible: options.discussionsVisible ?? false,
     activeThreadId: options.activeThreadId ?? null,
+    discussionMode: options.discussionMode ?? "docked",
   };
   writeDocumentPresentation(key, presentation);
-  const view = render(
-    createElement(ServiceProvider, {
+  const content = createElement(ServiceProvider, {
       services: {
         specDocumentService: documents.service,
         fileWatcherService: createWatcher().stub,
@@ -236,8 +240,10 @@ function renderDocumentPane(options: RenderOptions, documents = createDocumentsS
         parentSessionId: options.parentSessionId ?? null,
         onClose: () => {},
       }),
-    }),
-  );
+    });
+  const view = render(options.platform
+    ? createElement(PlatformProvider, { platform: options.platform, children: content })
+    : content);
   return { view, documents, key };
 }
 
@@ -296,6 +302,36 @@ describe("U-10 edit/view toggling keeps rendering and discussions intact", () =>
         ) => callback({ mode: "exclusive" }),
       },
     });
+  });
+
+  it("desktop expand opens a native discussion window without internal resize constraints", async () => {
+    const child = document.implementation.createHTMLDocument("discussion");
+    const closed = new Set<() => void>();
+    const openConversationPopout = vi.fn(async () => ({
+      document: child, innerWidth: 800, innerHeight: 700,
+      close: () => { for (const listener of Array.from(closed)) listener(); },
+      addEventListener: (_event: string, listener: () => void) => { closed.add(listener); },
+      removeEventListener: (_event: string, listener: () => void) => { closed.delete(listener); },
+    }));
+    renderDocumentPane({
+      identity: "native-discussion-window", discussionsVisible: true, discussionMode: "floating",
+      platform: { openConversationPopout } as unknown as IPlatformService,
+    });
+    const expand = await screen.findByRole("button", { name: "Вынести дискуссию в окно" });
+    expect(screen.queryByRole("button", { name: "Dock discussion" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Float discussion" })).toBeNull();
+    const aside = document.querySelector('aside[aria-label="Fragment discussions"]')!;
+    fireEvent.click(expand);
+    await waitFor(() => expect(child.querySelector("aside")).toBe(aside));
+    expect(openConversationPopout).toHaveBeenCalledOnce();
+    expect((aside as HTMLElement).style.width).toBe("");
+    expect((aside as HTMLElement).style.height).toBe("");
+    expect(child.querySelector('[aria-label="Move discussion"]')).toBeNull();
+    expect(child.querySelector('[aria-label="Resize discussion"]')).toBeNull();
+    expect(child.querySelector('[aria-label="Resize discussion panel"]')).toBeNull();
+    const restore = child.querySelector('[data-spec-popout-control="restore"]')!;
+    fireEvent(restore, new MouseEvent("click", { bubbles: true }));
+    await waitFor(() => expect(document.querySelector('aside[aria-label="Fragment discussions"]')).toBe(aside));
   });
 
   it("mode-switch × discussions-visible matrix: rendered view, aside, toggles, no alert, no unmount", async () => {

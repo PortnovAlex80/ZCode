@@ -653,6 +653,21 @@ export type CuaOsSupport =
  * 业务服务（文件、终端、凭据等）走 IServiceAccessor 的 RPC 通道。
  */
 export interface IPlatformService {
+  /** Native same-origin presentation window. Existing renderer/Host retain all state. */
+  openConversationPopout?(options: {
+    id: string;
+    title: string;
+    width: number;
+    height: number;
+  }): Promise<{
+    /** Browser Document; opaque to the node-only shared package. */
+    document: unknown;
+    innerWidth: number;
+    innerHeight: number;
+    close(): void;
+    addEventListener(type: "pagehide", listener: () => void): void;
+    removeEventListener(type: "pagehide", listener: () => void): void;
+  }>;
   /** Optional native panel capability; Web and remote hosts retain their existing surface. */
   specWindows?: SpecWindowBridge;
   /** 当前平台的文件选择框是否能返回 agent 可访问的本地绝对路径 */

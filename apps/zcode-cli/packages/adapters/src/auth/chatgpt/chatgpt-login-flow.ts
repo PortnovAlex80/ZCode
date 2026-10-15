@@ -2,11 +2,11 @@ import { isZCodeFileLockTimeoutError } from "@zcode/shared";
 import { withFileLock } from "@zcode/shared/node";
 import type { SharedZCodeCredentialStore } from "../shared-credentials.js";
 import { openUrlInBrowser, type BrowserOpenResult } from "../browser.js";
-import { MCP_OAUTH_CALLBACK_DENIED_ERROR_CODE, createLocalhostOAuthCallbackServer } from "../localhost-callback.js";
 import {
-  CHATGPT_OAUTH_CALLBACK_PATH,
-  CHATGPT_CREDENTIAL_KEYS,
-} from "./chatgpt-oauth-protocol.js";
+  MCP_OAUTH_CALLBACK_DENIED_ERROR_CODE,
+  createLocalhostOAuthCallbackServer,
+} from "../localhost-callback.js";
+import { CHATGPT_OAUTH_CALLBACK_PATH, CHATGPT_CREDENTIAL_KEYS } from "./chatgpt-oauth-protocol.js";
 import { verifyChatGptIdToken } from "./chatgpt-id-token.js";
 import { computePkceCodeChallenge, createPkceVerifier, createRandomToken } from "./pkce.js";
 import {
@@ -25,7 +25,6 @@ import {
 import {
   clearChatGptCredentialRecordIfUnchanged,
   deleteChatGptCachedModels,
-  readChatGptCachedModels,
   readChatGptClientId,
   readChatGptCredentialRecord,
   readChatGptCredentialSnapshot,
@@ -110,6 +109,8 @@ export async function runChatGptLogin(options: ChatGptLoginOptions): Promise<Cha
     callbackPath: CHATGPT_OAUTH_CALLBACK_PATH,
     state,
   });
+  const callbackWait = withTimeout(callbackServer.waitForCallback(), timeoutMs);
+  callbackWait.promise.catch(() => undefined);
   try {
     const authorizeUrl = buildChatGptAuthorizeUrl(endpoints.authorizeUrl, {
       redirectUri: callbackServer.callbackUrl,
@@ -127,13 +128,18 @@ export async function runChatGptLogin(options: ChatGptLoginOptions): Promise<Cha
     // 处理者（否则 unhandled rejection），同时消除回调与订阅之间的竞态。
     // 立即附加 no-op catch 只用于消除「outer promise 已拒绝、await 尚未执行」的
     // 空窗；真正的错误仍由下方 await 传播。
-    const callbackPromise = withTimeout(callbackServer.waitForCallback(), timeoutMs);
-    callbackPromise.catch(() => undefined);
+    const callbackPromise = callbackWait.promise;
 
     let browser: BrowserOpenResult | undefined;
     if (!options.noBrowser) {
       const openBrowser = options.openBrowser ?? ((url: string) => openUrlInBrowser(url));
       browser = await openBrowser(authorizeUrl);
+      if (!browser.opened) {
+        throw new ChatGptOAuthError(
+          "chatgpt_browser_open_failed",
+          "Could not open the system browser. Check your default browser and try again.",
+        );
+      }
     }
 
     const callback = await callbackPromise;
@@ -180,7 +186,10 @@ export async function runChatGptLogin(options: ChatGptLoginOptions): Promise<Cha
     );
     const scopes = parseGrantedScopes(tokenResponse);
     if (!tokenResponse.id_token) {
-      throw new ChatGptOAuthError("chatgpt_id_token_missing", "The token response has no id_token.");
+      throw new ChatGptOAuthError(
+        "chatgpt_id_token_missing",
+        "The token response has no id_token.",
+      );
     }
     const verified = await verifyChatGptIdToken({
       idToken: tokenResponse.id_token,
@@ -211,15 +220,18 @@ export async function runChatGptLogin(options: ChatGptLoginOptions): Promise<Cha
     // 先持久化签发 client_id（logout 后保留，官方要求重登录复用），再写会话记录；
     // 各自是独立原子事务，崩溃最多停留在「已登录 client、无会话」= 未登录状态。
     await options.store.save(CHATGPT_CREDENTIAL_KEYS.clientId, clientId);
+    // 旧账号的目录不能授予新会话模型；无计划 scope 时不得请求目录。
+    await deleteChatGptCachedModels(options.store);
     await writeChatGptCredentialRecord(options.store, record);
-
-    const models = await fetchAndCacheModels({
-      endpoints,
-      accessToken: record.accessToken,
-      store: options.store,
-      fetchImpl,
-      fallback: await readChatGptCachedModels(options.store),
-    });
+    const models = hasChatGptTokenSharingScope(scopes)
+      ? await fetchAndCacheModels({
+          endpoints,
+          accessToken: record.accessToken,
+          store: options.store,
+          fetchImpl,
+          fallback: null,
+        })
+      : [];
 
     return {
       account: {
@@ -258,6 +270,7 @@ export async function runChatGptLogin(options: ChatGptLoginOptions): Promise<Cha
     }
     throw error;
   } finally {
+    callbackWait.dispose();
     await callbackServer.close().catch(() => undefined);
   }
 }
@@ -283,7 +296,9 @@ export interface ChatGptLogoutResult {
  * 对已失效 token 同样返回 200）；网络失败按官方建议做有界重试，重试仍失败不阻止
  * 本地登出（用户可在 ChatGPT 设置中断开应用）。client/host 标识保留供重登录复用。
  */
-export async function runChatGptLogout(options: ChatGptLogoutOptions): Promise<ChatGptLogoutResult> {
+export async function runChatGptLogout(
+  options: ChatGptLogoutOptions,
+): Promise<ChatGptLogoutResult> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const sleep =
     options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -294,12 +309,14 @@ export async function runChatGptLogout(options: ChatGptLogoutOptions): Promise<C
     return { revoked: false, credentialsPath: options.store.filePath };
   }
 
+  let logoutSnapshotRaw: string = snapshotBeforeLock.raw;
   const revoked = await withFileLock(
     resolveChatGptRefreshLockPath(options.store.filePath),
     async () => {
       // 锁内重读：等锁期间 refresh 可能已轮换，必须撤销最新的 refresh token。
       const snapshot = await readChatGptCredentialSnapshot(options.store);
       if (!snapshot) return false;
+      logoutSnapshotRaw = snapshot.raw;
       if (!snapshot.record.refreshToken) return false;
       for (let attempt = 0; attempt <= REVOCATION_RETRY_DELAYS_MS.length; attempt += 1) {
         try {
@@ -331,10 +348,9 @@ export async function runChatGptLogout(options: ChatGptLogoutOptions): Promise<C
 
   // generation 守卫清空：只删除本进程观察到的会话版本；等锁期间被并行登录替换的
   // 新会话不受影响（logout 与 login 罕见并发时以用户最新动作获胜）。
-  const snapshot = await readChatGptCredentialSnapshot(options.store);
-  if (snapshot) {
-    await clearChatGptCredentialRecordIfUnchanged(options.store, snapshot.raw);
-    await deleteChatGptCachedModels(options.store).catch(() => undefined);
+  if (logoutSnapshotRaw) {
+    const cleared = await clearChatGptCredentialRecordIfUnchanged(options.store, logoutSnapshotRaw);
+    if (cleared) await deleteChatGptCachedModels(options.store).catch(() => undefined);
   }
   return { revoked, credentialsPath: options.store.filePath };
 }
@@ -370,9 +386,13 @@ async function fetchAndCacheModels(input: {
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): { promise: Promise<T>; dispose(): void } {
+  let timer: ReturnType<typeof setTimeout>;
+  const result = new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => {
       const error = new Error(
         "ChatGPT sign-in timed out waiting for the authorization callback.",
       ) as Error & { code: string };
@@ -390,4 +410,5 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
       },
     );
   });
+  return { promise: result, dispose: () => clearTimeout(timer) };
 }

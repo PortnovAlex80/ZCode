@@ -53,7 +53,7 @@ export async function readChatGptAccountProviderOverlay(
   const modelsRaw = await reader.loadCredential(CHATGPT_CREDENTIAL_KEYS.models).catch(() => null);
   const models = parseChatGptCachedModelsJson(modelsRaw);
   return new ProviderConfig({
-    access: new OpenAiOAuthAccessConfig({ entitled: true }),
+    access: new OpenAiOAuthAccessConfig({ entitled: snapshot.planEnabled }),
     // 空目录是合法结果（计划 §3 备注 5）：没有模型时 Provider 从 Registry 退出，
     // 不用 seed 名单顶替；Settings 视图仍能展示 Provider 本身。
     ...(models ? { builtinModelIds: models.map((model) => model.slug) } : {}),
@@ -129,7 +129,11 @@ export function createChatGptAwareAccountProviderSource(
       return snapshot;
     },
     async refresh(reason = "explicit") {
-      const base = await (options.source.refresh?.(reason) ?? options.source.read());
+      // 本地 ChatGPT 变更/上游通知只需重投影；再次刷新上游会形成
+      // onDidChange -> refresh -> onDidChange 回环，并触发无关 Z.ai 网络查询。
+      const base = await (reason.startsWith("chatgpt-")
+        ? options.source.read()
+        : (options.source.refresh?.(reason) ?? options.source.read()));
       const snapshot = await withChatGptOverlay(base);
       emitIfChanged(snapshot, reason);
       return snapshot;
@@ -147,12 +151,13 @@ export function createChatGptAwareAccountProviderSource(
       watcher?.close();
       watcher = undefined;
       listeners.clear();
+      disposeBaseSubscription();
       options.source.dispose?.();
     },
   };
 
   // Host 侧订阅 base 变化（settings/config 驱动的 zhipu 刷新）→ 重投影并按需广播。
-  options.source.onDidChange((reason) => {
+  const disposeBaseSubscription = options.source.onDidChange((reason) => {
     if (disposed) return;
     void source.refresh(`chatgpt-overlay:${reason}`).catch(() => undefined);
   });

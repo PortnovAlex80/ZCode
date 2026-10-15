@@ -1,5 +1,13 @@
 # Tool Change Chain Spec
 
+## ChatGPT subscription tools (2026-10-15)
+
+For SIWC HTTP Responses, the adapter moves local function/custom definitions into
+an `additional_tools` developer input item, as required by the official preview
+contract. Existing names, arguments, call IDs, permissions, local execution and
+tool-result history are preserved. No hosted MCP or tool_search is introduced.
+Regression: assert the actual outbound body and replay a local tool call/result.
+
 ## 工具内部模型请求的会话归因（2026-09-30）
 
 WebSearch、WebFetch processing、ReadSessionContext 的内部模型请求继承发起工具的宿主

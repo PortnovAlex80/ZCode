@@ -5,6 +5,7 @@ import type { UtilityProcess as ElectronUtilityProcess } from "electron";
 import { HostMessageTypes, InternalChannels, PlatformChannels, type Locale } from "@zcode/shared";
 import { scheduleArmsBrowserPerfLoadNudge } from "./armsBrowserPerfLoadNudge.js";
 import { createBrowserWindow } from "./desktopWindowChrome.js";
+import { installNativeConversationPopouts } from "./nativeConversationPopouts.js";
 import type { HostInitMessage, WindowBootstrapOptions } from "./desktopHostProcess.js";
 import type { StartupWorkspaceWarmupTarget } from "./startupWorkspace.js";
 import { handleDarwinWindowCloseRequest } from "./desktopDarwinCloseBehavior.js";
@@ -89,6 +90,7 @@ export function createWindow(options: {
     resolveBrowserViewOwner: options.resolveBrowserViewOwner,
   });
   const label = `local-${win.webContents.id}`;
+  installNativeConversationPopouts(win, () => options.forceQuitRef.current);
 
   if (options.persistWindowSize) {
     attachDesktopWindowSizePersistence(win, options.persistWindowSize, (error) => {
@@ -98,6 +100,7 @@ export function createWindow(options: {
 
   if (process.platform === "darwin") {
     win.on("close", (event) => {
+      if (event.defaultPrevented) return;
       if (
         handleDarwinWindowCloseRequest({
           win,
@@ -111,6 +114,7 @@ export function createWindow(options: {
     });
   } else if (options.handleBeforeClose) {
     win.on("close", (event) => {
+      if (event.defaultPrevented) return;
       if (options.handleBeforeClose?.(win, label)) {
         event.preventDefault();
       }

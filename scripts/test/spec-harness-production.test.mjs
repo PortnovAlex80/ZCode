@@ -36,6 +36,7 @@ test("receipt refuses altered lazy chunks and changed sources before launch", as
       "pnpm-workspace.yaml",
       "scripts/build-time-config.mjs",
       "scripts/spec-harness-production.mjs",
+      "scripts/build-desktop-agent-cli.mjs",
     ]) {
       await writeFile(join(directory, file), "source");
     }
@@ -50,6 +51,11 @@ test("receipt refuses altered lazy chunks and changed sources before launch", as
         outputs: await outputHashes(directory),
       }),
     );
+    await validateProductionBuild({ directory, manifest });
+    const authSource = join(directory, "apps/zcode-cli/auth.ts");
+    await writeFile(authSource, "changed authentication runtime");
+    await assert.rejects(validateProductionBuild({ directory, manifest }), /stale/);
+    await rm(authSource);
     await validateProductionBuild({ directory, manifest });
     await writeFile(lazy, "altered");
     await assert.rejects(validateProductionBuild({ directory, manifest }), /output tree changed/);

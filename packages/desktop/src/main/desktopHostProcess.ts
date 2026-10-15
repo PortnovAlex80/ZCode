@@ -1,4 +1,6 @@
 import { ingestToolExecResource } from "./desktopResourceTelemetry.js";
+import { launchChatGptBrowser } from "./chatGptBrowserLauncher.js";
+import { shell } from "electron";
 import { ingestMcpResourceSamples } from "./processResourceMcpTelemetrySource.js";
 /* eslint-disable max-lines -- host process 统一处理 main↔host 生命周期、日志、ZCode Agent，拆分前先保持跨进程消息收口。 */
 import {
@@ -323,6 +325,20 @@ export function spawnHostProcess(
 
     if (result.data.type === HostResponseTypes.DatabaseStartupState) {
       databaseStartupRelay.receive(result.data.state);
+      return;
+    }
+
+    if (result.data.type === HostResponseTypes.ChatGptBrowserOpenRequest) {
+      const request = result.data;
+      void launchChatGptBrowser(request.url, (url) => shell.openExternal(url))
+        .then((ok) => {
+          child.postMessage({
+            type: HostMessageTypes.ChatGptBrowserOpenResult,
+            requestId: request.requestId,
+            ok,
+          });
+        })
+        .catch(() => undefined);
       return;
     }
 

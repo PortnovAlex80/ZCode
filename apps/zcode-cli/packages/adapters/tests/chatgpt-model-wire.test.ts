@@ -182,7 +182,9 @@ function bindChatGptModel(execution: AiSdkModelExecution) {
   });
 }
 
-function streamChatGptRequest(resolved: ReturnType<ReturnType<AiSdkModelExecution["bindModel"]>["resolveRequest"]>) {
+function streamChatGptRequest(
+  resolved: ReturnType<ReturnType<AiSdkModelExecution["bindModel"]>["resolveRequest"]>,
+) {
   return streamText(
     createStreamTextOptions({
       includeModelIO: false,
@@ -243,14 +245,17 @@ describe("ChatGPT (openai-oauth) Responses wire contract", () => {
     expect(body.include).toContain("reasoning.encrypted_content");
     // instructions 承载 system（Responses 计划用量拒绝顶层 system message item）。
     expect(body.instructions).toBe("You are ZCode.");
-    expect((body.input as Array<{ role: string }>)[0]?.role).toBe("user");
+    expect((body.input as Array<{ role: string }>)[1]?.role).toBe("user");
     // reasoning effort 正常下发。
     expect(body.reasoning).toEqual({ effort: "high" });
 
     // 复审意见 #4 契约断言：默认（flag 关）tools 为 top-level function 数组，
     // name 无 namespace 前缀、无 namespace 字段。GPT-07 live 验证若判定该形态
     // 被拒，则开启 ZCODE_CHATGPT_TOOL_NAMESPACE 并据此更新断言。
-    const tools = body.tools as Array<Record<string, unknown>>;
+    expect(body.tools).toEqual([]);
+    const toolItem = (body.input as Array<Record<string, unknown>>)[0]!;
+    expect(toolItem).toMatchObject({ type: "additional_tools", role: "developer" });
+    const tools = toolItem.tools as Array<Record<string, unknown>>;
     expect(Array.isArray(tools)).toBe(true);
     expect(tools).toHaveLength(1);
     expect(tools[0]).toMatchObject({
@@ -294,7 +299,7 @@ describe("ChatGPT (openai-oauth) Responses wire contract", () => {
     for await (const event of result.fullStream) events.push(event as never);
 
     const body = bodies[0]!;
-    const tools = body.tools as Array<Record<string, unknown>>;
+    const tools = (body.input as Array<{ tools: Array<Record<string, unknown>> }>)[0]!.tools;
     expect(tools).toHaveLength(1);
     expect(tools[0]).toMatchObject({ type: "function", name: "zcode.get_weather" });
     expect(tools[0]).not.toHaveProperty("namespace");
@@ -308,7 +313,7 @@ describe("ChatGPT (openai-oauth) Responses wire contract", () => {
     expect(toolCalls).toHaveLength(1);
     expect(toolCalls[0]?.toolName).toBe("get_weather");
     expect(toolCalls[0]?.args ?? toolCalls[0]?.input).toEqual({ city: "Rome" });
-    expect((await result.text)).toBe("Hello from ChatGPT");
+    expect(await result.text).toBe("Hello from ChatGPT");
     expect(events.filter((event) => event.type === "error")).toEqual([]);
     expect(await result.finishReason).toBe("tool-calls");
     expect(requests).toHaveLength(1);

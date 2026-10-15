@@ -72,6 +72,7 @@ export function useSpecWriteGuard(sessionIds: string[]): {
   const ids = [...new Set(sessionIds)].sort().join("\0");
   useEffect(() => {
     const leases = ids ? ids.split("\0").map((id) => layer.acquire(id)) : [];
+    let published: { blocked: boolean; phases: Record<string, string> } | undefined;
     const update = () => {
       const phases: Record<string, string> = {};
       const blocked = leases.some(({ sessionId, store }) => {
@@ -91,7 +92,15 @@ export function useSpecWriteGuard(sessionIds: string[]): {
         phases[sessionId] =
           state.status === "live" ? state.snapshot?.control.phase || "unknown" : state.status;
       }
-      setGuard({ blocked, phases });
+      // 流式正文帧不改变写保护：原来每帧创建新 state，连带重渲染整个文档面板。
+      // 在订阅边界比较控制投影，仍逐帧读取所有会话，权限/队列/断连变化即时发布。
+      const previous = published;
+      if (
+        previous?.blocked === blocked &&
+        Object.keys(phases).every((id) => previous.phases[id] === phases[id])
+      ) return;
+      published = { blocked, phases };
+      setGuard(published);
     };
     const unsubscribers = leases.map(({ store }) => store.subscribe(update));
     update();

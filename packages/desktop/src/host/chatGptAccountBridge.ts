@@ -25,6 +25,8 @@ export interface DesktopChatGptAccountBridgeOptions {
   readonly env?: Record<string, string | undefined>;
   /** 测试注入的凭据文件路径；缺省按 Host 数据根解析。 */
   readonly credentialFilePath?: string;
+  /** Main's acknowledged native browser operation (utilityProcess must not spawn a shell). */
+  readonly openExternal?: (url: string) => Promise<void>;
 }
 
 /** createLocalServices 的 chatGptAccount 注入形状（loginBridge/logoutBridge）。 */
@@ -45,7 +47,22 @@ export function createDesktopChatGptAccountBridges(
     });
   return {
     async loginBridge() {
-      await runChatGptLogin({ store: createStore(), env });
+      await runChatGptLogin({
+        store: createStore(),
+        env,
+        ...(options.openExternal
+          ? {
+              openBrowser: async (url: string) => {
+                try {
+                  await options.openExternal!(url);
+                  return { command: "electron.shell.openExternal", opened: true };
+                } catch {
+                  return { command: "electron.shell.openExternal", opened: false };
+                }
+              },
+            }
+          : {}),
+      });
     },
     async logoutBridge() {
       const { revoked } = await runChatGptLogout({ store: createStore(), env });

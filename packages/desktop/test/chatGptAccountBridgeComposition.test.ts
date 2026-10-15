@@ -20,9 +20,9 @@ const adaptersMock = vi.hoisted(() => ({
     revoked: true,
     credentialsPath: "credentials.json",
   })),
-  createSharedZCodeCredentialStore: vi.fn(
-    (options: { filePath?: string } = {}) => ({ filePath: options.filePath }),
-  ),
+  createSharedZCodeCredentialStore: vi.fn((options: { filePath?: string } = {}) => ({
+    filePath: options.filePath,
+  })),
 }));
 
 vi.mock("@zcode/adapters/auth", () => adaptersMock);
@@ -37,6 +37,25 @@ function makeTempHome(): string {
 }
 
 describe("desktop ChatGPT account bridge composition", () => {
+  it("injects acknowledged native browser launch instead of the CLI shell launcher", async () => {
+    const { createDesktopChatGptAccountBridges } =
+      await import("../src/host/chatGptAccountBridge.js");
+    const openExternal = vi.fn(async () => {});
+    await createDesktopChatGptAccountBridges({
+      openExternal,
+      credentialFilePath: "test-credentials.json",
+    }).loginBridge();
+    const passed = (
+      adaptersMock.runChatGptLogin.mock.calls as unknown as [
+        { openBrowser: (url: string) => Promise<{ opened: boolean }> },
+      ][]
+    )[0]![0];
+    const url = "https://auth.openai.com/api/accounts/authorize?state=probe&nonce=probe";
+    await expect(passed.openBrowser(url)).resolves.toMatchObject({ opened: true });
+    expect(openExternal).toHaveBeenCalledWith(url);
+    openExternal.mockRejectedValueOnce(new Error("OS launch failed"));
+    await expect(passed.openBrowser(url)).resolves.toMatchObject({ opened: false });
+  });
   beforeEach(() => {
     adaptersMock.runChatGptLogin.mockClear();
     adaptersMock.runChatGptLogout.mockClear();
@@ -57,7 +76,8 @@ describe("desktop ChatGPT account bridge composition", () => {
   });
 
   it("bridge proxies login/logout lazily without touching the credential store at creation", async () => {
-    const { createDesktopChatGptAccountBridges } = await import("../src/host/chatGptAccountBridge.js");
+    const { createDesktopChatGptAccountBridges } =
+      await import("../src/host/chatGptAccountBridge.js");
 
     const env = { ZCODE_CREDENTIAL_SECRET: "test-secret" };
     const credentialFilePath = join("D:", "temp", "credentials.json");
@@ -85,7 +105,8 @@ describe("desktop ChatGPT account bridge composition", () => {
   it("resolves the credential file from the host data root (ZCODE_DATA_BASE_DIR-aware)", async () => {
     const home = makeTempHome();
     process.env.HOME = home;
-    const { createDesktopChatGptAccountBridges } = await import("../src/host/chatGptAccountBridge.js");
+    const { createDesktopChatGptAccountBridges } =
+      await import("../src/host/chatGptAccountBridge.js");
 
     await createDesktopChatGptAccountBridges().loginBridge();
 
@@ -100,11 +121,9 @@ describe("desktop ChatGPT account bridge composition", () => {
     const home = makeTempHome();
     process.env.HOME = home;
     const [{ createLocalServices, disposeServiceResources }, { IChatGptAccountService }] =
-      await Promise.all([
-        import("@zcode/services/node"),
-        import("@zcode/services"),
-      ]);
-    const { createDesktopChatGptAccountBridges } = await import("../src/host/chatGptAccountBridge.js");
+      await Promise.all([import("@zcode/services/node"), import("@zcode/services")]);
+    const { createDesktopChatGptAccountBridges } =
+      await import("../src/host/chatGptAccountBridge.js");
 
     const services = createLocalServices({
       zcodeBuiltinProviderConfigFilePath: join(
@@ -131,10 +150,7 @@ describe("desktop ChatGPT account bridge composition", () => {
     const home = makeTempHome();
     process.env.HOME = home;
     const [{ createLocalServices, disposeServiceResources }, { IChatGptAccountService }] =
-      await Promise.all([
-        import("@zcode/services/node"),
-        import("@zcode/services"),
-      ]);
+      await Promise.all([import("@zcode/services/node"), import("@zcode/services")]);
 
     const services = createLocalServices({
       zcodeBuiltinProviderConfigFilePath: join(

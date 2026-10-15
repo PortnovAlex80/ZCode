@@ -11,6 +11,9 @@ import {
 import { createPortal } from "react-dom";
 import { Ban, CircleAlert, PictureInPicture2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
+import { useOptionalPlatform } from "@/hooks/usePlatform.js";
+import { PortalHostContext } from "@/components/ui/portal-host.js";
+import { movePresentationHost } from "@/lib/presentationDocumentMove.js";
 import { PresentationHostDocumentContext } from "@/v4/usePresentationVisibility.js";
 import {
   adoptSpecPopoutStyles,
@@ -58,7 +61,7 @@ export interface SpecPopoutRegion {
  *   原布局直接参与锚点的布局上下文，与引入弹窗之前完全一致。
  * - PiP 文档内：占满弹出窗口（body margin 已清零）。
  */
-const POPOUT_HOST_PINNED_CLASS = "flex h-full min-h-0 w-full flex-col overflow-hidden";
+const POPOUT_HOST_PINNED_CLASS = "flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground";
 const POPOUT_HOST_DOCKED_CLASS = "contents";
 
 export function useSpecPopoutRegion(options: {
@@ -68,12 +71,23 @@ export function useSpecPopoutRegion(options: {
   title: string;
   /** false 时（区域本身不可见/不可用）自动返回原位；不会自动打开。 */
   enabled?: boolean;
+  /** Restore addressed navigation only on explicit Return / OS close, never teardown. */
+  onReturn?: () => void;
 }): SpecPopoutRegion {
   const { regionId, workspaceKey, enabled = true } = options;
+  const platform = useOptionalPlatform();
+  const nativeOpen = platform?.openConversationPopout;
+  const nativeId = useRef<string>(globalThis.crypto?.randomUUID?.() ?? `surface-${Date.now()}`);
+  const disposed = useRef(false);
+  const onReturnRef = useRef(options.onReturn);
+  onReturnRef.current = options.onReturn;
   const [popped, setPopped] = useState(false);
   const [opening, setOpening] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
-  const availability = useMemo(() => readSpecPopoutAvailability(), []);
+  const availability = useMemo<SpecPopoutAvailability>(
+    () => (nativeOpen ? { supported: true } : readSpecPopoutAvailability()),
+    [nativeOpen],
+  );
   const hostRef = useRef<HTMLDivElement | null>(null);
   if (hostRef.current === null && typeof document !== "undefined") {
     const host = document.createElement("div");
@@ -97,12 +111,19 @@ export function useSpecPopoutRegion(options: {
 
   const handleClosedRef = useRef<() => void>(() => {});
   const handleClosed = useCallback(() => {
+    const returningOpenWindow = pipRef.current !== null && !disposed.current;
     // pagehide（OS 关闭按钮）与主动 close() 都走这里：先记尺寸再回状态。
     persistSize();
     pipRef.current?.removeEventListener("pagehide", handleClosedRef.current);
     pipRef.current = null;
+    // 原节点同步归位，避免关闭子文档时 React 效果尚未运行而丢失输入/选区。
+    if (hostNode && anchorRef.current) {
+      hostNode.className = POPOUT_HOST_DOCKED_CLASS;
+      movePresentationHost(hostNode, anchorRef.current, true);
+    }
+    if (returningOpenWindow) onReturnRef.current?.();
     setPopped(false);
-  }, [persistSize]);
+  }, [hostNode, persistSize]);
   handleClosedRef.current = handleClosed;
 
   const close = useCallback(() => {
@@ -121,8 +142,20 @@ export function useSpecPopoutRegion(options: {
 
   const open = useCallback(() => {
     if (pipRef.current || opening) return;
-    const availabilityNow = readSpecPopoutAvailability();
-    const api = readSpecPopoutApi();
+    const availabilityNow = nativeOpen
+      ? { supported: true as const }
+      : readSpecPopoutAvailability();
+    const api = nativeOpen
+      ? {
+          requestWindow: (size: { width?: number; height?: number } = {}) =>
+            nativeOpen({
+              id: nativeId.current,
+              title: options.title,
+              width: size.width ?? 480,
+              height: size.height ?? 640,
+            }).then((handle) => handle as SpecPopoutWindow),
+        }
+      : readSpecPopoutApi();
     if (!hostNode || !availabilityNow.supported || !api) {
       setLastError(
         availabilityNow.supported
@@ -133,7 +166,7 @@ export function useSpecPopoutRegion(options: {
     }
     setLastError(null);
     // 共享槽位：先让其它区域（若有）自动返回原面板，再申请本 App 唯一的 PiP 窗口。
-    forceReturnSpecPopoutOwner(regionId);
+    if (!nativeOpen) forceReturnSpecPopoutOwner(regionId);
     setOpening(true);
     const size = readSpecPopoutSize(sizeKey);
     // 修复原因（活体缺陷 2026-10-14）：requestWindow 在部分运行时（Electron：API 存在
@@ -155,6 +188,10 @@ export function useSpecPopoutRegion(options: {
     }
     pipPromise
       .then((pip) => {
+        if (disposed.current) {
+          pip.close();
+          return;
+        }
         if (pipRef.current) {
           // 并发保护：打开期间已被占用（如另一区域刚申请）则立即让位关闭。
           try {
@@ -180,19 +217,16 @@ export function useSpecPopoutRegion(options: {
           );
           return;
         }
+        if (!movePresentationHost(hostNode, pip.document.body)) {
+          pip.close();
+          setLastError("Завершите ввод символа (IME), затем вынесите окно.");
+          return;
+        }
         pipRef.current = pip;
         pip.addEventListener("pagehide", handleClosedRef.current);
         adoptSpecPopoutStyles(document, pip.document);
-        if (hostNode.ownerDocument !== pip.document) {
-          try {
-            pip.document.adoptNode(hostNode);
-          } catch {
-            /* 支持自动 adopt 的实现这里是无害的 */
-          }
-        }
         // 进入 PiP 文档才切换为填充布局；面板内保持 contents 透传（见常量注释）。
         hostNode.className = POPOUT_HOST_PINNED_CLASS;
-        pip.document.body.appendChild(hostNode);
         setPopped(true);
       })
       .catch((cause: unknown) => {
@@ -201,7 +235,7 @@ export function useSpecPopoutRegion(options: {
         );
       })
       .finally(() => setOpening(false));
-  }, [handleClosed, hostNode, opening, regionId, sizeKey]);
+  }, [handleClosed, hostNode, nativeOpen, opening, options.title, regionId, sizeKey]);
 
   const toggle = useCallback(() => {
     if (pipRef.current) close();
@@ -209,7 +243,10 @@ export function useSpecPopoutRegion(options: {
   }, [close, open]);
 
   // 强制返回注册：共享槽位被新区域占用时，本区域无条件回位（状态保活，见上）。
-  useEffect(() => registerSpecPopoutForcedReturn(regionId, close), [regionId, close]);
+  useEffect(
+    () => (nativeOpen ? undefined : registerSpecPopoutForcedReturn(regionId, close)),
+    [nativeOpen, regionId, close],
+  );
 
   // 未弹出时 host 必须住回主文档锚点（首次挂载与每次返回都经此恢复），并恢复
   // display:contents 透传布局——绝不把 PiP 的填充 class 留在面板布局里。
@@ -222,12 +259,14 @@ export function useSpecPopoutRegion(options: {
 
   // 区域不可用（文档关闭/聊天视图切走）时自动返回原位。
   useEffect(() => {
-    if (!enabled && pipRef.current) close();
-  }, [enabled, close]);
+    if (!enabled && pipRef.current && !nativeOpen) close();
+  }, [enabled, nativeOpen, close]);
 
   // 卸载清理：关窗 + 记尺寸；host 节点随之脱离文档。
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    disposed.current = false;
+    return () => {
+      disposed.current = true;
       if (pipRef.current) {
         const pip = pipRef.current;
         persistSize();
@@ -238,9 +277,8 @@ export function useSpecPopoutRegion(options: {
           /* ignore */
         }
       }
-    },
-    [persistSize],
-  );
+    };
+  }, [persistSize]);
 
   return {
     popped,
@@ -270,10 +308,12 @@ export function SpecPopoutIconButton({
   region,
   popLabel = "Вынести в окно",
   restoreLabel = "Вернуть",
+  popIcon,
 }: {
   region: SpecPopoutRegion;
   popLabel?: string;
   restoreLabel?: string;
+  popIcon?: ReactNode;
 }) {
   const unavailable = !region.availability.supported;
   const label = region.popped ? restoreLabel : popLabel;
@@ -320,7 +360,7 @@ export function SpecPopoutIconButton({
       ) : region.popped ? (
         <Undo2 />
       ) : (
-        <PictureInPicture2 />
+        popIcon ?? <PictureInPicture2 />
       )}
     </Button>
   );
@@ -389,14 +429,16 @@ export function SpecPopoutRegionPortal({
   if (!region.hostNode || serverRender) return <>{children}</>;
   return createPortal(
     <PresentationHostDocumentContext.Provider value={hostDocument}>
-      <div className={region.popped ? "flex h-full min-h-0 w-full flex-col" : "contents"}>
-        {region.popped ? <SpecPopoutHostHeader region={region} title={title} /> : null}
-        <div
-          className={region.popped ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "contents"}
-        >
-          {children}
+      <PortalHostContext.Provider value={hostDocument?.body}>
+        <div className={region.popped ? "flex h-full min-h-0 w-full flex-col" : "contents"}>
+          {region.popped ? <SpecPopoutHostHeader region={region} title={title} /> : null}
+          <div
+            className={region.popped ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "contents"}
+          >
+            {children}
+          </div>
         </div>
-      </div>
+      </PortalHostContext.Provider>
     </PresentationHostDocumentContext.Provider>,
     region.hostNode,
   );

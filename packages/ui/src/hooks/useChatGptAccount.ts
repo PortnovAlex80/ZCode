@@ -36,11 +36,12 @@ export function useChatGptAccount(): ChatGptAccountRead {
       return;
     }
     let disposed = false;
+    let receivedEvent = false;
     setLoading(true);
     void service
       .getStatus()
       .then((next) => {
-        if (!disposed) setStatus(next);
+        if (!disposed && !receivedEvent) setStatus(next);
       })
       .catch((error: unknown) => {
         if (!disposed) logger.warn("[chatgpt-account] 状态读取失败", { error });
@@ -49,6 +50,7 @@ export function useChatGptAccount(): ChatGptAccountRead {
         if (!disposed) setLoading(false);
       });
     const subscription = service.onDidChange((next) => {
+      receivedEvent = true;
       if (!disposed) setStatus(next);
     });
     return () => {

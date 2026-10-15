@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("../src/main/nativeConversationPopouts.js", () => ({
+  installNativeConversationPopouts: vi.fn(),
+}));
 vi.mock("../src/main/databaseStartupRelay.js", () => ({
   getDatabaseStartupPortPayload: () => ({ databaseStartupId: "window-host-test" }),
 }));

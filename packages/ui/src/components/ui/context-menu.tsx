@@ -2,6 +2,7 @@ import * as React from "react";
 import { ContextMenu as ContextMenuPrimitive } from "radix-ui";
 import { ChevronRightIcon } from "lucide-react";
 
+import { usePortalHost } from "./portal-host.js";
 import { cn } from "../lib/utils.js";
 
 function ContextMenu({ ...props }: React.ComponentProps<typeof ContextMenuPrimitive.Root>) {
@@ -20,7 +21,7 @@ function ContextMenuContent({
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
   return (
-    <ContextMenuPrimitive.Portal>
+    <ContextMenuPrimitive.Portal container={usePortalHost()}>
       <ContextMenuPrimitive.Content
         data-slot="context-menu-content"
         className={cn(

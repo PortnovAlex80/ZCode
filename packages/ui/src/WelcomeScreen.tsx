@@ -20,6 +20,8 @@ import { Alert, AlertDescription } from "./components/ui/alert.js";
 import { Button } from "./components/ui/button.js";
 import { ZCodeAboutLogo } from "@/components/ui/ZCodeAboutLogo.js";
 import { useOAuth } from "./hooks/useOAuth.js";
+import { useChatGptAccount } from "./hooks/useChatGptAccount.js";
+import { ChatGptAccountCard } from "./settings/model-provider-section/ChatGptAccountCard.js";
 import { useZCodeIntl } from "./i18n/IntlProvider.js";
 import { LoginApiKeyForm } from "./login/LoginApiKeyForm.js";
 import { renderOAuthProviderIcon } from "./lib/oauthProviderIcon.js";
@@ -31,7 +33,7 @@ interface WelcomeScreenProps {
   onComplete: (reason: LoginCompleteReason) => void | Promise<void>;
 }
 
-export type LoginCompleteReason = "oauth" | "apiKey" | "skip";
+export type LoginCompleteReason = "oauth" | "apiKey" | "chatgpt" | "skip";
 
 export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
   return (
@@ -73,6 +75,7 @@ export function shouldCompleteLoginFromExistingUser(params: {
 
 export function LoginPanel({ active, onComplete }: LoginPanelProps) {
   const { intl } = useZCodeIntl();
+  const chatGptAccount = useChatGptAccount();
   const {
     startLogin,
     cancel,
@@ -296,6 +299,10 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
             失败期间统一由下方失败块接管（重新登录/取消），渠道列表等错误清掉后再回来。 */}
         {status === "idle" && !oauthError && loginMode === "providers" && (
           <div className="space-y-4">
+            <ChatGptAccountCard
+              account={chatGptAccount}
+              onConnected={() => onComplete("chatgpt")}
+            />
             {loadingProviders ? (
               <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-6 text-ui-base text-foreground-subtle">
                 <Loader2Icon className="size-4 animate-spin" />

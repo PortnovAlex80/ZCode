@@ -196,5 +196,16 @@ export function adoptSpecPopoutStyles(from: Document, to: Document): void {
       to.head.appendChild(link);
     }
   }
-  if (to.body) to.body.style.margin = "0";
+  // 修复原因：主窗口 body 为 vibrancy 透明；普通原生子窗口没有透明材质，
+  // 直接继承会显示白底。独立窗口明确使用当前主题背景，并提供完整高度链。
+  to.documentElement.style.height = "100%";
+  if (to.body) {
+    to.body.className = from.body.className;
+    to.body.classList.add("bg-background", "text-foreground");
+    to.body.style.margin = "0";
+    to.body.style.height = "100%";
+    to.body.style.overflow = "hidden";
+    to.body.style.backgroundColor = "var(--color-background)";
+    to.body.style.color = "var(--color-foreground)";
+  }
 }

@@ -9,6 +9,7 @@ import {
   readChatGptClientId,
   readChatGptCredentialRecord,
   resolveChatGptHostId,
+  writeChatGptCredentialRecord,
 } from "../src/auth/chatgpt/chatgpt-credential-record.js";
 import { createChatGptRequestAuthSource } from "../src/auth/chatgpt/chatgpt-request-auth.js";
 import { createMockAuthServer, RsaTestSigner } from "./chatgpt-oauth-mock-server.js";
@@ -42,6 +43,18 @@ function browserDriver() {
 }
 
 describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", () => {
+  it("fails immediately when the system browser cannot open", async () => {
+    const store = await createTempCredentialStore();
+    await expect(
+      runChatGptLogin({
+        store,
+        env: {},
+        timeoutMs: 60_000,
+        openBrowser: async () => ({ command: "test", opened: false }),
+      }),
+    ).rejects.toMatchObject({ code: "chatgpt_browser_open_failed" });
+    expect(await readChatGptCredentialRecord(store)).toBeNull();
+  });
   it("动态注册 → PKCE 交换 → id_token 校验 → 模型缓存；二次登录复用 client_id", async () => {
     const signer = new RsaTestSigner();
     const server = await createMockAuthServer({ signer });
@@ -73,7 +86,9 @@ describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", ()
       expect(authorizeQuery.get("agent_name_hint")).toBe("ZCode Harness");
       expect(authorizeQuery.get("ext_agent_host_id")).toMatch(/^urn:uuid:/u);
       expect(authorizeQuery.get("code_challenge_method")).toBe("S256");
-      expect(authorizeQuery.get("redirect_uri")).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/auth\/callback$/u);
+      expect(authorizeQuery.get("redirect_uri")).toMatch(
+        /^http:\/\/127\.0\.0\.1:\d+\/auth\/callback$/u,
+      );
       // 每次登录新生成 state / nonce / PKCE。
       expect(authorizeQuery.get("state")).toHaveLength(43);
       expect(authorizeQuery.get("nonce")).toHaveLength(43);
@@ -226,6 +241,33 @@ describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", ()
       // 官方：重登录复用已保存 client_id。
       expect(await readChatGptClientId(store)).toBe("oaiapp_test_client");
       expect(await resolveChatGptHostId(store)).toMatch(/^urn:uuid:/u);
+    } finally {
+      await server.close();
+    }
+  });
+  it("does not delete a new session published by another process during revocation", async () => {
+    const server = await createMockAuthServer({ signer: new RsaTestSigner() });
+    const store = await createTempCredentialStore();
+    const env = {
+      ZCODE_CHATGPT_OAUTH_ISSUER: server.url,
+      ZCODE_CHATGPT_API_BASE_URL: `${server.url}/v1`,
+    };
+    try {
+      await runChatGptLogin({ store, env, openBrowser: browserDriver() });
+      const original = await readChatGptCredentialRecord(store);
+      const replacement = { ...original!, generation: "new-login-generation" };
+      await runChatGptLogout({
+        store,
+        env,
+        fetchImpl: async (input, init) => {
+          const response = await fetch(input, init);
+          if (String(input).endsWith("/revoke"))
+            await writeChatGptCredentialRecord(store, replacement);
+          return response;
+        },
+      });
+      expect((await readChatGptCredentialRecord(store))?.generation).toBe("new-login-generation");
+      expect(await readChatGptCachedModels(store)).not.toBeNull();
     } finally {
       await server.close();
     }

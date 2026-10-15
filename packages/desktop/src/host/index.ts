@@ -32,6 +32,7 @@ import { resolveResourceTelemetryEnvironmentKey } from "./hostResourceTelemetryE
 import { reportHostSessionCreate } from "./hostSessionCreateTelemetry.js";
 import { createBrowserControlMainBridge } from "./browserControlMainBridge.js";
 import { createDesktopChatGptAccountBridges } from "./chatGptAccountBridge.js";
+import { createChatGptBrowserBridge } from "./chatGptBrowserBridge.js";
 import { materializeBrowserRecordingArtifact } from "./browserRecordingArtifactMaterializer.js";
 import {
   ServiceCollection,
@@ -194,6 +195,10 @@ type RemoteAssetDirs = Pick<
 >;
 
 const { parentPort } = process;
+const chatGptBrowserBridge = createChatGptBrowserBridge((message) => {
+  if (!parentPort) throw new Error("Native browser bridge unavailable");
+  parentPort.postMessage(message);
+});
 const hostNetworkCapture = createHostNetworkCapture(parentPort);
 
 // 进程检索体验优化：host 由 utilityProcess 拉起时外壳仍是 Electron Helper，
@@ -2264,7 +2269,7 @@ async function disposeHostResources(reason: string): Promise<HostShutdownResult>
     const servicesToDispose = activeServices;
     activeServices = null;
     // Registry 是全部远端 connection 的唯一 owner；释放失败不能阻塞本地服务继续收口。
-      const shutdownResult = await runHostShutdownPhases(
+    const shutdownResult = await runHostShutdownPhases(
       [
         {
           name: "remote-registry-dispose",
@@ -2461,6 +2466,11 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
     } else {
       pending.reject(new Error(msg.error ?? "本地视频预览路径授权失败"));
     }
+    return;
+  }
+
+  if (msg.type === HostMessageTypes.ChatGptBrowserOpenResult) {
+    chatGptBrowserBridge.accept(msg);
     return;
   }
 
@@ -2980,7 +2990,9 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
               // ChatGPT（Sign in with ChatGPT）：adapters 的 loopback+系统浏览器登录流程
               // 以进程内桥注入本窗口 local services；server/remote 宿主不注入，
               // beginLogin 保持 typed 不可用（fail-closed），不发网络请求。
-              chatGptAccount: createDesktopChatGptAccountBridges(),
+              chatGptAccount: createDesktopChatGptAccountBridges({
+                openExternal: (url) => chatGptBrowserBridge.open(url),
+              }),
               zcodeAgentSpawnFallbackCwd: msg.agentSpawnFallbackCwd,
               zcodeBuiltinProviderConfigFilePath: msg.zcodeBuiltinProviderConfigFilePath,
               processLifecycleReporter: runtimeProcessLifecycleReporter,

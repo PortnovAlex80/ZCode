@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button.js";
 import { PreviewPane } from "@/PreviewPane.js";
 import { inferCodeLanguage, type CodeViewerSource } from "@/lib/codeViewer.js";
 import { useServices } from "@/hooks/useServices.js";
+import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { V4PaneConversationProvider } from "@/v4/V4ConversationContext.js";
 import { SpecDiscussionPane } from "./SpecDiscussionPane.js";
 import {
@@ -124,6 +125,7 @@ function Documents({
   autoOpenLastDocument = true,
   onDocumentOpen,
 }: SpecDocumentPaneProps) {
+  const nativeDiscussionWindows = Boolean(useOptionalPlatform()?.openConversationPopout);
   const { specDocumentService: documentService, fileWatcherService } =
     useServices();
   // Capture this pane's project in every IO request; no shared mutable workspace.
@@ -622,6 +624,10 @@ function Documents({
   }
   async function open(path: string) {
     if (!documents || !path || ioPending) return;
+    if (discussionPopout.popped && document?.path !== path) {
+      setError("Сначала верните обсуждение в приложение, затем смените документ в этой вкладке. Другой документ можно открыть в новой вкладке.");
+      return;
+    }
     // Bug 修复（U-11 活体回归 2026-10-14）：原先缓冲区一旦有未保存修改（dirty）就静默
     // return，选择器又把 value 弹回旧路径——用户看到“换文件毫无反应，永远只开着第一个
     // 文件”。根因不是 21221728 的 value/option 路径不匹配（list/read 都返回同一套相对
@@ -1034,7 +1040,13 @@ function Documents({
             <PreviewPane
               key={editing ? "document-edit" : "document-view"}
               source={nativeSource}
-              onClose={onClose}
+              onClose={() => {
+                if (discussionPopout.popped) {
+                  setError("Сначала верните обсуждение в приложение, затем закройте документ.");
+                  return;
+                }
+                onClose();
+              }}
               workspacePath={workspacePath}
               documentContentBasePath={nativeSource.path
                 ?.replaceAll("\\", "/")
@@ -1276,7 +1288,7 @@ function Documents({
                     event.stopPropagation();
                 }}
               >
-            {discussionMode === "docked" && !dockedLayout.stacked ? (
+            {!discussionPopout.popped && discussionMode === "docked" && !dockedLayout.stacked ? (
               <button
                 type="button"
                 role="separator"
@@ -1300,12 +1312,12 @@ function Documents({
             <div
               className="flex shrink-0 items-center gap-1 border-b border-border p-2"
               style={
-                discussionMode === "floating"
+                !discussionPopout.popped && discussionMode === "floating"
                   ? { minWidth: MIN_DISCUSSION_WIDTH }
                   : undefined
               }
             >
-              {discussionMode === "floating" ? (
+              {!discussionPopout.popped && discussionMode === "floating" ? (
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -1346,8 +1358,11 @@ function Documents({
                 region={discussionPopout}
                 popLabel="Вынести дискуссию в окно"
                 restoreLabel="Вернуть дискуссию"
+                popIcon={nativeDiscussionWindows ? <Maximize2 /> : undefined}
               />
-              <Button
+              {/* 修复原因：桌面原先相邻的“放大”只开文档内浮层，用户无法移到桌面。
+                  桌面只保留一个放大入口，直达原生窗口；Web 仍保留内部浮动布局。 */}
+              {!nativeDiscussionWindows && !discussionPopout.popped ? <Button
                 variant="ghost"
                 size="icon-sm"
                 aria-label={
@@ -1368,12 +1383,15 @@ function Documents({
                 }}
               >
                 {discussionMode === "floating" ? <Minimize2 /> : <Maximize2 />}
-              </Button>
+              </Button> : null}
               <Button
                 variant="ghost"
                 size="sm"
                 aria-label="Hide discussions"
-                onClick={() => setDiscussionsVisible(false)}
+                onClick={() => {
+                  if (discussionPopout.popped) discussionPopout.close();
+                  setDiscussionsVisible(false);
+                }}
               >
                 ×
               </Button>
@@ -1388,7 +1406,7 @@ function Documents({
                       : "hidden"
                   }
                   style={
-                    discussionMode === "floating"
+                    !discussionPopout.popped && discussionMode === "floating"
                       ? {
                           minWidth: MIN_DISCUSSION_WIDTH,
                           minHeight: MIN_DISCUSSION_HEIGHT,
@@ -1447,7 +1465,7 @@ function Documents({
                 Select saved document text and choose Discuss selection.
               </p>
             ) : null}
-            {discussionMode === "floating" || dockedLayout.stacked ? (
+            {!discussionPopout.popped && (discussionMode === "floating" || dockedLayout.stacked) ? (
               <button
                 type="button"
                 aria-label="Resize discussion"

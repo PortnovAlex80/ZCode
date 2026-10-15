@@ -14,11 +14,18 @@ import { logger } from "@/logger.js";
  * 状态文案与操作按 Host sanitized 投影渲染（无 token）；quota-exhausted 时给官方
  * 用量管理入口。样式与 CodingPlanStatusActions 保持同一模式：主按钮 + outline 断开。
  */
-export function ChatGptAccountCard({ account }: { account: ChatGptAccountRead }) {
+export function ChatGptAccountCard({
+  account,
+  onConnected,
+}: {
+  account: ChatGptAccountRead;
+  onConnected?: () => void | Promise<void>;
+}) {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
   const [loginBusy, setLoginBusy] = useState(false);
   const [disconnectBusy, setDisconnectBusy] = useState(false);
+  const [errorId, setErrorId] = useState<string | null>(null);
   const snapshot = account.status;
   const status = snapshot?.status;
 
@@ -28,22 +35,37 @@ export function ChatGptAccountCard({ account }: { account: ChatGptAccountRead })
     return null;
   }
 
-  const connected = status === "connected" || status === "plan-enabled";
-  const showLogin = !connected;
-  const showDisconnect = connected;
+  const showLogin = status === "not-connected" || status === "reconnect-required";
+  const showDisconnect = status !== "not-connected";
 
   const handleLogin = async () => {
     setLoginBusy(true);
+    setErrorId(null);
     try {
       const result = await account.beginLogin();
       if (result.result === "failed") {
+        setErrorId(
+          result.code === "chatgpt_browser_open_failed"
+            ? "settings.modelProvider.chatgpt.error.browser"
+            : result.code === "chatgpt_login_timeout"
+              ? "settings.modelProvider.chatgpt.error.timeout"
+              : result.code === "chatgpt_consent_denied"
+                ? "settings.modelProvider.chatgpt.error.denied"
+                : "settings.modelProvider.chatgpt.error.login",
+        );
         // 失败原因（typed SIWC 错误码 + 描述）落日志；UI 文案保持稳定，
         // 不把原始 message 直接渲染（可能含端点/region 细节，走 i18n 状态键）。
         logger.warn("[chatgpt-account] 登录失败", {
           code: result.code,
           message: result.message,
         });
+      } else if (result.result === "unavailable") {
+        setErrorId("settings.modelProvider.chatgpt.error.unavailable");
+      } else if (result.status.status === "plan-enabled") {
+        await onConnected?.();
       }
+    } catch {
+      setErrorId("settings.modelProvider.chatgpt.error.login");
     } finally {
       setLoginBusy(false);
     }
@@ -51,9 +73,11 @@ export function ChatGptAccountCard({ account }: { account: ChatGptAccountRead })
 
   const handleDisconnect = async () => {
     setDisconnectBusy(true);
+    setErrorId(null);
     try {
       await account.disconnect();
     } catch (error) {
+      setErrorId("settings.modelProvider.chatgpt.error.disconnect");
       logger.warn("[chatgpt-account] 断开失败", { error });
     } finally {
       setDisconnectBusy(false);
@@ -91,15 +115,34 @@ export function ChatGptAccountCard({ account }: { account: ChatGptAccountRead })
           ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap justify-start gap-2">
+          {status === "plan-enabled" && onConnected ? (
+            <Button
+              type="button"
+              size="lg"
+              disabled={disconnectBusy || loginBusy}
+              onClick={() =>
+                void Promise.resolve(onConnected()).catch(() =>
+                  setErrorId("settings.modelProvider.chatgpt.error.login"),
+                )
+              }
+            >
+              {intl.formatMessage({ id: "settings.modelProvider.chatgpt.openWorkspace" })}
+            </Button>
+          ) : null}
           {showLogin ? (
-            <Button type="button" size="lg" onClick={() => void handleLogin()} disabled={loginBusy}>
+            <Button
+              type="button"
+              size="lg"
+              onClick={() => void handleLogin()}
+              disabled={loginBusy || disconnectBusy}
+            >
               {loginBusy ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
               {intl.formatMessage({
                 id: "settings.modelProvider.chatgpt.continue",
               })}
             </Button>
           ) : null}
-          {status === "quota-exhausted" ? (
+          {status === "quota-exhausted" || status === "plan-enabled" || status === "connected" ? (
             <Button
               type="button"
               variant="outline"
@@ -116,7 +159,7 @@ export function ChatGptAccountCard({ account }: { account: ChatGptAccountRead })
               type="button"
               variant="outline"
               size="lg"
-              disabled={disconnectBusy}
+              disabled={disconnectBusy || loginBusy}
               onClick={() => void handleDisconnect()}
             >
               {disconnectBusy ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
@@ -127,6 +170,16 @@ export function ChatGptAccountCard({ account }: { account: ChatGptAccountRead })
           ) : null}
         </div>
       </div>
+      {loginBusy ? (
+        <p role="status" className="text-ui-sm text-foreground-subtle">
+          {intl.formatMessage({ id: "settings.modelProvider.chatgpt.waiting" })}
+        </p>
+      ) : null}
+      {errorId ? (
+        <p role="alert" className="text-ui-sm text-destructive">
+          {intl.formatMessage({ id: errorId })}
+        </p>
+      ) : null}
     </div>
   );
 }

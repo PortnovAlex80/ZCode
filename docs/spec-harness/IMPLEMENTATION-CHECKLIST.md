@@ -25,13 +25,99 @@ recheck those items before restoring their accepted status.
 | Field                          | State                                                                                              |
 | ------------------------------ | -------------------------------------------------------------------------------------------------- |
 | Product decision               | One maintained fork build; official installer is fallback; no maintained overlay build             |
-| Current assignment             | Wave 3 integrated 2026-10-13: 6/6 tasks reviewed and committed by root; T-08 accepted earlier; no active assignment — next root action is Wave 4 (build-only release work) |
-| Live runtime gate              | CLOSED: user has active ZCODE sessions (agents running in other projects); no launch/stop/profile changes or paid prompts; code/fixture/docs work only; Word/Excel allowed solely on owned disposable fixture documents |
+| Current assignment             | 2026-10-15 follow-up repair: acknowledged native browser launch, active-session document root, and native discussion Expand. User authorized a local commit; rebuilt product GUI acceptance is recorded separately below. Live ChatGPT consent/inference and broader workload performance acceptance remain open. |
+| Live runtime gate              | OPEN for ZCode repair/GUI validation: user explicitly confirmed on 2026-10-15 that ZCode is shut down and work may proceed. Build, launch, restart and inspect the repaired app; preserve profiles and sessions. Browser consent remains the user's action; no automatic paid/model prompts or unrelated Office/CAD changes. This supersedes older closed-runtime notes for this repair. |
 | Toolchain decisions            | `pnpm.overrides`/`patchedDependencies` live in `pnpm-workspace.yaml` (frozen-lockfile install verified, react 19.2.7, typecheck green); agents may run `pnpm install --frozen-lockfile` but never lockfile-refreshing commands; node 24.13.1 shell deviation recorded per evidence |
 | Immediate implementation order | Wave 4 (build-only): R-08 Build-Installer.cmd, R-10 fork-safe updates, R-03 build/run instructions, O-06/O-07 and T-05 fixture halves, R-06 doc pass → R-02 full gates at the frozen revision → only live-gated work remains until the user explicitly releases the runtime |
 | Release status                 | Not accepted: GUI, performance, live agent and installation gates remain open                      |
 
 ## Exclusive write assignments
+
+### Reopened live defects — 2026-10-15
+
+User reports production browser never opens for ChatGPT, project picker still lists
+application-checkout files, and discussion Expand still creates a document-bounded panel.
+Root owns integration, real GUI validation and the user-authorized commit.
+`repair_openai` owns acknowledged Main/Host browser launch; `repair_performance` owns
+authoritative active-project document binding; `repair_windows` owns discussion native
+Expand/layout. The latter two coordinate exclusive writes in SpecDocumentPane/shell.
+Prior welcome-button and main-chat tests do not accept these three reported flows.
+
+Follow-up findings and verification:
+
+- A real isolated Electron probe reproduced utilityProcess shell launch returning
+  success without a browser request. Main `shell.openExternal` opened the localhost
+  page with intact query parameters. Desktop now uses a validated Host/Main request
+  and acknowledgement, with a bounded failure instead of optimistic success.
+- The document root reads the focused conversation binding or matching active task
+  metadata; unknown/remote scopes do not fall back to the installation directory.
+  Real temporary project A/B filesystem tests and store-focus tests cover this path.
+- Desktop discussion Expand uses the native window operation. A moved discussion has
+  no internal drag/resize handles or fixed inner minimum dimensions. The actual-pane
+  regression checks node preservation and Return; full installed GUI remains a gate.
+- Root integration regression run: 10 suites / 59 tests passed; build receipt tests
+  2 passed. Auth bridge independently reviewed without blocking findings. Workspace
+  review identified draft/session boundary cases; these are fixed with explicit regressions.
+  Final workspace/stability run: 4 suites / 14 tests passed. Final typecheck passed;
+  lint 63 warnings / 0 errors; architecture 0 violations.
+- Account consent and model requests were not performed. Browser launch evidence is
+  not evidence of successful subscription authentication or inference.
+
+### Active repair — 2026-10-15
+
+User released the stopped runtime for repair. Existing GPT checklist below is historical:
+`a79e7ad4`/`0cd2366e` already implemented subscription integration; this repair addresses
+defects in that implementation rather than claiming it was absent.
+
+- Root: production wrapper/receipt, ADR integration, build and real GUI validation.
+- `repair_openai`: OAuth launcher/login, SIWC tool wire format, account/model refresh,
+  account UI and welcome entry; focused protocol/account tests.
+- `repair_windows`: native popup policy/platform adapter, stable React portal and
+  source navigation lifecycle, child-document UI overlays, window regression tests.
+- `repair_performance`: write-guard publication and plugin disposition structural
+  sharing; regression tests and bounded CPU replay. Independent auth review follows.
+
+Confirmed regressions: unquoted Windows OAuth URL parsing; unsupported SIWC top-level
+function tools; UI-only production rebuild retaining old agent; repeated unchanged
+write-guard and plugin publications. Native same-origin Electron proof passed with
+sandbox/isolation retained. Production GUI, actual consent/inference and idle-home
+performance acceptance remain open until separately measured.
+
+Repair evidence (working tree based on `c3a256c0`, 2026-10-15):
+
+- CLI fully rebuilt and staged, then stable desktop build completed and the production
+  receipt validated. Concurrent edits during earlier attempts were correctly rejected.
+  `Build-Harness.cmd` now rebuilds/stages CLI; source receipt includes CLI source.
+- Product GUI with existing profile: real Lexical draft typed before and after detach;
+  real model picker opened inside native child; switching Main to Automations kept child
+  alive; Return restored the original draft; temporary unsent test text cleared.
+  Child surface background `rgb(22, 22, 22)`; one main window remained, no page errors.
+- Clean-profile product GUI: **Continue with ChatGPT** visible on welcome screen without
+  API-key entry. Real main-profile startup measured 8.4 s in one run; after settling,
+  renderer CPU sample was ~0.24%. This is bounded observation, not a broad performance SLA
+  or proof that every user-reported workload is fixed.
+- Isolated real Electron/React/Lexical smoke: three simultaneous native surfaces,
+  input/state retention, child menus, OS close, main hide/reveal, 20 cycles, no children
+  left behind. This does not substitute for actual multi-document/session workload testing.
+- CLI auth/wire 29 tests; services/bridge 18; account/selection UI 9; window-focused
+  suites 41; independent root regression run 22; build receipt 2. All passed (overlapping
+  suites are not additive). Full typecheck passed; final lint 63 warnings/0 errors;
+  final architecture check 0 violations. Auth and rendering changes independently reviewed.
+- Remaining human/account gate: real SIWC consent, model discovery and live tool roundtrip.
+  No model requests, account impersonation, private endpoints or billing fallback used.
+  Installed distribution was not overwritten; repaired checkout starts via `Start-Harness.cmd`.
+
+Production packaging follow-up (2026-10-15): built
+`packages/desktop/dist/ZCode-3.15.1-win-x64.exe` (170123160 bytes), SHA-256
+`f69333402f82b93cbe67c569a6e63946e9fc7833c01d833bc13d24b947246790`.
+Production identity `ZCode` / `dev.zcode.app`, automatic upstream updates disabled.
+Fixed preparation ordering: full agent preparation restores official plugins/native
+dependencies after CLI staging. All packaging/native checks and size audit passed.
+Packaged executable launched from `app.asar` and displayed Continue with ChatGPT.
+Exactly one related shortcut remains in Desktop/Start Menu/pinned locations:
+`C:\Users\user\Desktop\ZCode.lnk` → checkout `dist\win-unpacked\ZCode.exe`.
+Old shortcuts backed up under `.tmp/shortcuts-backup-*`; protected duplicates removed
+through Windows UAC. Installer was built, not installed over Program Files.
 
 ### GPT — подписка ChatGPT в штатном селекторе (2026-10-15)
 

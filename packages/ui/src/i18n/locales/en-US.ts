@@ -4058,6 +4058,20 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.customTitle": "Custom providers",
   "settings.modelProvider.refresh": "Refresh",
   "settings.modelProvider.chatgpt.title": "OpenAI — ChatGPT Subscription",
+  "settings.modelProvider.chatgpt.waiting": "Complete sign-in in your browser, then return here.",
+  "settings.modelProvider.chatgpt.openWorkspace": "Continue to workspace",
+  "settings.modelProvider.chatgpt.error.browser":
+    "Could not open your browser. Check your default browser and try again.",
+  "settings.modelProvider.chatgpt.error.timeout":
+    "Sign-in timed out. Click Continue with ChatGPT to try again.",
+  "settings.modelProvider.chatgpt.error.denied":
+    "ChatGPT authorization was declined. You can try again when ready.",
+  "settings.modelProvider.chatgpt.error.login":
+    "Could not connect to ChatGPT. Check your connection and try again.",
+  "settings.modelProvider.chatgpt.error.unavailable":
+    "ChatGPT sign-in is unavailable in this host. Open the current ZCode Harness desktop build.",
+  "settings.modelProvider.chatgpt.error.disconnect":
+    "Could not disconnect ChatGPT. Please try again.",
   "settings.modelProvider.chatgpt.description":
     "Use your ChatGPT plan for everyday ZCode tasks. Model requests consume your ChatGPT plan usage; no API key is required.",
   "settings.modelProvider.chatgpt.continue": "Continue with ChatGPT",

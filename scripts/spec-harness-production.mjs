@@ -49,7 +49,11 @@ export async function sourceFingerprint(directory = root) {
     const info = await stat(absolute);
     if (info.isDirectory()) {
       for (const entry of (await readdir(absolute)).sort()) {
-        if (["node_modules", "out", "dist", ".git"].includes(entry)) continue;
+        if (
+          ["node_modules", "out", "dist", ".git", ".turbo", ".tmp", "coverage"].includes(entry) ||
+          entry.endsWith(".tsbuildinfo")
+        )
+          continue;
         await visit(join(relative, entry));
       }
     } else {
@@ -64,7 +68,8 @@ export async function sourceFingerprint(directory = root) {
     "pnpm-workspace.yaml",
     "scripts/build-time-config.mjs",
     "scripts/spec-harness-production.mjs",
-    "apps/zcode-cli/packages/visualize-plugin/skills/visualize/assets",
+    "scripts/build-desktop-agent-cli.mjs",
+    "apps/zcode-cli",
   ]) {
     await visit(relative);
   }
@@ -98,6 +103,13 @@ function run(command, args, cwd, env) {
 
 async function build() {
   const env = productionEnvironment(process.env);
+  // 修复原因：只构建桌面会继续加载旧 bundled-agents，认证和推理修复实际不会生效。
+  // 禁止 bootstrap 的复用分支；先重新编译并暂存当前 Agent，再记录产物指纹。
+  delete env.ZCODE_BOOTSTRAP_WITH_REMOTE;
+  delete env.ZCODE_DESKTOP_AGENT_BUILD_MODE;
+  // CLI 暂存会清空 glm 目录；必须再通过完整准备入口恢复官方插件及 koffi/sharp，
+  // 否则安装包在桌面重建后丢失之前 prepare 阶段已暂存的原生依赖。
+  await run(process.execPath, ["packages/desktop/scripts/prepare-agent-node-bundle.mjs"], root, env);
   const before = await sourceFingerprint();
   // Only compile this checkout; no dev watcher, Host, Electron or application profile is started.
   await run("pnpm", ["--filter", "@zcode/desktop", "build:no-runtime-assets"], root, env);

@@ -125,7 +125,13 @@ export function createChatGptAccountService(
   // 观测是 Host 进程内本服务实例的私有状态；凭据本体仍是唯一持久事实。
   let runtimeObservation: ChatGptRuntimeObservationKind | undefined;
   let disposed = false;
-  let loginInFlight: Promise<void> | null = null;
+  let loginInFlight: Promise<ChatGptBeginLoginResult> | null = null;
+  let operationTail: Promise<unknown> = Promise.resolve();
+  const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
+    const pending = operationTail.then(operation, operation);
+    operationTail = pending;
+    return pending;
+  };
 
   const readCredentialSnapshot = () =>
     options
@@ -203,43 +209,58 @@ export function createChatGptAccountService(
         return { result: "unavailable", reason: "login-bridge-not-configured" };
       }
       // 同一 Host 同时只允许一次交互式登录；并发 begin 复用同一次用户授权。
-      const inFlight = loginInFlight ?? options.loginBridge();
+      if (loginInFlight) return loginInFlight;
+      const inFlight = enqueue(async (): Promise<ChatGptBeginLoginResult> => {
+        try {
+          await options.loginBridge!();
+          // 新登录即新会话：旧观测（quota/restricted）不携带到新 token。
+          runtimeObservation = undefined;
+          const status = await readStatus();
+          emit(status);
+          return { result: "completed", status };
+        } catch (error) {
+          const coded = error as { code?: unknown; message?: unknown };
+          return {
+            result: "failed",
+            code: typeof coded.code === "string" ? coded.code : "chatgpt_login_failed",
+            // message 只透传错误描述；adapters 的类型化错误不携带 token 值。
+            message: typeof coded.message === "string" ? coded.message : "ChatGPT sign-in failed.",
+          };
+        }
+      });
       loginInFlight = inFlight;
       try {
-        await inFlight;
-        // 新登录即新会话：旧观测（quota/restricted）不携带到新 token。
-        runtimeObservation = undefined;
-        const status = await readStatus();
-        emit(status);
-        return { result: "completed", status };
-      } catch (error) {
-        const coded = error as { code?: unknown; message?: unknown };
-        return {
-          result: "failed",
-          code: typeof coded.code === "string" ? coded.code : "chatgpt_login_failed",
-          // message 只透传错误描述；adapters 的类型化错误不携带 token 值。
-          message: typeof coded.message === "string" ? coded.message : "ChatGPT sign-in failed.",
-        };
+        return await inFlight;
       } finally {
-        loginInFlight = null;
+        if (loginInFlight === inFlight) loginInFlight = null;
       }
     },
 
     async disconnect() {
-      let revoked = false;
-      if (options.logoutBridge) {
-        try {
-          revoked = (await options.logoutBridge()).revoked;
-        } catch (error: unknown) {
-          // 撤销失败不阻止本地登出；用户可在 ChatGPT 设置中手动断开（官方建议路径）。
-          log.warn(undefined, "ChatGPT 会话撤销失败，继续本地登出", { error });
+      // 同一 owner 按用户操作顺序串行化：logout 后的新 login 不能复用旧尝试。
+      loginInFlight = null;
+      return enqueue(async () => {
+        let revoked = false;
+        let bridgeCompleted = false;
+        if (options.logoutBridge) {
+          try {
+            revoked = (await options.logoutBridge()).revoked;
+            bridgeCompleted = true;
+          } catch (error: unknown) {
+            // 撤销失败不阻止本地登出；用户可在 ChatGPT 设置中手动断开（官方建议路径）。
+            log.warn(undefined, "ChatGPT 会话撤销失败，继续本地登出", { error });
+          }
         }
-      }
-      runtimeObservation = undefined;
-      await options.deleteCredential(CHATGPT_CREDENTIAL_KEYS.credentials);
-      const status = await readStatus();
-      emit(status);
-      return { revoked, status };
+        runtimeObservation = undefined;
+        // Adapter 已按 generation 删除；不能无条件再删除另一个进程的新登录。
+        if (!bridgeCompleted) {
+          await options.deleteCredential(CHATGPT_CREDENTIAL_KEYS.credentials);
+          await options.deleteCredential(CHATGPT_CREDENTIAL_KEYS.models);
+        }
+        const status = await readStatus();
+        emit(status);
+        return { revoked, status };
+      });
     },
 
     onDidChange(listener) {

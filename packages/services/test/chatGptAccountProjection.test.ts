@@ -91,6 +91,17 @@ function modelsCacheJson(models: readonly { slug: string; display_name: string }
 }
 
 describe("readChatGptAccountProviderOverlay", () => {
+  it("does not grant model access without the plan scope even with a cached catalog", async () => {
+    const overlay = await readChatGptAccountProviderOverlay(
+      createCredentialMap({
+        [CHATGPT_CREDENTIAL_KEYS.credentials]: chatGptCredentialRecord({ scopes: ["openid"] }),
+        [CHATGPT_CREDENTIAL_KEYS.models]: modelsCacheJson([
+          { slug: "gpt-test", display_name: "Test" },
+        ]),
+      }),
+    );
+    expect(overlay.toJSON().access).toEqual({ type: "openai-oauth", entitled: false });
+  });
   it("未登录（无记录/损坏记录）fail-closed：entitled=false 且无模型", async () => {
     const store = createCredentialMap({});
     const overlay = await readChatGptAccountProviderOverlay(store);
@@ -160,6 +171,35 @@ describe("readChatGptAccountProviderOverlay", () => {
 });
 
 describe("createChatGptAwareAccountProviderSource", () => {
+  it("reprojects upstream events and local credential changes without upstream network refresh", async () => {
+    const base = createAccountProviderConfigSnapshot("rev", ProviderConfigMap.empty(), {});
+    let notify: (reason: string) => void = () => {};
+    const upstream = {
+      read: vi.fn(async () => base),
+      refresh: vi.fn(async () => base),
+      onDidChange: (listener: (reason: string) => void) => {
+        notify = listener;
+        return () => {};
+      },
+    };
+    const source = createChatGptAwareAccountProviderSource({
+      source: upstream,
+      configSource: {
+        read: async () => ({ revision: "rev", zcodeBuiltinProviders: ProviderConfigMap.empty() }),
+        onDidChange: () => () => {},
+      },
+      loadCredential: async () => null,
+      credentialFilePath: "unused",
+      watchCredentials: false,
+    });
+    await source.read();
+    notify("upstream-updated");
+    await source.refresh("chatgpt-credentials-changed");
+    expect(upstream.refresh).not.toHaveBeenCalled();
+    await source.refresh("explicit");
+    expect(upstream.refresh).toHaveBeenCalledOnce();
+    source.dispose();
+  });
   it("Built-in 未声明 ChatGPT Provider 时保持 Host 快照原样（guard）", async () => {
     const store = createCredentialMap({
       [CHATGPT_CREDENTIAL_KEYS.credentials]: chatGptCredentialRecord({}),
@@ -444,6 +484,39 @@ describe("ChatGPT account projection end-to-end（Host Registry → ModelSelecti
 });
 
 describe("createChatGptAccountService", () => {
+  it("serializes login, logout and a new login in user action order", async () => {
+    const store = createCredentialMap({});
+    const events: string[] = [];
+    let releaseLogin!: () => void;
+    const firstLogin = new Promise<void>((resolve) => {
+      releaseLogin = resolve;
+    });
+    let logins = 0;
+    const service = createChatGptAccountService({
+      ...store,
+      loginBridge: async () => {
+        logins += 1;
+        events.push(`login${logins}`);
+        if (logins === 1) await firstLogin;
+        store.replace({ [CHATGPT_CREDENTIAL_KEYS.credentials]: chatGptCredentialRecord({}) });
+      },
+      logoutBridge: async () => {
+        events.push("logout");
+        store.replace({});
+        return { revoked: true };
+      },
+    });
+    const login = service.beginLogin();
+    const duplicate = service.beginLogin();
+    const logout = service.disconnect();
+    const nextLogin = service.beginLogin();
+    releaseLogin();
+    await Promise.all([login, duplicate, logout, nextLogin]);
+    expect(events).toEqual(["login1", "logout", "login2"]);
+    expect(await service.getStatus()).toMatchObject({ status: "plan-enabled" });
+    expect(store.deleteCredential).not.toHaveBeenCalled();
+    service.dispose();
+  });
   it("状态映射：未连接 / 已登录无计划 scope / plan-enabled", async () => {
     const store = createCredentialMap({});
     const service = createChatGptAccountService({

@@ -3556,6 +3556,15 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.customTitle": "自定义供应商",
   "settings.modelProvider.refresh": "刷新",
   "settings.modelProvider.chatgpt.title": "OpenAI — ChatGPT 订阅",
+  "settings.modelProvider.chatgpt.waiting": "请在浏览器中完成登录，然后返回此处。",
+  "settings.modelProvider.chatgpt.openWorkspace": "进入工作区",
+  "settings.modelProvider.chatgpt.error.browser": "无法打开浏览器。请检查默认浏览器后重试。",
+  "settings.modelProvider.chatgpt.error.timeout": "登录超时。请点击 Continue with ChatGPT 重试。",
+  "settings.modelProvider.chatgpt.error.denied": "ChatGPT 授权被拒绝。准备好后可以重试。",
+  "settings.modelProvider.chatgpt.error.login": "无法连接 ChatGPT。请检查网络后重试。",
+  "settings.modelProvider.chatgpt.error.unavailable":
+    "当前 Host 不支持 ChatGPT 登录。请打开最新的 ZCode Harness 桌面版。",
+  "settings.modelProvider.chatgpt.error.disconnect": "无法断开 ChatGPT。请重试。",
   "settings.modelProvider.chatgpt.description":
     "在 ZCode 的日常任务中使用你的 ChatGPT 套餐。模型请求会消耗 ChatGPT 套餐用量，无需 API Key。",
   "settings.modelProvider.chatgpt.continue": "使用 ChatGPT 继续",
