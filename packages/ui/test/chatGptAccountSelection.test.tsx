@@ -97,6 +97,22 @@ describe("ChatGPT model selection renderer chain", () => {
 });
 
 describe("useChatGptAccount", () => {
+  it("refreshes the host model catalog without restarting login", async () => {
+    const { service } = fakeService({ status: "plan-enabled" });
+    const hook = renderWithService(service);
+    await expect(hook.result.current.refreshModels?.()).resolves.toEqual({
+      result: "completed",
+      modelCount: 2,
+    });
+    expect(service.refreshModels).toHaveBeenCalledOnce();
+    expect(service.beginLogin).not.toHaveBeenCalled();
+    hook.unmount();
+    const legacy = renderWithService(undefined);
+    await expect(legacy.result.current.refreshModels?.()).resolves.toEqual({
+      result: "unavailable",
+    });
+    legacy.unmount();
+  });
   function renderWithService(service: IChatGptAccountService | undefined) {
     const services = {
       chatGptAccountService: service,
@@ -114,6 +130,7 @@ describe("useChatGptAccount", () => {
     let current = initial;
     return {
       service: {
+        refreshModels: vi.fn(async () => ({ result: "completed" as const, modelCount: 2 })),
         getStatus: vi.fn(async () => current),
         beginLogin: vi.fn(async () => {
           current = {

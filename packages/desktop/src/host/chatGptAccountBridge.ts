@@ -1,9 +1,14 @@
 import {
   createSharedZCodeCredentialStore,
   runChatGptLogin,
+  refreshChatGptModels,
+  type ChatGptModelsRefreshResult,
   runChatGptLogout,
 } from "@zcode/adapters/auth";
-import { getAppConfigDir, resolveCredentialFilePath } from "@zcode/services/node";
+import {
+  getAppConfigDir,
+  resolveCredentialFilePath,
+} from "@zcode/services/node";
 
 /**
  * ChatGPT（Sign in with ChatGPT）账号桥：Desktop Host 装配层对 agent 侧
@@ -31,6 +36,7 @@ export interface DesktopChatGptAccountBridgeOptions {
 
 /** createLocalServices 的 chatGptAccount 注入形状（loginBridge/logoutBridge）。 */
 export interface DesktopChatGptAccountBridges {
+  readonly refreshModelsBridge: () => Promise<ChatGptModelsRefreshResult>;
   readonly loginBridge: () => Promise<void>;
   readonly logoutBridge: () => Promise<{ revoked: boolean }>;
 }
@@ -43,9 +49,14 @@ export function createDesktopChatGptAccountBridges(
   const createStore = () =>
     createSharedZCodeCredentialStore({
       env,
-      filePath: options.credentialFilePath ?? resolveCredentialFilePath(getAppConfigDir()),
+      filePath:
+        options.credentialFilePath ??
+        resolveCredentialFilePath(getAppConfigDir()),
     });
   return {
+    async refreshModelsBridge() {
+      return refreshChatGptModels({ store: createStore(), env });
+    },
     async loginBridge() {
       await runChatGptLogin({
         store: createStore(),
@@ -55,9 +66,15 @@ export function createDesktopChatGptAccountBridges(
               openBrowser: async (url: string) => {
                 try {
                   await options.openExternal!(url);
-                  return { command: "electron.shell.openExternal", opened: true };
+                  return {
+                    command: "electron.shell.openExternal",
+                    opened: true,
+                  };
                 } catch {
-                  return { command: "electron.shell.openExternal", opened: false };
+                  return {
+                    command: "electron.shell.openExternal",
+                    opened: false,
+                  };
                 }
               },
             }

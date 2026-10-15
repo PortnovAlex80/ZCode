@@ -33,6 +33,13 @@ export interface IChatGptAccountService {
    */
   beginLogin(): Promise<ChatGptBeginLoginResult>;
 
+  /** 使用现有凭据重试模型目录；网络失败不触发重新登录或删除凭据。 */
+  refreshModels(): Promise<
+    | { result: "completed"; modelCount: number }
+    | { result: "failed"; code: string; httpStatus?: number }
+    | { result: "unavailable" }
+  >;
+
   /** 断开本机会话：优先撤销远端会话（bridge 注入时），随后清空本地凭据与模型缓存。 */
   disconnect(): Promise<ChatGptDisconnectResult>;
 
@@ -99,6 +106,9 @@ export interface CreateChatGptAccountServiceOptions {
   /** 登录/登出实现桥；缺省时 begin fail-closed，disconnect 仍可本地清空。 */
   readonly loginBridge?: ChatGptAccountLoginBridge;
   readonly logoutBridge?: ChatGptAccountLogoutBridge;
+  readonly refreshModelsBridge?: () => Promise<
+    Exclude<Awaited<ReturnType<IChatGptAccountService["refreshModels"]>>, { result: "unavailable" }>
+  >;
 }
 
 interface ChatGptAccountRuntimeState {
@@ -126,6 +136,7 @@ export function createChatGptAccountService(
   let runtimeObservation: ChatGptRuntimeObservationKind | undefined;
   let disposed = false;
   let loginInFlight: Promise<ChatGptBeginLoginResult> | null = null;
+  let modelsInFlight: ReturnType<IChatGptAccountService["refreshModels"]> | null = null;
   let operationTail: Promise<unknown> = Promise.resolve();
   const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
     const pending = operationTail.then(operation, operation);
@@ -210,6 +221,7 @@ export function createChatGptAccountService(
       }
       // 同一 Host 同时只允许一次交互式登录；并发 begin 复用同一次用户授权。
       if (loginInFlight) return loginInFlight;
+      modelsInFlight = null;
       const inFlight = enqueue(async (): Promise<ChatGptBeginLoginResult> => {
         try {
           await options.loginBridge!();
@@ -236,9 +248,31 @@ export function createChatGptAccountService(
       }
     },
 
+    async refreshModels() {
+      if (!options.refreshModelsBridge || disposed) return { result: "unavailable" };
+      if (modelsInFlight) return modelsInFlight;
+      // 与登录/退出共用串行队列，避免迟到的目录刷新覆盖下一账号；并发重试只请求一次。
+      const inFlight = enqueue(async (): ReturnType<IChatGptAccountService["refreshModels"]> => {
+        if (disposed) return { result: "unavailable" };
+        try {
+          return await options.refreshModelsBridge!();
+        } catch {
+          // 不透传任意异常消息或凭据；失败只影响目录，保留已完成的登录。
+          return { result: "failed", code: "chatgpt_models_refresh_failed" };
+        }
+      });
+      modelsInFlight = inFlight;
+      try {
+        return await inFlight;
+      } finally {
+        if (modelsInFlight === inFlight) modelsInFlight = null;
+      }
+    },
+
     async disconnect() {
       // 同一 owner 按用户操作顺序串行化：logout 后的新 login 不能复用旧尝试。
       loginInFlight = null;
+      modelsInFlight = null;
       return enqueue(async () => {
         let revoked = false;
         let bridgeCompleted = false;

@@ -49,14 +49,20 @@ export interface SharedZCodeCredentialStore {
   delete(key: string): Promise<void>;
   deleteIfValue(key: string, expectedValue: string): Promise<boolean>;
   /**
-   * 条件事务保存：`key` 当前值等于 `expectedValue`（null 表示 key 不存在）才写入 `value`。
+   * 条件事务保存：`guardKey`（缺省为 `key`）当前值等于 `expectedValue` 才写入 `key`。
+   * expectedValue 为 null 表示 guardKey 不存在；独立 guardKey 用于凭据代际保护模型缓存。
    *
    * OAuth refresh 轮换的持久化需要 generation CAS：刷新在网络往返期间，另一条路径
    * （例如并发的重新登录）可能已经替换了整份记录；无条件 `save` 会用旧会话的轮换结果
    * 覆盖新会话。比较与写入在 `mutateRawCredentialRecord` 的同一把文件锁内完成，
    * 与 `deleteIfValue` 一样是单事务，不存在 delete+write 的中间窗口。
    */
-  saveIfValue(key: string, expectedValue: string | null, value: string): Promise<boolean>;
+  saveIfValue(
+    key: string,
+    expectedValue: string | null,
+    value: string,
+    guardKey?: string,
+  ): Promise<boolean>;
   deleteIfValues(
     expectedValues: Readonly<Record<string, string>>,
   ): Promise<Record<string, boolean>>;
@@ -218,17 +224,19 @@ export function createSharedZCodeCredentialStore(
       key: string,
       expectedValue: string | null,
       value: string,
+      guardKey: string = key,
     ): Promise<boolean> {
       const validatedKey = validateCredentialKey(key);
+      const validatedGuardKey = validateCredentialKey(guardKey);
       const validatedValue = cipher.encrypt(validateCredentialValue(value));
       const validatedExpectedValue =
         expectedValue === null ? null : validateCredentialValue(expectedValue);
       let saved = false;
       await mutateRawCredentialRecord(filePath, (rawCredentials) => {
-        const encryptedCurrent = rawCredentials[validatedKey];
+        const encryptedCurrent = rawCredentials[validatedGuardKey];
         const currentValue =
           encryptedCurrent === undefined ? null : cipher.decrypt(encryptedCurrent);
-        // 与 deleteIfValue 相同的单锁 compare-and-set：expected 为 null 表示「key 不存在」
+        // 与 deleteIfValue 相同的单锁 compare-and-set：expected 为 null 表示「guardKey 不存在」
         // （合法 value 永远非空，null 不会与任何真实值混淆）。
         if (currentValue !== validatedExpectedValue) return;
         rawCredentials[validatedKey] = validatedValue;

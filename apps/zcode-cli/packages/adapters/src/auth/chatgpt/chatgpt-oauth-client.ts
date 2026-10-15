@@ -1,3 +1,4 @@
+import { withChatGptRequestDeadline } from "./chatgpt-request-deadline.js";
 import {
   CHATGPT_OAUTH_AGENT_NAME_HINT,
   CHATGPT_OAUTH_REGISTRATION_CLIENT_ID,
@@ -163,42 +164,45 @@ async function postFormTokenRequest(
   params: Record<string, string>,
   fetchImpl: ChatGptOAuthFetch,
 ): Promise<ChatGptTokenResponse> {
-  let response: Response;
-  try {
-    response = await fetchImpl(tokenEndpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        accept: "application/json",
-      },
-      body: new URLSearchParams(params).toString(),
-    });
-  } catch (error) {
-    throw new ChatGptOAuthError(
-      "chatgpt_token_network_error",
-      "Unable to reach the OpenAI token endpoint.",
-      { cause: error },
-    );
-  }
-  const text = await response.text();
-  let body: unknown = undefined;
-  try {
-    body = text ? (JSON.parse(text) as unknown) : undefined;
-  } catch {
-    body = undefined;
-  }
-  if (!response.ok || !isRecord(body)) {
-    const oauthError = isRecord(body) ? readString(body.error) : undefined;
-    const oauthErrorDescription = isRecord(body)
-      ? readString(body.error_description) ?? readString(body.error_message)
-      : undefined;
-    throw new ChatGptOAuthError(
-      "chatgpt_token_request_failed",
-      `OpenAI token endpoint returned ${response.status}.`,
-      { oauthError, oauthErrorDescription, httpStatus: response.status },
-    );
-  }
-  return body as unknown as ChatGptTokenResponse;
+  return withChatGptRequestDeadline(async (signal) => {
+    let response: Response;
+    try {
+      response = await fetchImpl(tokenEndpoint, {
+        method: "POST",
+        signal,
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          accept: "application/json",
+        },
+        body: new URLSearchParams(params).toString(),
+      });
+    } catch (error) {
+      throw new ChatGptOAuthError(
+        "chatgpt_token_network_error",
+        "Unable to reach the OpenAI token endpoint.",
+        { cause: error },
+      );
+    }
+    const text = await response.text();
+    let body: unknown = undefined;
+    try {
+      body = text ? (JSON.parse(text) as unknown) : undefined;
+    } catch {
+      body = undefined;
+    }
+    if (!response.ok || !isRecord(body)) {
+      const oauthError = isRecord(body) ? readString(body.error) : undefined;
+      const oauthErrorDescription = isRecord(body)
+        ? readString(body.error_description) ?? readString(body.error_message)
+        : undefined;
+      throw new ChatGptOAuthError(
+        "chatgpt_token_request_failed",
+        `OpenAI token endpoint returned ${response.status}.`,
+        { oauthError, oauthErrorDescription, httpStatus: response.status },
+      );
+    }
+    return body as unknown as ChatGptTokenResponse;
+  }, new ChatGptOAuthError("chatgpt_token_timeout", "OpenAI token request timed out."));
 }
 
 export interface ChatGptCodeExchangeInput {
@@ -314,40 +318,53 @@ export async function fetchChatGptModelList(
   accessToken: string,
   fetchImpl: ChatGptOAuthFetch,
 ): Promise<ChatGptModelListResult> {
-  let response: Response;
-  try {
-    response = await fetchImpl(modelsEndpoint, {
-      headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" },
-    });
-  } catch (error) {
-    throw new ChatGptOAuthError(
-      "chatgpt_models_network_error",
-      "Unable to load the ChatGPT model list.",
-      { cause: error },
-    );
-  }
-  if (!response.ok) {
-    throw new ChatGptOAuthError(
-      "chatgpt_models_request_failed",
-      `Model list request failed: ${response.status}`,
-      { httpStatus: response.status },
-    );
-  }
-  const body = (await response.json()) as unknown;
-  const models = isRecord(body) && Array.isArray(body.models) ? body.models : [];
-  const entries: ChatGptModelListEntry[] = [];
-  for (const entry of models) {
-    if (!isRecord(entry)) continue;
-    const slug = readString(entry.slug);
-    const displayName = readString(entry.display_name);
-    if (!slug || !displayName) continue;
-    // 文档：只暴露 visibility == "list" 且可在 API 使用的模型；空目录不上报为错误，
-    // 由调用方按「有效空目录」处理（计划 §3 备注 5：不得用 seed 模型顶替）。
-    if (readString(entry.visibility) !== "list") continue;
-    if (entry.supported_in_api === false) continue;
-    entries.push({ slug, display_name: displayName });
-  }
-  return { models: entries };
+  return withChatGptRequestDeadline(
+    async (signal) => {
+      let response: Response;
+      try {
+        response = await fetchImpl(modelsEndpoint, {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            accept: "application/json",
+          },
+          signal,
+        });
+      } catch (error) {
+        throw new ChatGptOAuthError(
+          "chatgpt_models_network_error",
+          "Unable to load the ChatGPT model list.",
+          { cause: error },
+        );
+      }
+      if (!response.ok) {
+        throw new ChatGptOAuthError(
+          "chatgpt_models_request_failed",
+          `Model list request failed: ${response.status}`,
+          { httpStatus: response.status },
+        );
+      }
+      const body = (await response.json()) as unknown;
+      const models =
+        isRecord(body) && Array.isArray(body.models) ? body.models : [];
+      const entries: ChatGptModelListEntry[] = [];
+      for (const entry of models) {
+        if (!isRecord(entry)) continue;
+        const slug = readString(entry.slug);
+        const displayName = readString(entry.display_name);
+        if (!slug || !displayName) continue;
+        // 文档：只暴露 visibility == "list" 且可在 API 使用的模型；空目录不上报为错误，
+        // 由调用方按「有效空目录」处理（计划 §3 备注 5：不得用 seed 模型顶替）。
+        if (readString(entry.visibility) !== "list") continue;
+        if (entry.supported_in_api === false) continue;
+        entries.push({ slug, display_name: displayName });
+      }
+      return { models: entries };
+    },
+    new ChatGptOAuthError(
+      "chatgpt_models_timeout",
+      "ChatGPT model discovery timed out. Sign-in credentials were preserved.",
+    ),
+  );
 }
 
 /** 解析 token 响应的 scope 字段为列表；缺省返回空数组（refresh 可能不带 scope）。 */

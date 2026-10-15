@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
 import type { ChatGptAccountStatus } from "@zcode/shared";
+import type { IChatGptAccountService } from "@zcode/services";
 import { useOptionalServices } from "@/hooks/useServices.js";
 import { logger } from "@/logger.js";
 
@@ -14,6 +15,7 @@ export interface ChatGptAccountRead {
     | { result: "failed"; code: string; message: string }
   >;
   disconnect(): Promise<void>;
+  refreshModels?: IChatGptAccountService["refreshModels"];
 }
 
 /**
@@ -77,5 +79,10 @@ export function useChatGptAccount(): ChatGptAccountRead {
     setStatus(result.status);
   }, [service]);
 
-  return { status, loading, refresh: reload, beginLogin, disconnect };
+  const refreshModels = useCallback(async () => {
+    if (!service?.refreshModels) return { result: "unavailable" as const };
+    return service.refreshModels();
+  }, [service]);
+
+  return { status, loading, refresh: reload, beginLogin, disconnect, refreshModels };
 }

@@ -160,6 +160,9 @@ function closeServer(server: ReturnType<typeof createServer>): Promise<void> {
       }
       resolve();
     });
+    // 浏览器预连接可能从未发送 HTTP 请求；server.close() 不会收掉这种
+    // TCP socket，导致凭据已保存后登录仍永久等待 finally。先停止监听再收口连接。
+    server.closeAllConnections();
   });
 }
 

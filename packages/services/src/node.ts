@@ -1185,6 +1185,9 @@ export function createLocalServices(options: {
   chatGptAccount?: {
     loginBridge?: () => Promise<void>;
     logoutBridge?: () => Promise<{ revoked: boolean }>;
+    refreshModelsBridge?: () => Promise<
+      Exclude<Awaited<ReturnType<IChatGptAccountService["refreshModels"]>>, { result: "unavailable" }>
+    >;
   };
   /** 闲时任务翻 schedulable 后请求宿主立即唤醒 scheduler（desktop host 注入 parentPort 转发）。 */
   onOffPeakSchedulerWakeRequested?: () => void;
@@ -1495,6 +1498,17 @@ export function createLocalServices(options: {
   const chatGptAccountService = createChatGptAccountService({
     loadCredential: (key) => credentialService.load(key),
     deleteCredential: (key) => credentialService.delete(key),
+    ...(options.chatGptAccount?.refreshModelsBridge
+      ? {
+          refreshModelsBridge: async () => {
+            const result = await options.chatGptAccount!.refreshModelsBridge!();
+            if (result.result === "completed") {
+              await accountProviderConfigSource.refresh("chatgpt-models");
+            }
+            return result;
+          },
+        }
+      : {}),
     ...(options.chatGptAccount?.loginBridge
       ? {
           loginBridge: async () => {

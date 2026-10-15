@@ -15,3 +15,4 @@ export * from "./chatgpt-credential-record.js";
 export * from "./chatgpt-refresh-coordinator.js";
 export * from "./chatgpt-request-auth.js";
 export * from "./chatgpt-login-flow.js";
+export * from "./chatgpt-model-refresh.js";

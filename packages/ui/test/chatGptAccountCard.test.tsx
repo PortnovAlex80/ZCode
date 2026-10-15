@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatGptAccountCard } from "@/settings/model-provider-section/ChatGptAccountCard.js";
 import type { ChatGptAccountRead } from "@/hooks/useChatGptAccount.js";
 
 vi.mock("@/i18n/IntlProvider.js", () => ({
-  useZCodeIntl: () => ({ intl: { formatMessage: ({ id }: { id: string }) => id } }),
+  useZCodeIntl: () => ({
+    intl: {
+      formatMessage: ({ id }: { id: string }, values?: { httpStatus?: number }) =>
+        values?.httpStatus ? `${id} HTTP ${values.httpStatus}` : id,
+    },
+  }),
 }));
 vi.mock("@/hooks/usePlatform.js", () => ({ usePlatform: () => ({ openExternal: vi.fn() }) }));
 vi.mock("@/logger.js", () => ({ logger: { warn: vi.fn() } }));
@@ -22,6 +27,71 @@ function account(beginLogin: ChatGptAccountRead["beginLogin"]): ChatGptAccountRe
 }
 
 describe("ChatGPT connection feedback", () => {
+  it("bounds a stalled catalog request and allows another retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const current = account(vi.fn());
+      current.status = { status: "plan-enabled" };
+      current.refreshModels = vi.fn(() => new Promise(() => {}));
+      render(<ChatGptAccountCard account={current} />);
+      const button = screen.getByRole("button", {
+        name: "settings.modelProvider.chatgpt.models.refresh",
+      }) as HTMLButtonElement;
+      fireEvent.click(button);
+      expect(button.disabled).toBe(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(button.disabled).toBe(false);
+      expect(screen.getByRole("alert").textContent).toContain("models.failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("retries a 520 catalog failure without OAuth and reports returned models", async () => {
+    const current = account(vi.fn());
+    current.status = { status: "plan-enabled" };
+    current.refreshModels = vi
+      .fn()
+      .mockResolvedValueOnce({ result: "failed", code: "private-detail", httpStatus: 520 })
+      .mockResolvedValueOnce({ result: "completed", modelCount: 3 });
+    render(<ChatGptAccountCard account={current} />);
+    const button = screen.getByRole("button", {
+      name: "settings.modelProvider.chatgpt.models.refresh",
+    });
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("HTTP 520"));
+    expect(screen.queryByText("private-detail")).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("models.loaded"));
+    expect(current.beginLogin).not.toHaveBeenCalled();
+    expect(current.refreshModels).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["empty", "unavailable", "rejected"])(
+    "reports %s catalog result and releases the button",
+    async (outcome) => {
+      const current = account(vi.fn());
+      current.status = { status: "plan-enabled" };
+      current.refreshModels = vi.fn(async () => {
+        if (outcome === "rejected") throw new Error("private detail");
+        if (outcome === "unavailable") return { result: "unavailable" as const };
+        return { result: "completed" as const, modelCount: 0 };
+      });
+      render(<ChatGptAccountCard account={current} />);
+      const button = screen.getByRole("button", {
+        name: "settings.modelProvider.chatgpt.models.refresh",
+      }) as HTMLButtonElement;
+      fireEvent.click(button);
+      await waitFor(() =>
+        expect(screen.getByRole(outcome === "empty" ? "status" : "alert").textContent).toContain(
+          `models.${outcome === "rejected" ? "failed" : outcome}`,
+        ),
+      );
+      expect(button.disabled).toBe(false);
+      expect(current.beginLogin).not.toHaveBeenCalled();
+    },
+  );
   it("can enter the workspace with an already connected account", async () => {
     const current = account(vi.fn());
     current.status = { status: "plan-enabled" };

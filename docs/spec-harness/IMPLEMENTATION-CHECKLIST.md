@@ -33,6 +33,31 @@ recheck those items before restoring their accepted status.
 
 ## Exclusive write assignments
 
+### Callback completion and model catalog recovery — 2026-10-15
+
+Live user completed browser consent but login spinner persisted. Saved credentials
+were observed, model cache absent. An authenticated bounded GET to the documented
+model endpoint returned HTTP 520 (no model inference invoked). Host TCP inspection
+also showed a remaining loopback connection after its listener had closed; callback
+shutdown must be tested against browser speculative connections rather than assumed.
+`repair_openai` owns adapter deadlines/callback cleanup/catalog refresh + Desktop bridge;
+`repair_windows` owns account service serialization/Host composition;
+`repair_performance` owns retry/status UI and locales. Root owns specs, integration,
+independent review, validation and production rebuild. No account tokens or raw traces
+are committed. Existing installed process and active consent are preserved.
+
+Implementation verification: real speculative TCP callback test reproduced the hang
+before cleanup and passed after it. Token exchange/refresh and catalog headers/body
+have aborting 15-second deadlines; expired-token timeout preserves credentials and
+releases the refresh lock for the next attempt. Catalog retry uses current credentials,
+generation-guarded cache writes, and existing provider projection refresh.
+Root executed 43 adapter tests (5 suites), 9 service/desktop integration tests (2 suites),
+and 15 UI/hook tests (2 suites), all passed. Full typecheck passed after rebuilding
+adapter public declarations. Lint 63 warnings/0 errors; architecture 0 violations.
+Independent review caught the expired-token deadline gap before this validation.
+Actual account catalog availability remains blocked by observed upstream HTTP 520;
+local retry/interface evidence cannot establish live model access or inference.
+
 ### Reopened live defects — 2026-10-15
 
 User reports production browser never opens for ChatGPT, project picker still lists

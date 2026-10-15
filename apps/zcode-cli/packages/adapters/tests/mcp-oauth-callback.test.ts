@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { connect } from "node:net";
 import {
   createLocalhostOAuthCallbackServer,
   MCP_OAUTH_CALLBACK_DENIED_ERROR_CODE,
@@ -24,6 +25,21 @@ async function createServer(): Promise<LocalhostOAuthCallbackServer> {
 }
 
 describe("localhost OAuth callback server", () => {
+  it("closes after a successful callback even when the browser holds a speculative TCP socket", async () => {
+    const server = await createServer();
+    const preconnect = connect(Number(new URL(server.callbackUrl).port), "127.0.0.1");
+    await new Promise<void>((resolve, reject) => { preconnect.once("connect", resolve); preconnect.once("error", reject); });
+    try {
+      const accepted = await fetch(`${server.callbackUrl}?state=${CORRECT_STATE}&code=good-code`);
+      expect(await accepted.text()).toContain("Authorization successful");
+      await server.waitForCallback();
+      const outcome = await Promise.race([
+        server.close().then(() => "closed"),
+        new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 500)),
+      ]);
+      expect(outcome).toBe("closed");
+    } finally { preconnect.destroy(); }
+  });
   it("keeps waiting after a mismatched state request and still accepts the correct callback", async () => {
     const server = await createServer();
 

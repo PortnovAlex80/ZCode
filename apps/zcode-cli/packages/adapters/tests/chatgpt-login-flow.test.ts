@@ -1,9 +1,12 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSharedZCodeCredentialStore } from "../src/auth/shared-credentials.js";
-import { runChatGptLogin, runChatGptLogout } from "../src/auth/chatgpt/chatgpt-login-flow.js";
+import {
+  runChatGptLogin,
+  runChatGptLogout,
+} from "../src/auth/chatgpt/chatgpt-login-flow.js";
 import {
   readChatGptCachedModels,
   readChatGptClientId,
@@ -12,18 +15,26 @@ import {
   writeChatGptCredentialRecord,
 } from "../src/auth/chatgpt/chatgpt-credential-record.js";
 import { createChatGptRequestAuthSource } from "../src/auth/chatgpt/chatgpt-request-auth.js";
-import { createMockAuthServer, RsaTestSigner } from "./chatgpt-oauth-mock-server.js";
+import {
+  createMockAuthServer,
+  RsaTestSigner,
+} from "./chatgpt-oauth-mock-server.js";
 
 const tempDirs: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  vi.useRealTimers();
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
 });
 
 async function createTempCredentialStore() {
   const dir = await mkdtemp(join(tmpdir(), "zcode-chatgpt-login-"));
   tempDirs.push(dir);
-  return createSharedZCodeCredentialStore({ filePath: join(dir, "credentials.json") });
+  return createSharedZCodeCredentialStore({
+    filePath: join(dir, "credentials.json"),
+  });
 }
 
 /** 模拟浏览器：请求 authorize URL 并跟随 302 到 loopback 回调（回调页只展示，不抛错）。 */
@@ -43,6 +54,45 @@ function browserDriver() {
 }
 
 describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", () => {
+  it("finishes authenticated login when model discovery never resolves, preserving credentials", async () => {
+    const server = await createMockAuthServer({ signer: new RsaTestSigner() });
+    const store = await createTempCredentialStore();
+    let discovered!: () => void;
+    const discoveryStarted = new Promise<void>((resolve) => {
+      discovered = resolve;
+    });
+    let modelSignal: AbortSignal | null | undefined;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const login = runChatGptLogin({
+        store,
+        env: {
+          ZCODE_CHATGPT_OAUTH_ISSUER: server.url,
+          ZCODE_CHATGPT_API_BASE_URL: `${server.url}/v1`,
+        },
+        openBrowser: browserDriver(),
+        fetchImpl: async (url, init) => {
+          if (String(url).endsWith("/models")) {
+            modelSignal = init?.signal;
+            discovered();
+            return new Promise<Response>(() => {});
+          }
+          return fetch(url, init);
+        },
+      });
+      await discoveryStarted;
+      expect(await readChatGptCredentialRecord(store)).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(15_000);
+      const result = await login;
+      expect(result.tokenSharingGranted).toBe(true);
+      expect(result.models).toEqual([]);
+      expect(modelSignal?.aborted).toBe(true);
+      expect(await readChatGptCredentialRecord(store)).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+      await server.close();
+    }
+  });
   it("fails immediately when the system browser cannot open", async () => {
     const store = await createTempCredentialStore();
     await expect(
@@ -78,7 +128,10 @@ describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", ()
       expect(result.clientId).toBe("oaiapp_test_client");
       expect(result.firstRegistration).toBe(true);
       expect(result.tokenSharingGranted).toBe(true);
-      expect(result.models.map((model) => model.slug)).toEqual(["gpt-6.1-sol", "gpt-6.1-sol-fast"]);
+      expect(result.models.map((model) => model.slug)).toEqual([
+        "gpt-6.1-sol",
+        "gpt-6.1-sol-fast",
+      ]);
 
       // 首次注册请求必须携带 dynamic_agent_client + agent_name_hint（真实应用名）+ host 标识。
       const authorizeQuery = server.authorizeRequests[0]!.searchParams;
@@ -118,7 +171,12 @@ describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", ()
 
       // 二次登录：复用已签发 client_id，不再携带 agent_name_hint；host id 不重建。
       const hostIdBefore = await resolveChatGptHostId(store);
-      await runChatGptLogin({ store, env, openBrowser: browserDriver(), timeoutMs: 10_000 });
+      await runChatGptLogin({
+        store,
+        env,
+        openBrowser: browserDriver(),
+        timeoutMs: 10_000,
+      });
       const secondAuthorize = server.authorizeRequests.at(-1)!.searchParams;
       expect(secondAuthorize.get("client_id")).toBe("oaiapp_test_client");
       expect(secondAuthorize.get("agent_name_hint")).toBeNull();
@@ -133,7 +191,10 @@ describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", ()
 
   it("用户拒绝授权（error=access_denied）：类型化错误，绝不交换 code", async () => {
     const signer = new RsaTestSigner();
-    const server = await createMockAuthServer({ signer, authorizeError: "access_denied" });
+    const server = await createMockAuthServer({
+      signer,
+      authorizeError: "access_denied",
+    });
     const store = await createTempCredentialStore();
     try {
       const error = await runChatGptLogin({
@@ -161,7 +222,9 @@ describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", ()
     const signer = new RsaTestSigner();
     const server = await createMockAuthServer({
       signer,
-      tokenResponseOverrides: () => ({ scope: "openid profile email offline_access" }),
+      tokenResponseOverrides: () => ({
+        scope: "openid profile email offline_access",
+      }),
     });
     const store = await createTempCredentialStore();
     const env = {
@@ -184,7 +247,11 @@ describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", ()
       // 请求级鉴权 fail-closed：身份在，token 不交付。
       const source = createChatGptRequestAuthSource({ store, env });
       await expect(
-        source.resolve({ attempt: 1, providerId: "account:chatgpt", modelId: "gpt-6.1-sol" }),
+        source.resolve({
+          attempt: 1,
+          providerId: "account:chatgpt",
+          modelId: "gpt-6.1-sol",
+        }),
       ).rejects.toMatchObject({ code: "chatgpt_token_sharing_scope_missing" });
     } finally {
       await server.close();
@@ -194,7 +261,10 @@ describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", ()
   it("回调返回与已保存不同的 client_id 被拒绝", async () => {
     const signer = new RsaTestSigner();
     const firstServer = await createMockAuthServer({ signer });
-    const secondServer = await createMockAuthServer({ signer, issuedClientId: "oaiapp_other" });
+    const secondServer = await createMockAuthServer({
+      signer,
+      issuedClientId: "oaiapp_other",
+    });
     const store = await createTempCredentialStore();
     try {
       await runChatGptLogin({
@@ -231,11 +301,18 @@ describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", ()
       ZCODE_CHATGPT_API_BASE_URL: `${server.url}/v1`,
     };
     try {
-      await runChatGptLogin({ store, env, openBrowser: browserDriver(), timeoutMs: 10_000 });
+      await runChatGptLogin({
+        store,
+        env,
+        openBrowser: browserDriver(),
+        timeoutMs: 10_000,
+      });
       const logout = await runChatGptLogout({ store, env });
       expect(logout.revoked).toBe(true);
       expect(server.revocationRequests.length).toBe(1);
-      expect(server.revocationRequests[0]).toMatchObject({ token: "initial-refresh-1" });
+      expect(server.revocationRequests[0]).toMatchObject({
+        token: "initial-refresh-1",
+      });
       expect(await readChatGptCredentialRecord(store)).toBeNull();
       expect(await readChatGptCachedModels(store)).toBeNull();
       // 官方：重登录复用已保存 client_id。
@@ -266,7 +343,9 @@ describe("runChatGptLogin (官方 SIWC 流程 against mock 授权服务器)", ()
           return response;
         },
       });
-      expect((await readChatGptCredentialRecord(store))?.generation).toBe("new-login-generation");
+      expect((await readChatGptCredentialRecord(store))?.generation).toBe(
+        "new-login-generation",
+      );
       expect(await readChatGptCachedModels(store)).not.toBeNull();
     } finally {
       await server.close();

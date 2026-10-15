@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChatGptAccountStatus } from "@zcode/shared";
 import { CHATGPT_USAGE_SETTINGS_URL } from "@zcode/shared";
 import { Loader2Icon } from "lucide-react";
@@ -26,8 +26,79 @@ export function ChatGptAccountCard({
   const [loginBusy, setLoginBusy] = useState(false);
   const [disconnectBusy, setDisconnectBusy] = useState(false);
   const [errorId, setErrorId] = useState<string | null>(null);
+  const [modelsBusy, setModelsBusy] = useState(false);
+  const [modelsFeedback, setModelsFeedback] = useState<{
+    id: string;
+    failed: boolean;
+    count?: number;
+    httpStatus?: number;
+  } | null>(null);
+  const modelsRequest = useRef(0);
+  const mounted = useRef(true);
   const snapshot = account.status;
   const status = snapshot?.status;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      modelsRequest.current++;
+    };
+  }, []);
+  useEffect(() => {
+    modelsRequest.current++;
+    setModelsBusy(false);
+    setModelsFeedback(null);
+  }, [status, snapshot?.email]);
+
+  const handleRefreshModels = async () => {
+    if (modelsBusy) return;
+    const request = ++modelsRequest.current;
+    setModelsBusy(true);
+    setModelsFeedback(null);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        account.refreshModels?.() ?? Promise.resolve({ result: "unavailable" as const }),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("timeout")), 30_000);
+        }),
+      ]);
+      if (!mounted.current || request !== modelsRequest.current) return;
+      if (result.result === "completed") {
+        setModelsFeedback({
+          id: result.modelCount
+            ? "settings.modelProvider.chatgpt.models.loaded"
+            : "settings.modelProvider.chatgpt.models.empty",
+          failed: false,
+          count: result.modelCount,
+        });
+      } else {
+        const httpStatus =
+          result.result === "failed" &&
+          Number.isInteger(result.httpStatus) &&
+          result.httpStatus! >= 100 &&
+          result.httpStatus! <= 599
+            ? result.httpStatus
+            : undefined;
+        setModelsFeedback({
+          id:
+            result.result === "unavailable"
+              ? "settings.modelProvider.chatgpt.models.unavailable"
+              : httpStatus
+                ? "settings.modelProvider.chatgpt.models.httpError"
+                : "settings.modelProvider.chatgpt.models.failed",
+          failed: true,
+          httpStatus,
+        });
+      }
+    } catch {
+      if (mounted.current && request === modelsRequest.current)
+        setModelsFeedback({ id: "settings.modelProvider.chatgpt.models.failed", failed: true });
+    } finally {
+      clearTimeout(timeout);
+      if (mounted.current && request === modelsRequest.current) setModelsBusy(false);
+    }
+  };
 
   // 服务不可用（旧 host / 远端 environment）或首读未完成时不占版面；
   // 状态到达后卡片出现，错误态由 status 键文案表达。
@@ -115,6 +186,18 @@ export function ChatGptAccountCard({
           ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap justify-start gap-2">
+          {status === "plan-enabled" ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              disabled={modelsBusy || loginBusy || disconnectBusy}
+              onClick={() => void handleRefreshModels()}
+            >
+              {modelsBusy ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+              {intl.formatMessage({ id: "settings.modelProvider.chatgpt.models.refresh" })}
+            </Button>
+          ) : null}
           {status === "plan-enabled" && onConnected ? (
             <Button
               type="button"
@@ -173,6 +256,17 @@ export function ChatGptAccountCard({
       {loginBusy ? (
         <p role="status" className="text-ui-sm text-foreground-subtle">
           {intl.formatMessage({ id: "settings.modelProvider.chatgpt.waiting" })}
+        </p>
+      ) : null}
+      {modelsFeedback ? (
+        <p
+          role={modelsFeedback.failed ? "alert" : "status"}
+          className="text-ui-sm text-foreground-subtle"
+        >
+          {intl.formatMessage(
+            { id: modelsFeedback.id },
+            { count: modelsFeedback.count ?? 0, httpStatus: modelsFeedback.httpStatus ?? 0 },
+          )}
         </p>
       ) : null}
       {errorId ? (
