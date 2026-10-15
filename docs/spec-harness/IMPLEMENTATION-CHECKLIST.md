@@ -63,6 +63,29 @@ Follow-up findings and verification:
 - Account consent and model requests were not performed. Browser launch evidence is
   not evidence of successful subscription authentication or inference.
 
+Follow-up product GUI evidence at code commit `a4665e07`:
+
+- Fresh isolated profile, explicit temporary project A, process cwd in the app repo:
+  Open doc lists exactly `unique-project-A.md`. No installation files are listed.
+- Opened the actual document discussion pane, used its native Expand control,
+  moved/resized the real BrowserWindow to `(30,30,1000,750)`, verified no internal
+  move/resize handles, then returned the same pane. This used an empty discussion;
+  an active paid/model conversation was not created.
+- Actual Continue with ChatGPT UI reached Main's native launcher exactly once with
+  the official authorization origin/path. Injecting an OS-launch failure produced
+  the visible retryable error rather than an endless spinner. This fixture does not
+  claim live account authentication. The separate real localhost browser probe above
+  verifies that Main's native launcher opens the default browser.
+- Updated production executable launched from packaged `app.asar`, title ZCode,
+  and displayed Continue with ChatGPT. The existing user's app/profile was preserved.
+
+Updated installer: `packages/desktop/dist/ZCode-3.15.1-win-x64.exe`, 170122480 bytes,
+SHA-256 `ef1e2b9928820baa698d96888fba4ba5a670c945f3191e9ea7c2dcf7d51c8554`.
+Packaged code revision `a4665e07`, production identity, upstream auto-update disabled.
+Build-Installer fast validation, native packaging checks and size audit passed;
+completed 2026-10-15 19:12 MSK. One ZCode desktop shortcut still points to the rebuilt
+`dist/win-unpacked/ZCode.exe`; no installer execution or profile replacement performed.
+
 ### Active repair — 2026-10-15
 
 User released the stopped runtime for repair. Existing GPT checklist below is historical:
