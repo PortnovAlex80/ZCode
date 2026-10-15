@@ -188,6 +188,48 @@ test("document symlink cannot escape the grant", async (context) => {
   }
 });
 
+// U-14（活体反馈 2026-10-14 «корзина в пикере не удаляет»）：remove 真实删除磁盘
+// 文件；未获写许可的服务必须显式拒绝（可见错误），且不改动磁盘——不允许静默成功。
+test("U-14: remove deletes the document; read-only service refuses visibly and leaves the file", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "spec-document-delete-test-"));
+  try {
+    await mkdir(join(directory, "notes"), { recursive: true });
+    await writeFile(join(directory, "todo.md"), "delete me\n");
+    await writeFile(join(directory, "notes", "keep.md"), "keep me\n");
+    const service = createSpecDocumentService({
+      desktopLocal: true,
+      allowUnleasedWrites: true,
+    });
+    const readonly = createSpecDocumentService({ desktopLocal: true });
+    // 只读服务：拒绝必须抛错（UI 呈现为可见状态），文件原样保留。
+    await assert.rejects(
+      readonly.remove({ workspacePath: directory, path: "todo.md" }),
+      /read-only/,
+    );
+    assert.equal(await readFile(join(directory, "todo.md"), "utf8"), "delete me\n");
+    // 授权服务：真实 unlink，返回归一后的相对路径，列表与后续读取反映删除结果。
+    const removed = await service.remove({ workspacePath: directory, path: "todo.md" });
+    assert.equal(removed.path, "todo.md");
+    await assert.rejects(
+      service.read({ workspacePath: directory, path: "todo.md" }),
+      /no such file/i,
+    );
+    assert.deepEqual(await service.list({ workspacePath: directory }), ["notes/keep.md"]);
+    // 已删除的文件再次删除：可见失败（ENOENT），而不是静默成功。
+    await assert.rejects(
+      service.remove({ workspacePath: directory, path: "todo.md" }),
+      /no such file/i,
+    );
+    // 越界路径拒绝删除。
+    await assert.rejects(
+      service.remove({ workspacePath: directory, path: "../outside.md" }),
+      /outside/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 // D-02/D-03 服务侧佐证：讨论载荷引用的文档 identity/path 与片段字节来源。
 // 快照必须逐字节保留磁盘内容（CRLF、制表符、NBSP、西里尔、emoji），sha256 对原始
 // 字节计算（锚点 sha256 的比对基准）；相对路径 identity 归一为正斜杠（Document link）。

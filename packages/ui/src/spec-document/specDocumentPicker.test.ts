@@ -255,3 +255,106 @@ describe("U-13 clean workspace-relative display", () => {
     expect(onOpen).toHaveBeenCalledWith(DIRTY_FILES[2]);
   });
 });
+
+/**
+ * U-14（活体反馈 2026-10-14 «корзина в пикере не удаляет——тихий no-op»）：
+ * 行尾 корзина 先行内确认（Delete/Cancel），确认后 onDelete 携带服务原路径；
+ * 禁用态必须解释原因（title）；未提供 onDelete 时不渲染删除入口。
+ */
+describe("U-14 picker delete (корзина)", () => {
+  afterEach(() => cleanup());
+
+  function renderDeletablePicker(options?: {
+    deleteDisabled?: boolean;
+    deleteDisabledReason?: string;
+  }) {
+    const onOpen = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      createElement(SpecDocumentPicker, {
+        files: FILES,
+        value: null,
+        onOpen,
+        onDelete,
+        ...(options?.deleteDisabled === undefined
+          ? {}
+          : { deleteDisabled: options.deleteDisabled }),
+        ...(options?.deleteDisabledReason === undefined
+          ? {}
+          : { deleteDisabledReason: options.deleteDisabledReason }),
+      }),
+    );
+    return { onOpen, onDelete };
+  }
+
+  it("trash asks for confirmation; Delete calls onDelete with the service path (and never opens)", () => {
+    const { onOpen, onDelete } = renderDeletablePicker();
+    openDropdown();
+    const trash = document.querySelector<HTMLElement>(
+      '[data-picker-delete="README.md"]',
+    )!;
+    expect(trash).toBeTruthy();
+    fireEvent.click(trash);
+    // 行内确认出现；尚未删除。
+    expect(
+      document.querySelector('[data-picker-delete-confirm="README.md"]'),
+    ).toBeTruthy();
+    expect(onDelete).not.toHaveBeenCalled();
+    // 点 корзина 不打开文档（stopPropagation：option 的选择/打开语义不被触发）。
+    expect(onOpen).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("Confirm delete README.md"));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(onDelete).toHaveBeenCalledWith("README.md");
+    // 确认后回到普通行（无确认态），下拉保持打开（可继续操作其它文件）。
+    expect(
+      document.querySelector("[data-picker-delete-confirm]"),
+    ).toBeNull();
+    expect(screen.getByLabelText("Filter documents")).toBeTruthy();
+  });
+
+  it("Cancel keeps the file: no onDelete, confirm cleared", () => {
+    const { onDelete } = renderDeletablePicker();
+    openDropdown();
+    fireEvent.click(
+      document.querySelector<HTMLElement>(
+        '[data-picker-delete="notes/расчёт.txt"]',
+      )!,
+    );
+    fireEvent.click(
+      screen.getByLabelText("Cancel deleting notes/расчёт.txt"),
+    );
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(document.querySelector("[data-picker-delete-confirm]")).toBeNull();
+    // корзина 回来了（可再次发起确认）。
+    expect(
+      document.querySelector<HTMLElement>(
+        '[data-picker-delete="notes/расчёт.txt"]',
+      ),
+    ).toBeTruthy();
+  });
+
+  it("deleteDisabled disables the trash and explains why (title); no confirm can be opened", () => {
+    const reason = "Deleting is not available in this experimental build yet.";
+    renderDeletablePicker({
+      deleteDisabled: true,
+      deleteDisabledReason: reason,
+    });
+    openDropdown();
+    const trash = document.querySelector<HTMLElement>(
+      '[data-picker-delete="README.md"]',
+    ) as HTMLButtonElement;
+    expect(trash.disabled).toBe(true);
+    // 原因挂在包裹 span 的 title 上（禁用按钮在部分环境不触发 tooltip）。
+    expect(trash.parentElement?.getAttribute("title")).toBe(reason);
+    fireEvent.click(trash);
+    expect(document.querySelector("[data-picker-delete-confirm]")).toBeNull();
+  });
+
+  it("without onDelete no delete affordance is rendered", () => {
+    renderPicker();
+    openDropdown();
+    expect(document.querySelector("[data-picker-delete]")).toBeNull();
+    expect(document.querySelector("[data-picker-delete-confirm]")).toBeNull();
+    expect(optionRows()).toHaveLength(FILES.length);
+  });
+});

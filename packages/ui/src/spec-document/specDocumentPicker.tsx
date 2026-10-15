@@ -6,8 +6,9 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { Search } from "lucide-react";
+import { Search, Trash2 } from "lucide-react";
 import { cn } from "@/components/lib/utils.js";
+import { Button } from "@/components/ui/button.js";
 
 /**
  * U-08：工作区文档选择器——可搜索 combobox。
@@ -30,6 +31,11 @@ import { cn } from "@/components/lib/utils.js";
  * onOpen 一律使用服务原路径，打开链路不受影响（列表仍由服务独占持有）。
  *
  * 显式打开路径只有 onOpen 一个：选择器不持有“当前文档”以外的任何状态。
+ *
+ * U-14（活体反馈 2026-10-14）：行尾删除入口（корзина）。此前整条删除链路不
+ * 存在（服务无 remove、UI 无处理器），用户点删除只能是静默 no-op。现在：行尾
+ * корзина → 行内确认（Delete/Cancel）→ onDelete(服务原路径)；不可删除时禁用并
+ * 通过 title 解释原因；结果反馈（成功确认/失败错误）由宿主面板可见呈现。
  */
 
 /**
@@ -69,6 +75,9 @@ export function SpecDocumentPicker({
   workspaceRoot,
   disabled,
   onOpen,
+  onDelete,
+  deleteDisabled,
+  deleteDisabledReason,
 }: {
   files: readonly string[];
   value: string | null;
@@ -76,10 +85,23 @@ export function SpecDocumentPicker({
   workspaceRoot?: string;
   disabled?: boolean;
   onOpen: (path: string) => void;
+  /**
+   * U-14（活体反馈 2026-10-14 «корзина в пикере не удаляет——тихий no-op»）：
+   * 按行删除回调（服务原路径）。缺省不渲染删除入口（纯选择用法不受影响）。
+   * 删除是破坏性操作：行内先确认（Delete/Cancel），确认后才调用；结果反馈
+   * （成功确认/失败错误）由宿主面板负责可见呈现。
+   */
+  onDelete?: (path: string) => void;
+  /** U-14：true 时删除按钮禁用（只读工作区、IO 进行中等）——禁用必须解释原因。 */
+  deleteDisabled?: boolean;
+  /** U-14：禁用原因，展示在删除按钮的 title 上（disabled-explains-why）。 */
+  deleteDisabledReason?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  // U-14：正在确认删除的行（服务原路径）；null = 无确认。关闭下拉即取消。
+  const [confirmDeletePath, setConfirmDeletePath] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const filterInputRef = useRef<HTMLInputElement | null>(null);
@@ -116,6 +138,8 @@ export function SpecDocumentPicker({
   function close(returnFocus = true) {
     setOpen(false);
     setFilter("");
+    // U-14：关闭下拉同时取消未完成的删除确认（下次打开是干净状态）。
+    setConfirmDeletePath(null);
     if (returnFocus) triggerRef.current?.focus();
   }
 
@@ -226,35 +250,98 @@ export function SpecDocumentPicker({
             className="max-h-64 overflow-y-auto p-1"
           >
             {matches.length ? (
-              matches.map(({ path, name, directory }, index) => (
+              matches.map(({ path, display, name, directory }, index) => (
+                /* U-14：行 = option（打开语义，键鼠行为不变）+ 行尾删除入口。
+                   删除按钮必须是 option 的兄弟节点而非子节点（WAI-ARIA 不允许
+                   option 内嵌交互元素）；高亮背景挂在 li 上，整个行视觉一致。 */
                 <li
                   key={path}
-                  role="option"
-                  aria-selected={path === value}
-                  tabIndex={-1}
-                  data-picker-path={path}
                   className={cn(
-                    "cursor-default rounded-sm px-2 py-1 text-ui-sm",
+                    "flex items-center gap-1 rounded-sm text-ui-sm",
                     index === activeIndex
                       ? "bg-surface-hover text-foreground"
                       : "text-foreground-subtle",
                   )}
-                  onClick={() => setActiveIndex(index)}
-                  onDoubleClick={() => openDocument(path)}
                 >
-                  {/* U-13：名称在前（truncate 只吃掉 muted 目录侧），
-                      深路径不再把文件名挤出可视区。 */}
-                  <span className="block truncate">
-                    <span data-picker-file-name>{name}</span>
-                    {directory ? (
+                  <div
+                    role="option"
+                    aria-selected={path === value}
+                    tabIndex={-1}
+                    data-picker-path={path}
+                    className="min-w-0 flex-1 cursor-default px-2 py-1"
+                    onClick={() => setActiveIndex(index)}
+                    onDoubleClick={() => openDocument(path)}
+                  >
+                    {/* U-13：名称在前（truncate 只吃掉 muted 目录侧），
+                        深路径不再把文件名挤出可视区。 */}
+                    <span className="block truncate">
+                      <span data-picker-file-name>{name}</span>
+                      {directory ? (
+                        <span
+                          data-picker-directory
+                          className="ml-1 text-foreground-subtlest"
+                        >
+                          {directory}
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                  {onDelete ? (
+                    confirmDeletePath === path ? (
                       <span
-                        data-picker-directory
-                        className="ml-1 text-foreground-subtlest"
+                        className="flex shrink-0 items-center gap-1 pr-1"
+                        data-picker-delete-confirm={path}
                       >
-                        {directory}
+                        <span className="text-ui-xs">Delete {name}?</span>
+                        <Button
+                          variant="destructive"
+                          size="icon-xs"
+                          aria-label={`Confirm delete ${display}`}
+                          title={`Permanently delete ${display} from disk`}
+                          data-picker-confirm-delete={path}
+                          onClick={() => {
+                            setConfirmDeletePath(null);
+                            onDelete(path);
+                          }}
+                        >
+                          <Trash2 aria-hidden="true" className="size-2.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={`Cancel deleting ${display}`}
+                          onClick={() => setConfirmDeletePath(null)}
+                        >
+                          ×
+                        </Button>
                       </span>
-                    ) : null}
-                  </span>
+                    ) : (
+                      /* U-14：禁用态必须解释原因——title 挂在外层 span 上
+                         （禁用按钮在部分环境不触发 tooltip/指针事件）。 */
+                      <span
+                        className="shrink-0 pr-1"
+                        title={
+                          deleteDisabled
+                            ? (deleteDisabledReason ?? "Deleting is unavailable.")
+                            : `Delete ${display} from disk`
+                        }
+                      >
+                        <button
+                          type="button"
+                          data-picker-delete={path}
+                          aria-label={`Delete ${display}`}
+                          disabled={deleteDisabled}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setConfirmDeletePath(path);
+                          }}
+                          className="rounded-sm p-1 text-foreground-subtle hover:text-destructive disabled:cursor-not-allowed disabled:text-foreground-subtlest"
+                        >
+                          <Trash2 aria-hidden="true" className="size-3.5" />
+                        </button>
+                      </span>
+                    )
+                  ) : null}
                 </li>
               ))
             ) : (

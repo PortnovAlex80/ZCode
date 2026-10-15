@@ -35,6 +35,7 @@ import {
   type ManagedNativeDiscussionOpenRequest,
 } from "@/spec-document/nativeDiscussionHandoff.js";
 import { SpecDocumentPane } from "@/spec-document/SpecDocumentPane.js";
+import type { ResolvedSpecDocumentWorkspace } from "@/spec-document/specDocumentWorkspace.js";
 import { PreviewPane } from "@/PreviewPane.js";
 import { SidePaneTerminalPane } from "@/SidePaneTerminalPane.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -340,6 +341,12 @@ export function AnimatedSidePanePanel({
   workspaceAbsPath,
   workspaceIdentity,
   workspaceRemoteSessionId,
+  /**
+   * U-15：文档面板（picker/list/read/save、workspaceRoot 展示与文档 tab 身份）使用的
+   * workspace，由宿主经 resolveSpecDocumentWorkspace 解析——活跃 tab 是应用托管的对话
+   * 后备 workspace（启动根）时指向「对话所在项目」。缺省回退 workspaceAbsPath 旧语义。
+   */
+  specDocumentWorkspace,
   activeTaskId,
   sidePaneOwnerId,
   gitState,
@@ -416,6 +423,8 @@ export function AnimatedSidePanePanel({
   workspaceAbsPath: string;
   workspaceIdentity?: string;
   workspaceRemoteSessionId?: string;
+  /** U-15：解析后的文档 workspace；缺省回退外壳活跃 workspace。 */
+  specDocumentWorkspace?: ResolvedSpecDocumentWorkspace;
   activeTaskId: string | null;
   sidePaneOwnerId: string | null;
   gitState: ReturnType<
@@ -514,6 +523,15 @@ export function AnimatedSidePanePanel({
     : (visibleTabs.at(-1)?.id ?? "");
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const [specDocumentRoot, setSpecDocumentRoot] = useState<string | null>(null);
+  // U-15：文档面板的根。缺省回退外壳活跃 workspace（旧语义，直渲染测试/fixture 兼容）；
+  // 宿主传入解析结果时，活跃 tab 是应用托管对话后备 workspace（启动根）的场景改用
+  // 「对话所在项目」的 workspace，picker/list/read/save 与 workspaceRoot 展示随之归位。
+  const specDocumentWorkspacePath = specDocumentWorkspace
+    ? specDocumentWorkspace.workspacePath
+    : workspaceAbsPath;
+  const specDocumentWorkspaceIdentity = specDocumentWorkspace
+    ? specDocumentWorkspace.workspaceIdentity
+    : workspaceIdentity;
   useEffect(() => {
     let live = true;
     setSpecDocumentRoot(null);
@@ -523,7 +541,7 @@ export function AnimatedSidePanePanel({
       services.specDocumentService
     ) {
       void services.specDocumentService
-        .getWorkspace({ workspacePath: workspaceAbsPath })
+        .getWorkspace({ workspacePath: specDocumentWorkspacePath })
         .then((grant) => {
           if (live) setSpecDocumentRoot(grant.root);
         })
@@ -534,7 +552,7 @@ export function AnimatedSidePanePanel({
     return () => {
       live = false;
     };
-  }, [isDesktop, workspaceRemoteSessionId, services, workspaceAbsPath]);
+  }, [isDesktop, workspaceRemoteSessionId, services, specDocumentWorkspacePath]);
   const normalizeDocumentPath = (path: string) =>
     path.replaceAll("\\", "/").replace(/\/$/, "").toLowerCase();
   const hasSpecDocumentGrant = Boolean(specDocumentRoot);
@@ -547,9 +565,13 @@ export function AnimatedSidePanePanel({
   const openSpecDocument = () => {
     if (!hasSpecDocumentGrant) return;
     onOpenCodeViewer(
+      // U-15：入口 source 也带解析后的文档 workspace——attachSpecDocumentSidePaneTab
+      // 用 source.workspacePath 拼绝对路径，tab 身份必须与面板实际根一致。
       buildSpecDocumentPickerSource({
-        workspacePath: workspaceAbsPath,
-        ...(workspaceIdentity ? { workspaceIdentity } : {}),
+        workspacePath: specDocumentWorkspacePath,
+        ...(specDocumentWorkspaceIdentity
+          ? { workspaceIdentity: specDocumentWorkspaceIdentity }
+          : {}),
       }),
     );
   };
@@ -563,9 +585,10 @@ export function AnimatedSidePanePanel({
       if (
         !target ||
         !hasSpecDocumentGrant ||
+        // U-15：回流请求携带的是文档面板（解析后）的 workspacePath；比较同根。
         normalizeDocumentPath(target.workspacePath) !==
-          normalizeDocumentPath(workspaceAbsPath) ||
-        target.workspaceIdentity !== workspaceIdentity
+          normalizeDocumentPath(specDocumentWorkspacePath) ||
+        target.workspaceIdentity !== specDocumentWorkspaceIdentity
       )
         return;
       // U-12 多开：原生讨论回流优先激活既有文档 tab（其面板自身监听会切到目标文档），
@@ -577,8 +600,8 @@ export function AnimatedSidePanePanel({
       window.removeEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, reopen);
   }, [
     hasSpecDocumentGrant,
-    workspaceAbsPath,
-    workspaceIdentity,
+    specDocumentWorkspacePath,
+    specDocumentWorkspaceIdentity,
   ]);
   const canOpenSpecDocument = (source: CodeViewerSource) => {
     if (
@@ -587,14 +610,14 @@ export function AnimatedSidePanePanel({
       source.workspaceRemoteSessionId ||
       !source.workspacePath ||
       normalizeDocumentPath(source.workspacePath) !==
-        normalizeDocumentPath(workspaceAbsPath) ||
+        normalizeDocumentPath(specDocumentWorkspacePath) ||
       (source.workspaceIdentity &&
-        source.workspaceIdentity !== workspaceIdentity)
+        source.workspaceIdentity !== specDocumentWorkspaceIdentity)
     )
       return false;
     if (source.specDocument) return true;
     const path = source.path.replaceAll("\\", "/");
-    const root = normalizeDocumentPath(workspaceAbsPath);
+    const root = normalizeDocumentPath(specDocumentWorkspacePath);
     const relativePath = normalizeDocumentPath(path).startsWith(root + "/")
       ? path.slice(root.length + 1)
       : path;
@@ -1521,8 +1544,12 @@ export function AnimatedSidePanePanel({
                           !workspaceRemoteSessionId &&
                           canOpenSpecDocument(tab.source) ? (
                           <SpecDocumentPane
-                            workspacePath={workspaceAbsPath}
-                            workspaceIdentity={workspaceIdentity}
+                            // U-15：面板的文档根/身份用解析后的「对话项目」workspace——
+                            // list/read/save、documentDisplayParts(workspaceRoot)、讨论与
+                            // 草稿键全部跟随项目；parentSessionId 仍来自宿主，讨论继续
+                            // 挂到当前对话的会话上，不因换根丢绑定。
+                            workspacePath={specDocumentWorkspacePath}
+                            workspaceIdentity={specDocumentWorkspaceIdentity}
                             visible={isVisible && tab.id === visibleActiveTabId}
                             parentSessionId={activeTaskId || sidePaneOwnerId}
                             // U-12 多开：面板实例键 = tab id（tab 内切换文档不重挂）；

@@ -137,5 +137,27 @@ export function createSpecDocumentService(options: {
       writeQueue = operation;
       return operation;
     },
+    async remove(params) {
+      // U-14（活体反馈 2026-10-14 «корзина в пикере не удаляет»）：删除链路此前
+      // 根本不存在（服务无 remove、UI 无处理器）——用户点删除永远是静默 no-op。
+      // 修复：真实 unlink，且与 save 同一写许可门（未获 writer lease 一律拒绝）和
+      // 同一写队列（排队中的 save 先落盘、再删除；删除后到达的 save 会在
+      // resolveDocument 处失败并可见报错），删除前复核文件身份（dev/ino），
+      // 防止校验与删除之间目标被替换成其它文件。
+      if (options.allowUnleasedWrites !== true)
+        throw new Error("Documents is read-only until a shared writer lease is implemented.");
+      const operation = writeQueue
+        .catch(() => undefined)
+        .then(async () => {
+          const target = await resolveDocument(params.path, params.workspacePath);
+          const info = await lstat(target.absolute);
+          if (info.dev !== target.dev || info.ino !== target.ino)
+            throw new Error("Document identity changed before deletion.");
+          await unlink(target.absolute);
+          return { path: target.path };
+        });
+      writeQueue = operation;
+      return operation;
+    },
   };
 }

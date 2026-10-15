@@ -41,6 +41,7 @@ import {
   SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE,
   type SpecShellLayoutSwapMode,
 } from "@/spec-document/specShellLayoutSwap.js";
+import { resolveSpecDocumentWorkspace } from "@/spec-document/specDocumentWorkspace.js";
 import {
   SpecPopoutIconButton,
   SpecPopoutRegionPortal,
@@ -2238,6 +2239,21 @@ export const WorkspaceShellLayout = memo(
     });
     const workspaceInnerFrameClass =
       "rounded-[var(--workspace-panel-radius)] border border-border";
+    // U-15：文档面板（picker/list/read/save 与 workspaceRoot 展示）的根不再直接用
+    // 外壳活跃 workspace，而是经 resolveSpecDocumentWorkspace 解析——活跃 tab 是
+    // 应用托管的对话后备 workspace（启动根）时回落到最近打开的本地项目 tab。
+    // 纯派生读取（tab store 是唯一事实源），其它面板仍用 workspaceAbsPath。
+    const specDocumentWorkspace = useMemo(
+      () =>
+        resolveSpecDocumentWorkspace({
+          shellWorkspacePath: workspaceAbsPath,
+          ...(workspaceIdentity
+            ? { shellWorkspaceIdentity: workspaceIdentity }
+            : {}),
+          workspaceTabs,
+        }),
+      [workspaceAbsPath, workspaceIdentity, workspaceTabs],
+    );
     // U-04 泛化的铺满规则：AUXILIARY 被隐藏时 PRIMARY 铺满整宽并回到最外沿——与角色无关。
     // chat-center 隐藏 tabs 容器 ⇒ 聊天列铺满；document-center 隐藏聊天 ⇒ tabs 容器铺满。
     const sidePaneCaptionCarriesWindowControls =
@@ -2270,6 +2286,7 @@ export const WorkspaceShellLayout = memo(
         workspaceAbsPath={workspaceAbsPath}
         workspaceIdentity={workspaceIdentity}
         workspaceRemoteSessionId={workspaceRemoteSessionId}
+        specDocumentWorkspace={specDocumentWorkspace}
         activeTaskId={activeTaskId}
         sidePaneOwnerId={sidePaneOwnerId}
         gitState={gitState}

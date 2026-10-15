@@ -139,6 +139,8 @@ function Documents({
           content: string;
           expectedSha256: string;
         }) => documentService.save({ ...params, workspacePath }),
+        remove: (params: { path: string }) =>
+          documentService.remove({ ...params, workspacePath }),
       },
     [documentService, workspacePath],
   );
@@ -716,6 +718,49 @@ function Documents({
       setIoPending(false);
     }
   }
+  // U-14（活体反馈 2026-10-14 «корзина в пикере не удаляет——тихий no-op»）：
+  // 根因是删除链路整段缺失（服务无 remove、UI 无处理器），用户的删除意图只能
+  // 落空。修复后的语义：服务真实 unlink（同一写许可/写队列），删除后刷新列表；
+  // 删的是当前文档时清空打开态与持久化 path（watcher 随 document?.path 变化自动
+  // 释放）；该文件的 per-path 草稿槽一并清除（用户主动删除，不适用 D-01 的
+  // “文件回来恢复草稿”语义）；成功有可见确认（状态行），失败有可见错误（alert）。
+  // 未获写许可（writable=false）时入口禁用并解释原因，不会走到这里。
+  async function removeDocument(path: string) {
+    if (!documents || !path || ioPending || !writable) return;
+    setIoPending(true);
+    setError("");
+    try {
+      await documents.remove({ path });
+      writeDocumentDraft(presentationKey, path, null, undefined, paneWriteToken);
+      const next = await documents.list();
+      setFiles(next);
+      if (documentRef.current?.path === path) {
+        documentRef.current = null;
+        draftRef.current = "";
+        setDocument(null);
+        setDraft("");
+        baseSha256Ref.current = "";
+        setBaseSha256("");
+        presentationRef.current = {
+          ...presentationRef.current,
+          path: null,
+          scrollTop: 0,
+          activeThreadId: null,
+          discussionsVisible: false,
+        };
+        persistPresentation();
+        setActiveThreadId(null);
+        setDiscussionsVisible(false);
+        setSelection(null);
+      }
+      setStatus(`Deleted ${path} from disk`);
+    } catch (cause) {
+      setStatus("Delete failed · nothing was removed");
+      setError(String(cause));
+    } finally {
+      setIoPending(false);
+    }
+  }
   function select(event: SyntheticEvent<HTMLTextAreaElement>) {
     const target = event.currentTarget;
     if (!document || dirty || target.selectionEnd <= target.selectionStart) {
@@ -919,6 +964,13 @@ function Documents({
           workspaceRoot={workspacePath}
           disabled={ioPending || !files.length}
           onOpen={(path) => void open(path)}
+          onDelete={(path) => void removeDocument(path)}
+          deleteDisabled={!writable || ioPending}
+          deleteDisabledReason={
+            !writable
+              ? "Deleting is not available in this experimental build yet."
+              : "A document operation is in progress…"
+          }
         />
       </div>
       {error ? (
@@ -1423,7 +1475,7 @@ function Documents({
       <div className="space-y-1 border-t border-border px-3 py-2 text-ui-xs text-foreground-subtle">
         <p>{dirty ? "Unsaved draft" : status}</p>
         {!writable && document ? (
-          <p>Saving is not available in this experimental build yet.</p>
+          <p>Saving and deleting are not available in this experimental build yet.</p>
         ) : null}
         {!parentSessionId && document ? (
           <p role={executionSource?.phase === "error" ? "alert" : "status"}>

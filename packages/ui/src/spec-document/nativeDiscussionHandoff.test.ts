@@ -585,7 +585,10 @@ test("actual renderer keeps bootstrap hook mounted and native/custom composers a
   );
   assert.equal(
     prop("interactionDialogsVisible")?.getText(source),
-    "interactionDialogsVisible={visible && nativeInteractive}",
+    // 评审 #2（0b3f73ef）：可见性改为 panePresented（宿主文档可见性 ∧ 宿主侧
+    // visible 判定，useCombinedPresentationVisibility），非激活保留线程不得开
+    // presentation/interaction dialogs——这里同步断言新形态（旧期望未跟上实现）。
+    "interactionDialogsVisible={panePresented && nativeInteractive}",
   );
   assert.match(
     text.replace(/\s+/g, " "),
