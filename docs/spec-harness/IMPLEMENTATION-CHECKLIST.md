@@ -214,6 +214,8 @@ No implementation/GUI acceptance is asserted. Runtime gate remains CLOSED.
 
 - [ ] **U-16** Live updates visible in the UI: the user wants to see real-time agent/subagent/workflow progress (what is running, what changed, intermediate results) in the conversation/task surface instead of asking for status. Record exact screenshot context; design a live progress feed/status panel showing current subagent activity, tool calls in flight, and recent completions, updating as work proceeds (no polling by the user).
 
+- [ ] **U-17** The PiP-unavailable affordance renders compactly: on desktop the «вынести в окно» control must be a small disabled icon with a short badge/tooltip, NOT a long visible text button explaining Electron/PiP limitations (user screenshot 2026-10-15: long Electron explanation shown as a button bottom-right). Hide the explanation behind hover/aria; keep the honest reason accessible but visually compact.
+
 ## N — Parked outside this release
 
 - [ ] **N-01** Compact agent capability/reference map for Word/Excel/AutoCAD (object → operation → limits → minimal example; versioned startup index plus lazy resources). Intentionally outside this checklist's release scope as a separate user request. Evidence: IMPLEMENTATION-PLAN.md:277-282.
