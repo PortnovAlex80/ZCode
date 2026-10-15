@@ -63,6 +63,12 @@ are reproducible (PowerShell UTF-8, platform file URLs, pnpm patch authority, pr
 URL import). Independent focused check: 5 suites / 30 tests passed. The earlier
 PowerShell timeout does not reproduce after recursive fixture cleanup.
 
+The next full verification exposed a timing-sensitive downloader test (30ms real
+network chunks versus a 50ms idle limit). Replaced only that test fixture with a
+controlled clock and stream consumption checkpoints, retaining real file/hash checks;
+active data survives 240ms total and stalled data aborts exactly at the 50ms limit.
+Product downloader and timeouts are unchanged. Focused 7 tests passed, lint clean.
+
 ### Callback completion and model catalog recovery — 2026-10-15
 
 Live user completed browser consent but login spinner persisted. Saved credentials
