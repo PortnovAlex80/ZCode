@@ -43,6 +43,13 @@ fork-research folder were archived under `D:\Development\_archive\zcode-2026-10-
 Git links, branches and uncommitted work were preserved. Main product, Harmess and
 the spec-harness reference remain in place.
 
+User follow-up explicitly accepts the current working product as the baseline and
+requests disposal of superseded copies. The archive above was sent to Windows
+Recycle Bin and its four worktree registrations pruned; only the main worktree
+remains registered. Recycle Bin contents were verified. Git branches/history stay
+in the main repository. Product source baseline is `674d57b8`; this acceptance
+does not stand in for the remaining specialized runtime evidence.
+
 ### User handoff audit and push — 2026-10-15
 
 User explicitly approved committing and pushing current work, requested an English
