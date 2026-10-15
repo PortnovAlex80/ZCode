@@ -4,6 +4,9 @@
 
 ### Added
 
+- Add a project-local DOCX title-sheet renderer with explicit counted text
+  replacements, template hashes and output receipts. Preserve the real Word
+  template layout and refuse to overwrite an author-modified output.
 - Edit artifact passports for files, folders and project roots. Bind instructions,
   sources, skills, checklists and descriptive file/MCP/REST steps to a document.
 - Opt into artifact context in document discussions, inspect inherited sources and
