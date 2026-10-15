@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { parse } from "yaml";
 
 import {
   initializeE2EElectronServiceBridge,
@@ -87,11 +88,13 @@ describe("desktop e2e Electron service lifecycle", () => {
   });
 
   it("cancels the ContextId timeout after the default execution context is found", () => {
-    const rootPackageJson = JSON.parse(
-      readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
-    ) as {
-      pnpm?: { patchedDependencies?: Record<string, string> };
-    };
+    // 修复原因：c676c887（chore: move pnpm overrides and patches into pnpm-workspace.yaml）
+    // 把 pnpm.patchedDependencies 从根 package.json 迁到 pnpm-workspace.yaml——pnpm 10
+    // 只认 workspace 文件里的声明。本用例仍读根 package.json 的旧位置导致确定性失败；
+    // 改为从迁移后的唯一事实源 pnpm-workspace.yaml 读取补丁声明。
+    const workspaceYaml = parse(
+      readFileSync(new URL("../../../pnpm-workspace.yaml", import.meta.url), "utf8"),
+    ) as { patchedDependencies?: Record<string, string> };
     const electronServiceSource = readFileSync(
       new URL(
         "../../../node_modules/wdio-electron-service/dist/esm/index.js",
@@ -109,9 +112,7 @@ describe("desktop e2e Electron service lifecycle", () => {
     // Bug 根因：上游 9.2.1 的 ContextId Promise 成功 resolve 后没有取消 timeout，
     // 定时器仍会在健康 case 运行期间打印误导性的 Timeout exceeded error。
     expect(
-      rootPackageJson.pnpm?.patchedDependencies?.[
-        "wdio-electron-service@9.2.1"
-      ],
+      workspaceYaml.patchedDependencies?.["wdio-electron-service@9.2.1"],
     ).toBe("patches/wdio-electron-service@9.2.1.patch");
     expect(contextIdHandler).toContain("clearTimeout(timeout)");
     expect(contextIdHandler).toContain(

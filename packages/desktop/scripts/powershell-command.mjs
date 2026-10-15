@@ -25,7 +25,16 @@ export function createEncodedPowerShellArgs(script, values = []) {
         `$zcodeArg${index}=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodeUtf8Value(value)}'));`,
     )
     .join("");
-  const encodedCommand = Buffer.from(`${valueBindings}${script}`, "utf16le").toString("base64");
+  // 修复原因：Windows PowerShell 5.1 的 [Console]::Out 默认按系统 OEM 代码页写 stdout
+  //（如俄文机器 CP866、繁中机器 CP950），而所有调用方（chromeCredentialManager、
+  // windowsAumidIcon、windowsChromeAppBoundKey 及其单测）一律按 UTF-8 解码输出，
+  // 代码页外的非 ASCII 字符（中文路径等）会被 PowerShell 替换成 "?"。
+  // 在脚本入口把控制台输出编码切换为 UTF-8，保证双向编码一致。
+  const outputEncodingSetup = "[Console]::OutputEncoding=[Text.Encoding]::UTF8;";
+  const encodedCommand = Buffer.from(
+    `${outputEncodingSetup}${valueBindings}${script}`,
+    "utf16le",
+  ).toString("base64");
   return [...POWERSHELL_COMMON_ARGS, "-EncodedCommand", encodedCommand];
 }
 

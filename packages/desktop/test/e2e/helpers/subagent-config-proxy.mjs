@@ -8,13 +8,19 @@ import { fileURLToPath } from "node:url";
 if (process.argv.includes("app-server") && process.argv.includes("--stdio")) {
   // 仅由本组 WDIO 预加载的透明 stdio 代理。真实 Host/CLI 完成保存、解析和执行；
   // 故障位于传输边界，不修改业务对象，也不记录其他 RPC 的鉴权或模型凭据。
-  const preload = `--import=${JSON.stringify(fileURLToPath(import.meta.url))}`;
+  // Windows 测试使用 file:// URL，而旧启动器使用路径；只移除路径会残留 URL，
+  // 导致子进程反复预加载并递归创建代理。两种精确形式都移除，保留其他预加载参数。
+  const preloads = [import.meta.url, fileURLToPath(import.meta.url)].map(
+    (specifier) => `--import=${JSON.stringify(specifier)}`,
+  );
   const child = spawn(process.execPath, process.argv.slice(1), {
     stdio: ["pipe", "pipe", "inherit"],
     // 只移除当前代理预加载，保留覆盖采集等其他 Node 参数，防止递归启动代理。
     env: {
       ...process.env,
-      NODE_OPTIONS: (process.env.NODE_OPTIONS ?? "").replace(preload, "").trim(),
+      NODE_OPTIONS: preloads
+        .reduce((value, preload) => value.replaceAll(preload, ""), process.env.NODE_OPTIONS ?? "")
+        .trim(),
     },
   });
   const root = process.env.ZCODE_E2E_ARTIFACT_DIR;

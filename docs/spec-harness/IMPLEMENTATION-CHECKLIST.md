@@ -54,6 +54,15 @@ without OPENAI_API_KEY fallback. Shared data-base path matches Host credentials.
 Root final typecheck passed; lint 63 warnings/0 errors; architecture 0 violations.
 Full live billing/quota bucket remains unverified; no paid inference was used.
 
+Push validation expanded to the full root unit suite because origin/dev predates
+removed source files. It exposed recursive test-proxy preloading: the existing
+Windows URL import was not removed by path-only NODE_OPTIONS cleanup. Fixed only
+that helper and verified no fixture processes remain. Five already-present local
+Windows compatibility changes are reviewed and included unchanged so pushed tests
+are reproducible (PowerShell UTF-8, platform file URLs, pnpm patch authority, proxy
+URL import). Independent focused check: 5 suites / 30 tests passed. The earlier
+PowerShell timeout does not reproduce after recursive fixture cleanup.
+
 ### Callback completion and model catalog recovery — 2026-10-15
 
 Live user completed browser consent but login spinner persisted. Saved credentials

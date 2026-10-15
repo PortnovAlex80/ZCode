@@ -23,6 +23,9 @@
   during streaming.
 - Rebuild and stage the current CLI and required native plugins before desktop builds;
   reject stale production receipts and keep upstream automatic updates disabled.
+- Keep Windows verification reproducible: preserve UTF-8 PowerShell output, use
+  platform-correct file URLs, read patch declarations from the pnpm workspace file,
+  and remove the stdio proxy preload before starting its child process.
 
 ### Validation and remaining acceptance
 

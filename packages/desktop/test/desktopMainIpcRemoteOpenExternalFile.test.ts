@@ -1,5 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { platform } from "node:process";
+import { pathToFileURL } from "node:url";
 import { PlatformChannels } from "@zcode/shared";
+
+// 修复原因：Node 的 fileURLToPath 在 Windows 上只接受盘符（file:///C:/...）或
+// UNC（file://server/...）形态——POSIX 风格的 file:///tmp/... 会抛
+// ERR_INVALID_FILE_URL_PATH；而 file://server/... 在 POSIX 上抛
+// ERR_INVALID_FILE_URL_HOST、在 Windows 上却是合法 UNC。本文件自导入（aac47556）
+// 起固定使用 POSIX 固定值，在 Windows 上确定性失败；改用按平台生成夹具，
+// 被测的产品行为（剥 hash、转换失败记 warn 不回退、成功走 openPath）保持不变。
+const localReportPath = platform === "win32" ? "C:\\report.html" : "/tmp/report.html";
+const localReportFileUrl = `${pathToFileURL(localReportPath).href}#section`;
+const unconvertibleFileUrl =
+  platform === "win32" ? "file:///tmp/report.html" : "file://server/share/page.html";
 
 type IpcHandler = (...args: unknown[]) => unknown;
 type RemoteIpcOptions = Parameters<
@@ -139,9 +152,10 @@ describe("OpenExternal 对 file URL 的分流", () => {
     const { listener } = await registerOpenExternalListener();
     const sender = { getURL: vi.fn(() => "about:blank") };
 
-    listener({ sender }, "file:///tmp/report.html#section");
+    listener({ sender }, localReportFileUrl);
 
     await vi.waitFor(() => expect(h.shellOpenPath).toHaveBeenCalledTimes(1));
+    expect(h.shellOpenPath).toHaveBeenCalledWith(localReportPath);
     expect(h.shellOpenPath).not.toHaveBeenCalledWith(expect.stringContaining("#"));
     expect(h.shellOpenExternal).not.toHaveBeenCalled();
   });
@@ -161,7 +175,7 @@ describe("OpenExternal 对 file URL 的分流", () => {
     const { listener, options } = await registerOpenExternalListener();
     const sender = { getURL: vi.fn(() => "about:blank") };
 
-    listener({ sender }, "file://server/share/page.html");
+    listener({ sender }, unconvertibleFileUrl);
 
     await vi.waitFor(() => expect(options.logger.warn).toHaveBeenCalledTimes(1));
     expect(h.shellOpenPath).not.toHaveBeenCalled();

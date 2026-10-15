@@ -3,7 +3,6 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 
 const roots: string[] = [];
@@ -33,13 +32,14 @@ it.each([false, true])(
     });
   `,
     );
-    const proxy = fileURLToPath(
-      new URL("./e2e/helpers/subagent-config-proxy.mjs", import.meta.url),
-    );
+    // 修复原因：Node 的 --import 在 Windows 上必须是 file:// URL——直接传盘符绝对路径
+    //（D:\...）会被 ESM loader 当成 "d:" 协议并抛 ERR_UNSUPPORTED_ESM_URL_SCHEME，
+    // 本用例自导入（aac47556）起在 Windows 上确定性失败。保持 file:// URL 形式传入。
+    const proxy = new URL("./e2e/helpers/subagent-config-proxy.mjs", import.meta.url);
     const child = spawn(process.execPath, [entry, "app-server", "--stdio"], {
       env: {
         ...process.env,
-        NODE_OPTIONS: `--import=${JSON.stringify(proxy)}`,
+        NODE_OPTIONS: `--import=${JSON.stringify(proxy.href)}`,
         ZCODE_E2E_ARTIFACT_DIR: root,
       },
       stdio: ["pipe", "pipe", "pipe"],

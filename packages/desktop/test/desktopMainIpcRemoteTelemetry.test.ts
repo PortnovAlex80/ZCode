@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { platform } from "node:process";
+import { pathToFileURL } from "node:url";
 import { InternalChannels, PlatformChannels, type RemoteTarget } from "@zcode/shared";
 import { isAllowedExternalOpenUrl } from "../src/main/desktopMainIpcRemote.js";
+
+// 修复原因：fileURLToPath 在 Windows 上不接受 file:///tmp/... 这类 POSIX 根路径
+//（抛 ERR_INVALID_FILE_URL_PATH，产品按设计记 warn 而非调用 openPath）。本用例自
+// 导入（aac47556）起固定使用 POSIX 固定值导致在 Windows 上确定性失败；
+// 按平台生成夹具后仍验证同一产品行为：file URL 只允许 main 进程经 openPath 打开。
+const localSecretPath = platform === "win32" ? "C:\\secret" : "/tmp/secret";
 
 type IpcHandler = (...args: unknown[]) => unknown;
 type RemoteIpcOptions = Parameters<
@@ -172,14 +180,14 @@ describe("remote workspace connect telemetry IPC", () => {
 
     listener?.({}, "https://example.com/docs");
     listener?.({}, "http://localhost:3000/index.html");
-    listener?.({}, "file:///tmp/secret");
+    listener?.({}, pathToFileURL(localSecretPath).href);
     listener?.({}, "javascript:alert(1)");
     listener?.({}, "not a url");
 
     expect(h.shellOpenExternal).toHaveBeenCalledTimes(2);
     expect(h.shellOpenExternal).toHaveBeenCalledWith("https://example.com/docs");
     expect(h.shellOpenExternal).toHaveBeenCalledWith("http://localhost:3000/index.html");
-    await vi.waitFor(() => expect(h.shellOpenPath).toHaveBeenCalledWith("/tmp/secret"));
+    await vi.waitFor(() => expect(h.shellOpenPath).toHaveBeenCalledWith(localSecretPath));
     expect(options.logger.warn).toHaveBeenCalledTimes(2);
   });
 
