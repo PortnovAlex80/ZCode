@@ -40,6 +40,33 @@ UI refresh → Host account service (serialized) → adapter current OAuth recor
     └─ network error → preserve account/cache → sanitized result → retry UI
 ```
 
+Аудит маршрутов после пользовательской приёмки выявил разрыв inference assembly:
+адаптер требует request-auth source для `openai-oauth`, но bootstrap не передавал
+созданный ChatGPT source в runtime. Исправление ограничено composition root и
+provider runtime: create-app создаёт existing `createChatGptRequestAuthSource`
+с общей encrypted credential store и env; `ApiProviderModelRuntime` получает его
+через DI и передаёт только provider с `openai-oauth` access. Текущий Zhipu account
+requestDependencies и API-key providers сохраняют свои прежние ветки. OAuth source
+отсутствует/не выдаёт token → typed failure, без перехода на иной способ оплаты.
+Тесты factory и composition с локальным HTTP подтверждают доставку OAuth token,
+Zhipu/GLM branch и API-key branch отдельно, без реальных inference-запросов.
+
+### Проверка маршрута и оплаты после переноса окон
+
+| Выбор | Источник доступа | Маршрут и ограничение проверки |
+| --- | --- | --- |
+| GLM / официальный account provider | Существующие Zhipu account / Project Token / plan sources | Штатный ZCode/Z.ai gateway; правила `official-coding-plan-gateway.ts` не менялись этими исправлениями |
+| OpenAI / ChatGPT | Отдельная OAuth запись SIWC, обязательный `chatgpt.tokens.use.direct` | Публичный `api.openai.com/v1/responses`; отсутствие разрешения или token завершает запрос ошибкой, не включает API key автоматически |
+| Явно настроенный API-key provider | Пользовательский ключ выбранного провайдера | Прежняя отдельная ветка; вход ChatGPT её не подменяет |
+
+Разделение маршрутов проверяется source/factory/HTTP fixtures и существующими
+регрессиями gateway. Перенос UI дерева между окнами не создаёт новый model request
+и не меняет provider/session. Фактическая тарификация и номер серверного счётчика
+не определяются локальной конфигурацией. Документация SIWC описывает использование
+плана ChatGPT; тождество конкретному счётчику «квота Codex» не подтверждено.
+Проверка не выполняет платных model-запросов и не обещает сумму списания.
+[Официальный контракт ChatGPT plan usage](https://developers.openai.com/siwc/token-sharing-open-source).
+
 Повторная проверка реального Electron utilityProcess: PowerShell launcher возвращает
 успех, но браузер не делает запрос даже к локальному диагностическому серверу.
 В том же процессе Main `shell.openExternal` открывает страницу и сохраняет query.

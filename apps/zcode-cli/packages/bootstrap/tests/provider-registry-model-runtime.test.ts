@@ -1,7 +1,13 @@
 import type { CreateAiSdkModelOptions } from "@zcode/adapters/model";
-import { ModelErrorCode, ModelProtocolError, type Model } from "@zcode/contracts";
+import {
+  ModelErrorCode,
+  ModelProtocolError,
+  type Model,
+  type ModelRequestAuthSource,
+} from "@zcode/contracts";
 import {
   ModelConfig,
+  OpenAiOAuthAccessConfig,
   ModelOptionSpecsConfig,
   ModelPropertiesConfig,
   ProviderApiConfig,
@@ -87,11 +93,15 @@ function selection(providerId = "api-provider") {
   return { providerId, modelId: "model-a", options: { reasoningLevel: "high" } };
 }
 
-function captureRuntime(registry: ProviderRegistry) {
+function captureRuntime(
+  registry: ProviderRegistry,
+  chatGptRequestAuthSource?: ModelRequestAuthSource,
+) {
   const created: CreateAiSdkModelOptions[] = [];
   const expected = fakeModel();
   const runtime = new ApiProviderModelRuntime({
     registry,
+    chatGptRequestAuthSource,
     modelAdapter: {
       createModel(options) {
         created.push(options);
@@ -104,6 +114,39 @@ function captureRuntime(registry: ProviderRegistry) {
 }
 
 describe("ApiProviderModelRuntime", () => {
+  it("uses the local OAuth source only for ChatGPT and ignores foreign execution credentials", () => {
+    const oauth = provider(
+      "account:chatgpt",
+      new ProviderConfig({
+        access: new OpenAiOAuthAccessConfig({ entitled: true }),
+        api: new ProviderApiConfig({
+          type: "openai-responses",
+          baseUrl: "https://api.openai.com/v1",
+        }),
+        builtinModelIds: ["model-a"],
+      }),
+    );
+    const local = { resolve: vi.fn() };
+    const foreign = { resolve: vi.fn() };
+    const { created, runtime } = captureRuntime(new ProviderRegistry([oauth, provider()]), local);
+    runtime.modelFactory({
+      selection: selection("account:chatgpt"),
+      requestDependencies: { requestAuth: { source: foreign } },
+    });
+    expect(created[0]?.requestDependencies?.requestAuth?.source).toBe(local);
+    runtime.modelFactory({
+      selection: selection(),
+      requestDependencies: { requestAuth: { source: foreign } },
+    });
+    expect(created[1]?.requestDependencies).toBeUndefined();
+    const missing = captureRuntime(new ProviderRegistry([oauth]));
+    missing.runtime.modelFactory({
+      selection: selection("account:chatgpt"),
+      requestDependencies: { requestAuth: { source: foreign } },
+    });
+    expect(missing.created[0]?.requestDependencies?.requestAuth?.source).toBeUndefined();
+  });
+
   it("把 Registry 的完整 Provider / Model Config 原样交给 Adapter", () => {
     const registry = new ProviderRegistry([provider()]);
     const { created, expected, runtime } = captureRuntime(registry);

@@ -33,6 +33,27 @@ recheck those items before restoring their accepted status.
 
 ## Exclusive write assignments
 
+### User handoff audit and push — 2026-10-15
+
+User explicitly approved committing and pushing current work, requested an English
+changelog and review of the Russian acceptance checklist, and asked to preserve GLM
+billing/routing. Root owns those documents and push to origin/dev. The checklist now
+records general everyday-UX approval separately from detailed unperformed scenarios;
+U-15/10.2 has direct live evidence. Model availability/billing remain separate gates.
+Read-only routing audit confirmed unchanged ZCode/Z.ai gateway and credential branches,
+but found missing production GPT request-auth assembly. `repair_openai` owns the narrow
+bootstrap DI fix and routing regressions; root requires independent review and rebuild
+before treating the latest installer as the final handoff candidate.
+
+Routing audit result: 54 existing adapter/gateway/provider/overlay tests plus 19
+bootstrap tests passed. Independent reviewer reran the 11 factory/composition tests,
+including a real loopback HTTP request through runner. New source applies only to
+openai-oauth; Zhipu off-peak/highspeed preserve the exact target source, ordinary
+GLM/API-key providers preserve their branches. Missing OAuth fails before network
+without OPENAI_API_KEY fallback. Shared data-base path matches Host credentials.
+Root final typecheck passed; lint 63 warnings/0 errors; architecture 0 violations.
+Full live billing/quota bucket remains unverified; no paid inference was used.
+
 ### Callback completion and model catalog recovery — 2026-10-15
 
 Live user completed browser consent but login spinner persisted. Saved credentials
@@ -57,6 +78,14 @@ adapter public declarations. Lint 63 warnings/0 errors; architecture 0 violation
 Independent review caught the expired-token deadline gap before this validation.
 Actual account catalog availability remains blocked by observed upstream HTTP 520;
 local retry/interface evidence cannot establish live model access or inference.
+
+Product GUI at code revision `f667b682`: isolated encrypted fixture account and
+localhost catalog endpoint, first GET returned HTTP 520 and visible error, second
+explicit Refresh models returned one model. Continued into workspace and opened
+the actual composer selector: OpenAI/ChatGPT group contained `gpt-5.4` from the
+fixture catalog. Exactly two catalog GETs; zero OAuth consent or inference calls.
+This verifies UI → Host service → Desktop adapter → cache → provider projection →
+real selector, not live OpenAI availability. Production source/CLI build passed.
 
 ### Reopened live defects — 2026-10-15
 
@@ -328,7 +357,7 @@ items plus parked N-01.
 - [ ] **U-13** The document picker displays CLEAN workspace-relative paths: forward slashes, no leading «./», no absolute-drive or workspace-folder prefix, no duplicated repo segments; the file name is the primary text and the directory part secondary (muted); the search filter matches over exactly this displayed form. Live report 2026-10-14: the picker currently shows strange paths in the dropdown (user screenshot) — diagnose the actual displayed string source and fix the display + filter together.
 
 - [ ] **U-14** The picker delete (корзина) actually deletes the document (visible confirmation, error state on failure, no silent no-op); disabled state explains why if deletion is not allowed.
-- [ ] **U-15** (REOPENED live 2026-10-15: fix 4413f4f6 did NOT work in the real app — picker still shows paths from app/ i.e. the ~/.zcode conversation root, not the current project folder of the open session; the topmost-project-tab heuristic is wrong — the root must follow the workspace of the ACTIVE session/conversation the user is in) The picker paths are relative to THE CONVERSATION PROJECT WORKSPACE (the project the user works in), not the ZCODE execution/launch root. Live report 2026-10-14: the project lives in a different folder; the picker currently builds paths from the wrong root (the ZCODE launch dir), so displayed paths and filtering are misleading.
+- [x] **U-15** Accepted 2026-10-15 after replacing the failed tab-order heuristic from 4413f4f6. Picker IO follows the focused conversation binding or matching active session workspace, never the ZCODE launch root. Product GUI with a separate project listed only its own document; real A/B filesystem and store-focus tests passed. Russian acceptance 10.2 is updated; stale/remote/unresolved session scopes fail closed.
 
 ### U-06 / U-07 bounded implementation gates (plan dated 2026-10-15)
 

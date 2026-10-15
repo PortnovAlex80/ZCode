@@ -7,6 +7,10 @@ import {
 import { createNodeLoggerFactory } from "@zcode/adapters/logging";
 import { createConfig, resolvePath } from "@zcode/adapters/config";
 import {
+  createChatGptRequestAuthSource,
+  createSharedZCodeCredentialStore,
+} from "@zcode/adapters/auth";
+import {
   createNodeExecutionAdapter,
   resolveEffectiveBashShellSelection,
 } from "@zcode/adapters/exec";
@@ -590,6 +594,10 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     providerModelRuntime = new ApiProviderModelRuntime({
       registry: options.providerRegistry,
       modelAdapter,
+      chatGptRequestAuthSource: createChatGptRequestAuthSource({
+        store: createSharedZCodeCredentialStore({ env: options.env }),
+        env: options.env ?? process.env,
+      }),
     });
     providerModelRuntime.start();
     // model factory 提前到三条 workflow child 装配线之前构造：script workflow bridge、dwf actor
