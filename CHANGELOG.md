@@ -4,6 +4,9 @@
 
 ### Added
 
+- Replace the artifact passport form with five prose blocks: role, template,
+  data, assembly and acceptance. Send readable instructions to the agent,
+  preserve detailed legacy procedures, and migrate only on save to store v2.
 - Add a project-local DOCX title-sheet renderer with explicit counted text
   replacements, template hashes and output receipts. Preserve the real Word
   template layout and refuse to overwrite an author-modified output.

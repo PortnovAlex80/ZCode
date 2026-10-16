@@ -67,66 +67,43 @@ function openMenu() {
 async function loadedEditor() {
   await waitFor(() =>
     expect(
-      (screen.getByLabelText("artifactMetadata.field.purpose") as HTMLTextAreaElement).value,
-    ).toBe("Title page"),
+      (screen.getByLabelText("artifactMetadata.field.role") as HTMLTextAreaElement).value,
+    ).toContain("Title page"),
   );
 }
 
 describe("artifact metadata controls", () => {
-  it("reads only on opening and saves an edited passport through the workspace service", async () => {
+  it("edits exactly five prose blocks and preserves literal commands without parsing JSON", async () => {
     render(<ArtifactMetadataControls workspacePath={workspacePath} path={path} />);
     expect(host.service!.read).not.toHaveBeenCalled();
     expect(host.service!.resolve).not.toHaveBeenCalled();
     edit();
     await loadedEditor();
-    fireEvent.change(screen.getByLabelText("artifactMetadata.field.purpose"), {
-      target: { value: "ODN title" },
-    });
-    fireEvent.change(screen.getByLabelText("artifactMetadata.field.instructions"), {
-      target: { value: "Preserve author edits" },
-    });
-    fireEvent.change(screen.getByLabelText("artifactMetadata.field.skills"), {
-      target: { value: "skills/title.md\n\nskills/checks.md" },
-    });
-    fireEvent.change(screen.getByLabelText("artifactMetadata.field.checklist"), {
-      target: { value: "Check designation\nCheck year" },
-    });
-    fireEvent.change(screen.getByLabelText("artifactMetadata.field.steps"), {
-      target: {
-        value: JSON.stringify([
-          {
-            title: "Read",
-            instruction: "Read requisites",
-            tool: { transport: "mcp", connection: "odn", operation: "read_project" },
-            input: "project-id",
-          },
-        ]),
-      },
-    });
+    expect(screen.getAllByRole("textbox")).toHaveLength(5);
+    expect(screen.queryByLabelText("artifactMetadata.field.type")).toBeNull();
+    expect(screen.queryByLabelText("artifactMetadata.field.steps")).toBeNull();
+    expect(
+      (screen.getByLabelText("artifactMetadata.field.data") as HTMLTextAreaElement).value,
+    ).toContain("requisites.txt");
+    const blocks = {
+      role: "ODN title",
+      template: "Keep the real Word template and its tables.",
+      data: "project-data.txt → project designation",
+      assembly:
+        "  py build_title.py --request request.json\n  {not JSON: keep this call example}\n",
+      acceptance: "- [ ] Word opens the file\n- [ ] Source data verified",
+    };
+    for (const [field, value] of Object.entries(blocks)) {
+      fireEvent.change(screen.getByLabelText(`artifactMetadata.field.${field}`), {
+        target: { value },
+      });
+    }
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(host.service!.save).toHaveBeenCalledWith({
       workspacePath,
       path,
-      entry: {
-        kind: "document",
-        purpose: "ODN title",
-        type: "note",
-        instructions: "Preserve author edits",
-        sources: ["requisites.txt"],
-        links: [],
-        methods: [],
-        skills: ["skills/title.md", "skills/checks.md"],
-        checklist: ["Check designation", "Check year"],
-        steps: [
-          {
-            title: "Read",
-            instruction: "Read requisites",
-            tool: { transport: "mcp", connection: "odn", operation: "read_project" },
-            input: "project-id",
-          },
-        ],
-      },
+      entry: { kind: "document", blocks },
     });
     expect(host.service!.resolve).not.toHaveBeenCalled();
   });
@@ -140,9 +117,9 @@ describe("artifact metadata controls", () => {
     });
     fireEvent.click(await screen.findByRole("option", { name: "artifactMetadata.projectScope" }));
     expect(
-      (screen.getByLabelText("artifactMetadata.field.purpose") as HTMLTextAreaElement).value,
+      (screen.getByLabelText("artifactMetadata.field.role") as HTMLTextAreaElement).value,
     ).toBe("");
-    fireEvent.change(screen.getByLabelText("artifactMetadata.field.purpose"), {
+    fireEvent.change(screen.getByLabelText("artifactMetadata.field.role"), {
       target: { value: "Project policy" },
     });
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
@@ -150,38 +127,58 @@ describe("artifact metadata controls", () => {
     expect(host.service!.save).toHaveBeenCalledWith(
       expect.objectContaining({
         path: ".",
-        entry: expect.objectContaining({ kind: "folder", purpose: "Project policy" }),
+        entry: expect.objectContaining({
+          kind: "folder",
+          blocks: expect.objectContaining({ role: "Project policy" }),
+        }),
       }),
     );
   });
 
-  it("retains the draft on JSON validation and service failures", async () => {
+  it("retains all prose when the service refuses saving", async () => {
     vi.mocked(host.service!.save).mockRejectedValue(new Error("Metadata store is read-only"));
     render(<ArtifactMetadataControls workspacePath={workspacePath} path={path} />);
     edit();
     await loadedEditor();
-    fireEvent.change(screen.getByLabelText("artifactMetadata.field.instructions"), {
-      target: { value: "Keep this draft" },
-    });
-    fireEvent.change(screen.getByLabelText("artifactMetadata.field.steps"), {
-      target: { value: '[{"title":"Missing instruction"}]' },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
-    expect(screen.getByRole("alert").textContent).toBe("artifactMetadata.invalidSteps");
-    expect(host.service!.save).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("artifactMetadata.field.steps"), {
-      target: { value: "[]" },
+    fireEvent.change(screen.getByLabelText("artifactMetadata.field.assembly"), {
+      target: { value: "  {a command example, not JSON}\n" },
     });
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toBe("Metadata store is read-only"),
     );
     expect(
-      (screen.getByLabelText("artifactMetadata.field.instructions") as HTMLTextAreaElement).value,
-    ).toBe("Keep this draft");
+      (screen.getByLabelText("artifactMetadata.field.assembly") as HTMLTextAreaElement).value,
+    ).toBe("  {a command example, not JSON}\n");
     expect(
       (screen.getByRole("button", { name: "common.save" }) as HTMLButtonElement).disabled,
     ).toBe(false);
+  });
+
+  it("keeps intentionally empty canonical blocks empty on reopen", async () => {
+    const blocks = { role: "", template: "", data: "", assembly: "", acceptance: "" };
+    vi.mocked(host.service!.read).mockResolvedValue({
+      [path]: { id: "stable-title-id", kind: "document", updatedAt: "2026-10-17", blocks },
+    });
+    render(<ArtifactMetadataControls workspacePath={workspacePath} path={path} />);
+    edit();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "common.save" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    for (const field of Object.keys(blocks))
+      expect(
+        (screen.getByLabelText(`artifactMetadata.field.${field}`) as HTMLTextAreaElement).value,
+      ).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() =>
+      expect(host.service!.save).toHaveBeenCalledWith({
+        workspacePath,
+        path,
+        entry: { kind: "document", blocks },
+      }),
+    );
   });
 
   it("activates without IO and previews fresh context with provenance", async () => {
@@ -277,8 +274,8 @@ describe("artifact metadata controls", () => {
     await loadedEditor();
     await act(async () => finishOld({ [path]: passport("Wrong project") }));
     expect(
-      (screen.getByLabelText("artifactMetadata.field.purpose") as HTMLTextAreaElement).value,
-    ).toBe("Title page");
+      (screen.getByLabelText("artifactMetadata.field.role") as HTMLTextAreaElement).value,
+    ).toContain("Title page");
     expect(host.service!.read).toHaveBeenLastCalledWith({ workspacePath: "D:/other" });
   });
 });

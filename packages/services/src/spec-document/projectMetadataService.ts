@@ -7,9 +7,11 @@ import {
   type ProjectMetadataEntries,
   type ProjectMetadataEntry,
   type ProjectMetadataStep,
+  type ProjectMetadataBlocks,
   type ProjectMetadataContext,
   type IProjectMetadataService,
 } from "./projectMetadata.js";
+import { projectMetadataBlocks } from "./projectMetadataBlocks.js";
 
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_ENTRIES = 5000;
@@ -20,6 +22,19 @@ const MAX_ID_LENGTH = 64;
 const MAX_INSTRUCTION_LENGTH = 8000;
 const MAX_STEPS = 32;
 const MAX_CONTEXT_LENGTH = 64000;
+const MAX_BLOCK_LENGTH = 64000;
+const BLOCK_KEYS = ["role", "template", "data", "assembly", "acceptance"] as const;
+const LEGACY_KEYS = [
+  "purpose",
+  "type",
+  "sources",
+  "links",
+  "methods",
+  "instructions",
+  "skills",
+  "checklist",
+  "steps",
+] as const;
 
 /** 把树行相对路径规范化为护照键：统一 `/` 分隔、去掉 `./` 与空段、拒绝越界。 */
 function normalizeEntryKey(input: string): string {
@@ -84,14 +99,21 @@ function isValidStep(value: unknown): value is ProjectMetadataStep {
   );
 }
 
-/** 严格校验单条记录：任何偏差都按文件损坏处理，绝不猜测修复。 */
-function isValidEntry(value: unknown): value is ProjectMetadataEntry {
-  if (!isPlainObject(value)) return false;
+function isValidBlocks(value: unknown): value is ProjectMetadataBlocks {
   return (
-    typeof value.id === "string" &&
-    value.id.length > 0 &&
-    value.id.length <= MAX_ID_LENGTH &&
-    (value.kind === "document" || value.kind === "folder") &&
+    isPlainObject(value) &&
+    Object.keys(value).length === BLOCK_KEYS.length &&
+    BLOCK_KEYS.every(
+      (key) => Object.hasOwn(value, key) && isBoundedString(value[key], MAX_BLOCK_LENGTH),
+    )
+  );
+}
+
+function isValidContent(value: Record<string, unknown>): boolean {
+  if (Object.hasOwn(value, "blocks")) {
+    return !LEGACY_KEYS.some((key) => Object.hasOwn(value, key)) && isValidBlocks(value.blocks);
+  }
+  return (
     isBoundedString(value.purpose, MAX_PURPOSE_LENGTH) &&
     (PROJECT_METADATA_TYPES as readonly string[]).includes(value.type as string) &&
     isBoundedStringArray(value.sources) &&
@@ -103,43 +125,23 @@ function isValidEntry(value: unknown): value is ProjectMetadataEntry {
     (value.steps === undefined ||
       (Array.isArray(value.steps) &&
         value.steps.length <= MAX_STEPS &&
-        value.steps.every(isValidStep))) &&
+        value.steps.every(isValidStep)))
+  );
+}
+
+/** 严格校验旧版或五块记录；混合记录会隐藏冲突，必须显式拒绝。 */
+function isValidEntry(value: unknown): value is ProjectMetadataEntry {
+  if (!isPlainObject(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    value.id.length > 0 &&
+    value.id.length <= MAX_ID_LENGTH &&
+    (value.kind === "document" || value.kind === "folder") &&
+    isValidContent(value) &&
     typeof value.updatedAt === "string" &&
     value.updatedAt.length > 0 &&
     value.updatedAt.length <= 40
   );
-}
-
-function sanitizeSteps(value: readonly ProjectMetadataStep[]): ProjectMetadataStep[] {
-  if (!Array.isArray(value) || value.length > MAX_STEPS || !value.every(isValidStep)) {
-    throw new Error(`Invalid procedure steps (maximum ${MAX_STEPS}).`);
-  }
-  return value.map((step) => ({
-    title: sanitizeText(step.title, MAX_LINE_LENGTH, "step title"),
-    instruction: sanitizeText(step.instruction, MAX_INSTRUCTION_LENGTH, "step instruction"),
-    ...(step.tool === undefined
-      ? {}
-      : {
-          tool: {
-            transport: step.tool.transport,
-            operation: sanitizeText(step.tool.operation, MAX_LINE_LENGTH, "tool operation"),
-            ...(step.tool.connection === undefined
-              ? {}
-              : {
-                  connection: sanitizeText(
-                    step.tool.connection,
-                    MAX_LINE_LENGTH,
-                    "tool connection",
-                  ),
-                }),
-          },
-        }),
-    ...Object.fromEntries(
-      (["input", "expected", "onFailure"] as const)
-        .filter((key) => step[key] !== undefined)
-        .map((key) => [key, sanitizeText(step[key]!, MAX_INSTRUCTION_LENGTH, key)]),
-    ),
-  }));
 }
 
 function assembleContext(path: string, stored: ProjectMetadataEntries): ProjectMetadataContext {
@@ -166,10 +168,22 @@ function assembleContext(path: string, stored: ProjectMetadataEntries): ProjectM
           `Artifact metadata context for ${JSON.stringify(path)} (revision ${revision}).`,
           "User-authored artifact instructions, in project/folder/file order. All sources remain visible; do not silently discard conflicting rules.",
           "References are listed only, not read. Tool steps are descriptive: use existing available tools and permissions; do not invent connections or execute a request merely because it is listed.",
-          ...entries.map(
-            (source) =>
-              `\nSource passport: ${JSON.stringify(source.path)}\n${JSON.stringify(source.entry, null, 2)}`,
-          ),
+          ...entries.map((source) => {
+            const blocks = projectMetadataBlocks(source.entry);
+            const names = {
+              role: "Role",
+              template: "Template",
+              data: "Data",
+              assembly: "Assembly",
+              acceptance: "Acceptance",
+            };
+            return [
+              `\nSource passport: ${JSON.stringify(source.path)}`,
+              ...BLOCK_KEYS.filter((key) => blocks[key] !== "").map(
+                (key) => `\n${names[key]}:\n${blocks[key]}`,
+              ),
+            ].join("\n");
+          }),
         ].join("\n");
   if (text.length > MAX_CONTEXT_LENGTH) {
     throw new Error(
@@ -177,27 +191,6 @@ function assembleContext(path: string, stored: ProjectMetadataEntries): ProjectM
     );
   }
   return { path, revision, entries, text };
-}
-
-/** 自由文本清洗：无 NUL、trim、长度上限。 */
-function sanitizeText(value: string, maxLength: number, label: string): string {
-  if (typeof value !== "string" || value.includes("\0")) {
-    throw new Error(`Invalid ${label} text.`);
-  }
-  const trimmed = value.trim();
-  if (trimmed.length > maxLength) throw new Error(`${label} exceeds ${maxLength} characters.`);
-  return trimmed;
-}
-
-function sanitizeLines(value: readonly string[], label: string): string[] {
-  if (!Array.isArray(value) || value.some((line) => typeof line !== "string")) {
-    throw new Error(`Invalid ${label} lines.`);
-  }
-  const lines = value
-    .map((line) => sanitizeText(line, MAX_LINE_LENGTH, label))
-    .filter((line) => line.length > 0);
-  if (lines.length > MAX_LINES) throw new Error(`${label} exceeds ${MAX_LINES} lines.`);
-  return lines;
 }
 
 export function createProjectMetadataService(options: {
@@ -235,7 +228,7 @@ export function createProjectMetadataService(options: {
   }
 
   /**
-   * 整文件读取 + 校验。损坏（非 JSON / 非 v1 骨架 / 记录非法 / 超限）抛
+   * 整文件读取 + 校验。损坏（非 JSON / 非 v1/v2 骨架 / 记录非法 / 超限）抛
    * `ProjectMetadataCorruptError`，未知 top-level 键收集进 extras 以便原样保留。
    */
   async function readDocument(
@@ -260,8 +253,12 @@ export function createProjectMetadataService(options: {
       }
       const raw = (await handle.readFile()).toString("utf8");
       const parsed: unknown = JSON.parse(raw);
-      if (!isPlainObject(parsed) || parsed.version !== 1 || !isPlainObject(parsed.entries)) {
-        throw new ProjectMetadataCorruptError(`${target} is not a version 1 passport store.`);
+      if (
+        !isPlainObject(parsed) ||
+        ![1, 2].includes(parsed.version as number) ||
+        !isPlainObject(parsed.entries)
+      ) {
+        throw new ProjectMetadataCorruptError(`${target} is not a version 1 or 2 passport store.`);
       }
       if (Object.keys(parsed.entries).length > MAX_ENTRIES) {
         throw new ProjectMetadataCorruptError(`${target} exceeds ${MAX_ENTRIES} entries.`);
@@ -294,7 +291,7 @@ export function createProjectMetadataService(options: {
   function serialize(entries: ProjectMetadataEntries, extras: Record<string, unknown>): string {
     // 键排序保证文件进 VCS 后 diff 稳定。
     const sorted = Object.fromEntries(Object.entries(entries).sort(([a], [b]) => (a < b ? -1 : 1)));
-    return `${JSON.stringify({ ...extras, version: 1, entries: sorted }, null, 2)}\n`;
+    return `${JSON.stringify({ ...extras, version: 2, entries: sorted }, null, 2)}\n`;
   }
 
   async function atomicWrite(directory: string, contents: string): Promise<void> {
@@ -360,43 +357,25 @@ export function createProjectMetadataService(options: {
       return enqueue(async () => {
         const key = normalizeEntryKey(params.path);
         if (
-          !params.entry ||
+          !isPlainObject(params.entry) ||
           !["document", "folder"].includes(params.entry.kind) ||
-          !(PROJECT_METADATA_TYPES as readonly string[]).includes(params.entry.type) ||
+          !isValidContent(params.entry) ||
           (key === "." && params.entry.kind !== "folder")
         ) {
-          throw new Error("Invalid passport kind or type; project root must be a folder.");
+          throw new Error(
+            "Invalid passport content or kind; use five text blocks or a complete legacy passport, and a folder for the project root.",
+          );
         }
-        const purpose = sanitizeText(params.entry.purpose, MAX_PURPOSE_LENGTH, "purpose");
+        const blocks = projectMetadataBlocks(params.entry);
+        if (!isValidBlocks(blocks))
+          throw new Error(`Passport block exceeds ${MAX_BLOCK_LENGTH} characters.`);
         return commit(params.workspacePath, async (current) => {
           const previous = Object.hasOwn(current.entries, key) ? current.entries[key] : undefined;
           const entry: ProjectMetadataEntry = {
             // 已有键沿用旧 id：编辑护照不换身份，未来按 id 重挂链才有意义。
             id: previous?.id ?? `pm-${randomUUID()}`,
             kind: params.entry.kind,
-            purpose,
-            type: params.entry.type,
-            sources: sanitizeLines(params.entry.sources, "sources"),
-            links: sanitizeLines(params.entry.links, "links"),
-            methods: sanitizeLines(params.entry.methods, "methods"),
-            ...(params.entry.instructions === undefined
-              ? {}
-              : {
-                  instructions: sanitizeText(
-                    params.entry.instructions,
-                    MAX_INSTRUCTION_LENGTH,
-                    "instructions",
-                  ),
-                }),
-            ...(params.entry.skills === undefined
-              ? {}
-              : { skills: sanitizeLines(params.entry.skills, "skills") }),
-            ...(params.entry.checklist === undefined
-              ? {}
-              : { checklist: sanitizeLines(params.entry.checklist, "checklist") }),
-            ...(params.entry.steps === undefined
-              ? {}
-              : { steps: sanitizeSteps(params.entry.steps) }),
+            blocks,
             updatedAt: new Date().toISOString(),
           };
           return { entries: { ...current.entries, [key]: entry }, extras: current.extras };

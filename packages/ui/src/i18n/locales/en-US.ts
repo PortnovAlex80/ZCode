@@ -4079,13 +4079,19 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.chatgpt.manageUsage": "Manage usage",
   "settings.modelProvider.chatgpt.models.refresh": "Refresh models",
   "settings.modelProvider.chatgpt.navigation": "OpenAI — ChatGPT Subscription",
-  "settings.modelProvider.chatgpt.manualModels": "Enable models to show them in the chat selector. You can add a model ID manually; availability for your account is unverified until a request succeeds. Subscription access is still required.",
-  "settings.modelProvider.chatgpt.noModels": "No models are configured. Refresh the account catalog or add a model ID manually. An unavailable catalog does not mean you are signed out.",
+  "settings.modelProvider.chatgpt.manualModels":
+    "Enable models to show them in the chat selector. You can add a model ID manually; availability for your account is unverified until a request succeeds. Subscription access is still required.",
+  "settings.modelProvider.chatgpt.noModels":
+    "No models are configured. Refresh the account catalog or add a model ID manually. An unavailable catalog does not mean you are signed out.",
   "settings.modelProvider.chatgpt.models.loaded": "Models refreshed: {count} available.",
-  "settings.modelProvider.chatgpt.models.empty": "The account returned no available models. Try refreshing again later.",
-  "settings.modelProvider.chatgpt.models.unavailable": "Model refresh is unavailable in this runtime.",
-  "settings.modelProvider.chatgpt.models.httpError": "Could not refresh models (HTTP {httpStatus}). Existing models are kept. Try again later.",
-  "settings.modelProvider.chatgpt.models.failed": "Could not refresh models. Existing models are kept. Try again later.",
+  "settings.modelProvider.chatgpt.models.empty":
+    "The account returned no available models. Try refreshing again later.",
+  "settings.modelProvider.chatgpt.models.unavailable":
+    "Model refresh is unavailable in this runtime.",
+  "settings.modelProvider.chatgpt.models.httpError":
+    "Could not refresh models (HTTP {httpStatus}). Existing models are kept. Try again later.",
+  "settings.modelProvider.chatgpt.models.failed":
+    "Could not refresh models. Existing models are kept. Try again later.",
   "settings.modelProvider.chatgpt.status.notConnected": "Not connected",
   "settings.modelProvider.chatgpt.status.connected": "Signed in — plan usage not granted",
   "settings.modelProvider.chatgpt.status.planEnabled": "Plan enabled",
@@ -7437,18 +7443,31 @@ const enUS: Record<string, string> = {
   "artifactMetadata.edit": "Edit artifact metadata…",
   "artifactMetadata.scope": "Artifact / scope",
   "artifactMetadata.projectScope": ". — project root",
-  "artifactMetadata.editorHelp": "Edit this artifact or an ancestor folder. Changes are saved to the project's .harness/project.json; nothing runs when you open or save metadata.",
-  "artifactMetadata.referencesHelp": "Sources, links, methods, skills and checks: one reference or item per line. Referenced documents are not automatically read.",
-  "artifactMetadata.stepsHelp": "Ordered steps (JSON array). Each step requires title and instruction. Optional: tool {transport: file/mcp/rest, connection, operation}, input, expected, onFailure. These guide the agent; connection configuration and permissions stay in integrations.",
-  "artifactMetadata.stepExample": "Show a step example",
-  "artifactMetadata.stepExampleTitle": "Read project requisites",
-  "artifactMetadata.stepExampleInstruction": "Read the source and identify missing required fields.",
-  "artifactMetadata.stepExampleExpected": "A list of known and missing requisites.",
-  "artifactMetadata.stepExampleFailure": "Report missing input and stop dependent steps.",
-  "artifactMetadata.invalidSteps": "Invalid steps: use a JSON array with a nonempty title and instruction for each step. Tool transport must be file, mcp or rest, with an operation; input, expected and onFailure must be text.",
-  "artifactMetadata.previewHelp": "Preview the current project → folders → artifact instructions. Every enabled send resolves them again before submission.",
-  "artifactMetadata.historyHelp": "Disabling metadata affects future messages. Context already sent remains in conversation history; start a new discussion for a clean history.",
-  "artifactMetadata.unavailable": "Artifact metadata is unavailable on this host. Open a supported local workspace.",
+  "artifactMetadata.editorHelp":
+    "Edit this artifact or an ancestor folder. Changes are saved to the project's .harness/project.json; nothing runs when you open or save metadata.",
+  "artifactMetadata.blocksHelp":
+    "Five optional text blocks. Write detailed instructions, Markdown, checklists and call examples directly. Referenced files are not automatically read; tools use existing connections and permissions.",
+  "artifactMetadata.field.role": "Role and project position",
+  "artifactMetadata.field.template": "Template",
+  "artifactMetadata.field.data": "Data",
+  "artifactMetadata.field.assembly": "Assembly",
+  "artifactMetadata.field.acceptance": "Acceptance",
+  "artifactMetadata.hint.role":
+    "Why this document exists, what it depends on and where its result is used.",
+  "artifactMetadata.hint.template":
+    "The actual template, sections, fields, tables, layout and what must be preserved.",
+  "artifactMetadata.hint.data":
+    "Which exact source supplies each element; how to handle missing or conflicting data.",
+  "artifactMetadata.hint.assembly":
+    "Operations in order, exact commands or tool-call examples, expected outputs and error handling.",
+  "artifactMetadata.hint.acceptance":
+    "Checklists for content and formatting, and the evidence needed to accept the result.",
+  "artifactMetadata.previewHelp":
+    "Preview the current project → folders → artifact instructions. Every enabled send resolves them again before submission.",
+  "artifactMetadata.historyHelp":
+    "Disabling metadata affects future messages. Context already sent remains in conversation history; start a new discussion for a clean history.",
+  "artifactMetadata.unavailable":
+    "Artifact metadata is unavailable on this host. Open a supported local workspace.",
   "artifactMetadata.failed": "Could not load or save artifact metadata.",
   "artifactMetadata.loading": "Loading metadata…",
   "artifactMetadata.revision": "Revision",
@@ -7457,20 +7476,6 @@ const enUS: Record<string, string> = {
   "artifactMetadata.refresh": "Refresh preview",
   "artifactMetadata.close": "Close",
   "artifactMetadata.remove": "Remove this passport",
-  "artifactMetadata.field.type": "Artifact type",
-  "artifactMetadata.field.purpose": "Purpose",
-  "artifactMetadata.field.instructions": "Instructions",
-  "artifactMetadata.field.sources": "Sources",
-  "artifactMetadata.field.links": "Related materials",
-  "artifactMetadata.field.methods": "Methods / rules",
-  "artifactMetadata.field.skills": "Skill references",
-  "artifactMetadata.field.checklist": "Checklist",
-  "artifactMetadata.field.steps": "Procedure steps (JSON)",
-  "artifactMetadata.type.source": "Source data",
-  "artifactMetadata.type.calculation": "Calculation",
-  "artifactMetadata.type.note": "Document / note",
-  "artifactMetadata.type.drawing": "Drawing",
-  "artifactMetadata.type.other": "Other",
   ...requestSecurityMessagesEnUS,
 };
 

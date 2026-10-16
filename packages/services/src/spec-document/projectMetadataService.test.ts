@@ -5,9 +5,11 @@ import { join } from "node:path";
 import { test } from "vitest";
 import {
   ProjectMetadataCorruptError,
+  type ProjectMetadataBlocks,
   type ProjectMetadataEntries,
   type ProjectMetadataInput,
 } from "./projectMetadata.js";
+import { projectMetadataBlocks } from "./projectMetadataBlocks.js";
 import { createProjectMetadataService } from "./projectMetadataService.js";
 
 function sampleEntry(overrides: Partial<ProjectMetadataInput> = {}): ProjectMetadataInput {
@@ -50,13 +52,16 @@ test("save writes UTF-8 JSON under normalized path keys and read restores the va
     });
     const entries = await service.read({ workspacePath: workspace });
     assert.deepEqual(Object.keys(entries), ["docs/расчёт.md"]);
-    assert.equal(entries["docs/расчёт.md"]?.purpose, "Расчёт осадки фундамента");
-    assert.equal(entries["docs/расчёт.md"]?.type, "calculation");
-    assert.deepEqual(entries["docs/расчёт.md"]?.sources, ["ГОСТ 12345", "изыскания 2024"]);
+    assert.equal(
+      entries["docs/расчёт.md"]?.blocks?.role,
+      "Расчёт осадки фундамента\n\nArtifact type:\ncalculation",
+    );
+    assert.match(entries["docs/расчёт.md"]?.blocks?.data ?? "", /ГОСТ 12345\nизыскания 2024/);
+    assert.equal(entries["docs/расчёт.md"]?.purpose, undefined);
 
     const raw = await readFile(join(workspace, ".harness", "project.json"), "utf8");
     const parsed = JSON.parse(raw) as { version: number; entries: ProjectMetadataEntries };
-    assert.equal(parsed.version, 1);
+    assert.equal(parsed.version, 2);
     assert.ok(entries["docs/расчёт.md"]?.id);
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -78,7 +83,7 @@ test("editing an existing passport keeps the stable entry id; each key gets one 
       entry: sampleEntry({ kind: "folder", type: "note", purpose: "Обновлённое назначение" }),
     });
     assert.equal(second["notes/записка.md"]?.id, first["notes/записка.md"]?.id);
-    assert.equal(second["notes/записка.md"]?.purpose, "Обновлённое назначение");
+    assert.match(second["notes/записка.md"]?.blocks?.role ?? "", /Обновлённое назначение/);
     // 同一目录换键 => 新 id。
     const other = await service.save({
       workspacePath: workspace,
@@ -132,7 +137,7 @@ test("a corrupted project.json fails reads visibly and is never overwritten by s
     await mkdir(harness);
     const corruptPayloads = [
       "{ not json",
-      JSON.stringify({ version: 2, entries: {} }),
+      JSON.stringify({ version: 3, entries: {} }),
       JSON.stringify({ version: 1, entries: { "x.md": { purpose: 1 } } }),
     ];
     const service = createProjectMetadataService({ desktopLocal: true });
@@ -267,11 +272,8 @@ async function withWorkspace(run: (workspace: string) => Promise<void>): Promise
 test("version 1 old entries stay additive and root/procedure fields round-trip without reading references", async () => {
   await withWorkspace(async (workspace) => {
     const service = createProjectMetadataService({ desktopLocal: true });
-    await service.save({ workspacePath: workspace, path: "old.txt", entry: sampleEntry() });
-    await service.save({
-      workspacePath: workspace,
-      path: ".",
-      entry: sampleEntry({
+    const legacyRoot = {
+      ...sampleEntry({
         kind: "folder",
         instructions: "Use only verified requisites.",
         skills: ["skills/nonexistent.md"],
@@ -297,7 +299,19 @@ test("version 1 old entries stay additive and root/procedure fields round-trip w
           },
         ],
       }),
+      id: "root-legacy",
+      updatedAt: "2026-10-15T00:00:00Z",
+    };
+    await mkdir(join(workspace, ".harness"));
+    const target = join(workspace, ".harness/project.json");
+    const original = JSON.stringify({
+      version: 1,
+      entries: {
+        ".": legacyRoot,
+        "old.txt": { ...sampleEntry(), id: "old-legacy", updatedAt: "2026-10-15T00:00:00Z" },
+      },
     });
+    await writeFile(target, original);
     const fresh = createProjectMetadataService({ desktopLocal: true });
     const entries = await fresh.read({ workspacePath: workspace });
     assert.equal(entries["old.txt"]?.instructions, undefined);
@@ -310,9 +324,21 @@ test("version 1 old entries stay additive and root/procedure fields round-trip w
     assert.match(context.text, /skills\/nonexistent\.md/);
     assert.match(context.text, /not read/);
     assert.match(context.text, /descriptive/);
+    assert.equal(await readFile(target, "utf8"), original);
+    assert.equal(entries["."]?.blocks, undefined);
+    const saved = await service.save({
+      workspacePath: workspace,
+      path: ".",
+      entry: { kind: "folder", blocks: projectMetadataBlocks(entries["."]) },
+    });
+    assert.equal(saved["."]?.id, "root-legacy");
+    assert.equal(saved["."]?.steps, undefined);
+    assert.equal(saved["old.txt"]?.purpose, "Расчёт осадки фундамента");
+    assert.equal(saved["old.txt"]?.blocks, undefined);
+    assert.deepEqual(projectMetadataBlocks(saved["."]), projectMetadataBlocks(legacyRoot));
     assert.equal(
       JSON.parse(await readFile(join(workspace, ".harness/project.json"), "utf8")).version,
-      1,
+      2,
     );
   });
 });
@@ -394,7 +420,7 @@ test("context revision is stable, changes on current inherited metadata, and ign
     );
     const target = join(workspace, ".harness/project.json");
     const external = JSON.parse(await readFile(target, "utf8"));
-    external.entries["."].instructions = "Changed externally";
+    external.entries["."].blocks.assembly = "Changed externally";
     await writeFile(target, JSON.stringify(external));
     const next = await service.resolve({ workspacePath: workspace, path: "title.md" });
     assert.notEqual(next.revision, first.revision);
@@ -474,22 +500,31 @@ test("invalid stored keys cannot inject paths and prototype-named keys remain or
 test("oversized assembled context refuses instead of silently truncating an inherited procedure", async () => {
   await withWorkspace(async (workspace) => {
     const service = createProjectMetadataService({ desktopLocal: true });
-    await service.save({
-      workspacePath: workspace,
-      path: ".",
-      entry: sampleEntry({
+    const legacy = {
+      ...sampleEntry({
         kind: "folder",
         steps: Array.from({ length: 9 }, (_, index) => ({
           title: `Step ${index}`,
           instruction: "x".repeat(8000),
         })),
       }),
-    });
+      id: "long-legacy",
+      updatedAt: "2026-10-15T00:00:00Z",
+    };
+    await mkdir(join(workspace, ".harness"));
+    const target = join(workspace, ".harness/project.json");
+    const original = JSON.stringify({ version: 1, entries: { ".": legacy } });
+    await writeFile(target, original);
     await assert.rejects(
       service.resolve({ workspacePath: workspace, path: "title.md" }),
       /context exceeds/,
     );
     assert.equal((await service.read({ workspacePath: workspace }))["."]?.steps?.length, 9);
+    await assert.rejects(
+      service.save({ workspacePath: workspace, path: ".", entry: legacy }),
+      /block exceeds/,
+    );
+    assert.equal(await readFile(target, "utf8"), original);
   });
 });
 
@@ -553,4 +588,123 @@ test("a linked project.json refuses all operations and leaves its external targe
       assert.equal(await readFile(target, "utf8"), raw);
     }),
   );
+});
+
+test("five blocks preserve whitespace and save only canonical content without a legacy shadow", async () => {
+  await withWorkspace(async (workspace) => {
+    const service = createProjectMetadataService({ desktopLocal: true });
+    const initial = await service.save({
+      workspacePath: workspace,
+      path: "title.md",
+      entry: sampleEntry({ instructions: "OLD INSTRUCTION" }),
+    });
+    const blocks: ProjectMetadataBlocks = {
+      role: "  Role\n\n",
+      template: "\n  Template layout\n",
+      data: "\tField -> source.txt\n",
+      assembly: "```python\n  exact_call()\n```\n",
+      acceptance: "\n- [ ] Check result\n  Preserve author text  ",
+    };
+    const result = await service.save({
+      workspacePath: workspace,
+      path: "title.md",
+      entry: { kind: "document", blocks },
+    });
+    const reopened = (await service.read({ workspacePath: workspace }))["title.md"];
+    assert.deepEqual(reopened?.blocks, blocks);
+    assert.equal(reopened?.id, initial["title.md"]?.id);
+    assert.deepEqual(Object.keys(result["title.md"]!).sort(), [
+      "blocks",
+      "id",
+      "kind",
+      "updatedAt",
+    ]);
+    const context = await service.resolve({ workspacePath: workspace, path: "title.md" });
+    for (const value of Object.values(blocks)) assert.ok(context.text.includes(value));
+    assert.ok(!context.text.includes("OLD INSTRUCTION"));
+    assert.ok(!context.text.includes(reopened!.id));
+    assert.ok(!context.text.includes(reopened!.updatedAt));
+    assert.match(context.text, /Source passport: "title\.md"/);
+    assert.match(context.text, /\nRole:\n/);
+    assert.match(context.text, /\nTemplate:\n/);
+    assert.match(context.text, /\nData:\n/);
+    assert.match(context.text, /\nAssembly:\n/);
+    assert.match(context.text, /\nAcceptance:\n/);
+    assert.equal(context.text.split("exact_call()").length - 1, 1);
+    const empty = projectMetadataBlocks();
+    await service.save({
+      workspacePath: workspace,
+      path: "title.md",
+      entry: { kind: "document", blocks: empty },
+    });
+    assert.deepEqual((await service.read({ workspacePath: workspace }))["title.md"]?.blocks, empty);
+    const cleared = await service.resolve({ workspacePath: workspace, path: "title.md" });
+    assert.ok(!cleared.text.includes("OLD INSTRUCTION"));
+    assert.ok(!cleared.text.includes("\nRole:\n"));
+  });
+});
+
+test("mixed content, incomplete legacy and malformed five blocks fail saves and reads without writes", async () => {
+  await withWorkspace(async (workspace) => {
+    const service = createProjectMetadataService({ desktopLocal: true });
+    await service.save({
+      workspacePath: workspace,
+      path: "title.md",
+      entry: { kind: "document", blocks: projectMetadataBlocks() },
+    });
+    const target = join(workspace, ".harness/project.json");
+    const before = await readFile(target, "utf8");
+    const invalid = [
+      { kind: "document", purpose: "Incomplete" },
+      { ...sampleEntry(), blocks: projectMetadataBlocks() },
+      { kind: "document", blocks: projectMetadataBlocks(), instructions: "" },
+      { kind: "document", blocks: projectMetadataBlocks(), purpose: undefined },
+      { kind: "document", blocks: { role: "" } },
+      { kind: "document", blocks: { ...projectMetadataBlocks(), extra: "" } },
+      { kind: "document", blocks: { ...projectMetadataBlocks(), data: [] } },
+      { kind: "document", blocks: { ...projectMetadataBlocks(), assembly: "\0" } },
+      { kind: "document", blocks: { ...projectMetadataBlocks(), role: "x".repeat(64001) } },
+    ];
+    for (const entry of invalid) {
+      await assert.rejects(
+        service.save({
+          workspacePath: workspace,
+          path: "title.md",
+          entry: entry as ProjectMetadataInput,
+        }),
+      );
+      assert.equal(await readFile(target, "utf8"), before);
+      if (Object.hasOwn(entry, "purpose") && entry.purpose === undefined) continue;
+      const corrupt = JSON.parse(before);
+      corrupt.entries["title.md"] = { id: "invalid", updatedAt: "2026-10-17T00:00:00Z", ...entry };
+      const raw = JSON.stringify(corrupt);
+      await writeFile(target, raw);
+      await assert.rejects(service.read({ workspacePath: workspace }), ProjectMetadataCorruptError);
+      await assert.rejects(
+        service.save({
+          workspacePath: workspace,
+          path: "other.md",
+          entry: { kind: "document", blocks: projectMetadataBlocks() },
+        }),
+      );
+      assert.equal(await readFile(target, "utf8"), raw);
+      await writeFile(target, before);
+    }
+  });
+});
+
+test("a bounded block can still exceed assembled context and is never silently truncated", async () => {
+  await withWorkspace(async (workspace) => {
+    const service = createProjectMetadataService({ desktopLocal: true });
+    const blocks = { ...projectMetadataBlocks(), assembly: "x".repeat(64000) };
+    await service.save({ workspacePath: workspace, path: ".", entry: { kind: "folder", blocks } });
+    assert.equal(
+      (await service.read({ workspacePath: workspace }))["."]?.blocks?.assembly.length,
+      64000,
+    );
+    await assert.rejects(
+      service.resolve({ workspacePath: workspace, path: "title.md" }),
+      /context exceeds/,
+    );
+  });
 });

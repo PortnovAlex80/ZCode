@@ -9,6 +9,10 @@ User guide: [metadata fields, purpose and filling examples (Russian)](ARTIFACT-M
 
 ## Product behavior
 
+2026-10-17: the current editor/storage evolution is specified in
+[five prose blocks](ARTIFACT-TEXT-BLOCKS.md). The field-heavy model below is the
+legacy input format; it remains readable without automatic file migration.
+
 An artifact passport contains purpose, sources, links and methods plus optional
 instructions, skill references, checklist and ordered procedure steps. A step has
 `title`, `instruction`, optional `tool` (`transport`: file/mcp/rest, logical

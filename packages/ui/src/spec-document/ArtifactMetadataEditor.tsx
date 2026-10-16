@@ -71,16 +71,10 @@ export function ArtifactMetadataEditor({
     setDraft((current) => ({ ...current, [key]: value }));
   };
   async function save() {
-    let input: ProjectMetadataInput;
-    try {
-      input = metadataInputFromDraft(
-        draft,
-        entries?.[scope]?.kind ?? (scope === path && path !== "." ? kind : "folder"),
-      );
-    } catch {
-      setError(t("invalidSteps"));
-      return;
-    }
+    const input = metadataInputFromDraft(
+      draft,
+      entries?.[scope]?.kind ?? (scope === path && path !== "." ? kind : "folder"),
+    );
     setBusy(true);
     setError("");
     try {
@@ -104,29 +98,7 @@ export function ArtifactMetadataEditor({
       if (mounted.current) setBusy(false);
     }
   }
-  const fields = [
-    "purpose",
-    "instructions",
-    "sources",
-    "links",
-    "methods",
-    "skills",
-    "checklist",
-  ] as const;
-  const stepsExample = JSON.stringify(
-    [
-      {
-        title: t("stepExampleTitle"),
-        instruction: t("stepExampleInstruction"),
-        tool: { transport: "file", operation: "read" },
-        input: "requisites.txt",
-        expected: t("stepExampleExpected"),
-        onFailure: t("stepExampleFailure"),
-      },
-    ],
-    null,
-    2,
-  );
+  const fields = ["role", "template", "data", "assembly", "acceptance"] as const;
 
   return (
     <DialogContent className="max-h-[90dvh] sm:max-w-2xl flex flex-col overflow-hidden">
@@ -158,60 +130,23 @@ export function ArtifactMetadataEditor({
             </SelectContent>
           </Select>
         </label>
-        <label className="grid gap-1 text-ui-base">
-          {t("field.type")}
-          <Select
-            value={draft.type}
-            disabled={busy || !entries}
-            onValueChange={(value) => setField("type", value)}
-          >
-            <SelectTrigger className="w-full" aria-label={t("field.type")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(["source", "calculation", "note", "drawing", "other"] as const).map((type) => (
-                <SelectItem key={type} value={type}>
-                  {t(`type.${type}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </label>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <p className="text-ui-sm text-foreground-subtle">{t("blocksHelp")}</p>
+        <div className="grid gap-3">
           {fields.map((field) => (
-            <label
-              key={field}
-              className={`grid gap-1 text-ui-base ${field === "instructions" || field === "purpose" ? "sm:col-span-2" : ""}`}
-            >
+            <label key={field} className="grid gap-1 text-ui-base">
               {t(`field.${field}`)}
               <Textarea
                 value={draft[field]}
                 disabled={busy || !entries}
                 aria-label={t(`field.${field}`)}
-                className="max-h-48 overflow-y-auto"
-                rows={field === "instructions" ? 4 : 2}
+                placeholder={t(`hint.${field}`)}
+                className="max-h-64 overflow-y-auto"
+                rows={field === "assembly" || field === "template" ? 4 : 3}
                 onChange={(event) => setField(field, event.target.value)}
               />
             </label>
           ))}
         </div>
-        <p className="text-ui-sm text-foreground-subtle">{t("referencesHelp")}</p>
-        <label className="grid gap-1 text-ui-base">
-          {t("field.steps")}
-          <Textarea
-            value={draft.steps}
-            aria-label={t("field.steps")}
-            disabled={busy || !entries}
-            className="max-h-64 overflow-y-auto font-mono"
-            rows={6}
-            onChange={(event) => setField("steps", event.target.value)}
-          />
-        </label>
-        <p className="text-ui-sm text-foreground-subtle">{t("stepsHelp")}</p>
-        <details className="text-ui-sm text-foreground-subtle">
-          <summary className="cursor-pointer">{t("stepExample")}</summary>
-          <pre className="mt-2 whitespace-pre-wrap break-words font-mono">{stepsExample}</pre>
-        </details>
         {error && (
           <p role="alert" className="text-ui-base text-destructive whitespace-pre-wrap">
             {error}

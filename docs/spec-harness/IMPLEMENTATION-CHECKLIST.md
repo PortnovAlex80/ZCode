@@ -33,6 +33,21 @@ recheck those items before restoring their accepted status.
 
 ## Exclusive write assignments
 
+### Five prose passport blocks — 2026-10-17
+
+User requested simplifying the model to ordinary text blocks. Contract:
+[ARTIFACT-TEXT-BLOCKS.md](ARTIFACT-TEXT-BLOCKS.md), ADR 003.
+Root owns UI/docs/integration; service agent owns bounded metadata service files;
+independent reviewer found no blockers. Existing unrelated shared/index.ts and
+the nul file remain untouched. Active packaged ZCode was detected: no stop,
+profile migration or replacement of its executable is authorized by this change.
+Build/GUI verification uses a separate output/profile; no model prompt is sent.
+
+- [x] Canonical five-block form and readable agent context; legacy read/no rewrite,
+  ID-preserving v2 save, exact text and detailed old procedure preservation.
+- [x] Focused service tests: 23 passed. UI/activation/send preparation: 16 passed.
+- [ ] Final typecheck, lint, architecture and isolated production GUI delivery.
+
 ### Artifact harness MD/TXT implementation — 2026-10-15
 
 User requested recording the full concept, implementing it and packaging the fork.

@@ -6,7 +6,7 @@ import { createServiceDescriptor } from "../descriptors.js";
  * 文件布局：`.harness/project.json`（UTF-8 JSON）：
  *  - `entries` 的键是规范化后的相对路径（分隔符 `/`，无 `..`）；
  *  - 每条记录有稳定 `id`，编辑护照不改 id，未来重命名文件/目录时可以按 id 重新挂链；
- *  - 记录只存引用（источники/связи/методики 是短文本行），不复制文档内容；
+ *  - v1 旧字段只读投影；v2 保存五个正文块，不自动复制引用文档的内容；
  *  - 写入保留未知的 top-level 键，`.harness/` 下也留出 `rules/`、`workflows/` 的位置，
  *    后续扩展不需要迁移本文件。
  *
@@ -23,6 +23,15 @@ export const PROJECT_METADATA_TYPES = [
   "other",
 ] as const;
 export type ProjectMetadataType = (typeof PROJECT_METADATA_TYPES)[number];
+
+/** 五个正文块；空字符串有效，保留用户缩进与换行。 */
+export interface ProjectMetadataBlocks {
+  role: string;
+  template: string;
+  data: string;
+  assembly: string;
+  acceptance: string;
+}
 
 /** 描述性步骤；连接、权限及真实执行由现有工具运行时负责。 */
 export interface ProjectMetadataStep {
@@ -44,18 +53,20 @@ export interface ProjectMetadataEntry {
   /** 行级别：文档或目录（左侧项目树的 file row / folder row）。 */
   kind: "document" | "folder";
   /** Назначение（自由文本）。 */
-  purpose: string;
-  type: ProjectMetadataType;
+  purpose?: string;
+  type?: ProjectMetadataType;
   /** Источники——短文本引用行，不是文档副本。 */
-  sources: string[];
+  sources?: string[];
   /** Связанные материалы——短文本引用行。 */
-  links: string[];
+  links?: string[];
   /** Методики/правила——名称或链接引用。 */
-  methods: string[];
+  methods?: string[];
   instructions?: string;
   skills?: string[];
   checklist?: string[];
   steps?: ProjectMetadataStep[];
+  /** v2 正式表示；不能与旧内容字段混合，旧字段只用于读取旧记录。 */
+  blocks?: ProjectMetadataBlocks;
   /** 最近一次保存的 ISO-8601 时间。 */
   updatedAt: string;
 }

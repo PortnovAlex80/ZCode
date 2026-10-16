@@ -102,7 +102,7 @@ describe("file tree artifact metadata action", () => {
       );
       expect(screen.queryByRole("menu")).toBeNull();
       expect(screen.getByRole("dialog")).toBeTruthy();
-      fireEvent.change(screen.getByLabelText("artifactMetadata.field.purpose"), {
+      fireEvent.change(screen.getByLabelText("artifactMetadata.field.role"), {
         target: { value: "ODN passport" },
       });
       fireEvent.click(screen.getByRole("button", { name: "common.save" }));
@@ -113,7 +113,7 @@ describe("file tree artifact metadata action", () => {
             path: type === "directory" ? "documents" : "documents/title.md",
             entry: expect.objectContaining({
               kind: type === "directory" ? "folder" : "document",
-              purpose: "ODN passport",
+              blocks: expect.objectContaining({ role: "ODN passport" }),
             }),
           }),
         ),
