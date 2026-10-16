@@ -5,6 +5,8 @@ AH-04. The user's authorization starts implementation and production packaging.
 This extends [the concept](ARTIFACT-HARNESS-PLAN.md); rename/copy/import, evidence
 automation and a workflow executor remain later stages.
 
+User guide: [metadata fields, purpose and filling examples (Russian)](ARTIFACT-METADATA-GUIDE.md).
+
 ## Product behavior
 
 An artifact passport contains purpose, sources, links and methods plus optional
