@@ -46,7 +46,28 @@ Build/GUI verification uses a separate output/profile; no model prompt is sent.
 - [x] Canonical five-block form and readable agent context; legacy read/no rewrite,
   ID-preserving v2 save, exact text and detailed old procedure preservation.
 - [x] Focused service tests: 23 passed. UI/activation/send preparation: 16 passed.
-- [ ] Final typecheck, lint, architecture and isolated production GUI delivery.
+- [x] Typecheck passed; lint 0 errors / 63 existing warnings; architecture 0 violations.
+- [x] Isolated source-built Electron GUI: five fields, legacy open without write,
+  v2 save with stable ID, literal commands round-trip, inherited plaintext context,
+  refresh and persisted activation. No model request or live profile was used.
+- [x] Packaged production GUI repeats the same five-field/legacy/context scenario.
+  Production NSIS artifact and runtime-closure/size audit completed. Independent
+  manifest SHA-512/size, Windows PE, embedded source revision and size audit pass
+  with exit 0. Version 3.15.1, production flavor, code `9d1dafbf`.
+
+Delivery: `packages/desktop/dist/text-blocks-20261017/ZCode-3.15.1-win-x64.exe`,
+170133444 bytes; SHA-256
+`4fa9fa9fb91a4611ddcf6cbae44f88814182d86e1e99903116cf2a9847603863`.
+One existing Desktop `ZCode.lnk` now targets this output's
+`win-unpacked/ZCode.exe`; its original is backed up under ignored `.tmp`.
+The user's old process/profile remains open and unchanged. Close it normally,
+then use the same shortcut; the installer was not launched.
+
+Packaging evidence caveat: the outer nested PowerShell wrapper reported exit 1
+with NativeCommandError records for native stderr warnings. The builder reached
+all final audit steps and produced its complete update manifest. Independent
+artifact verification above passed; the wrapper invocation is not recorded as
+an exit-0 command. No duplicate full build/test sweep was run to hide this result.
 
 ### Artifact harness MD/TXT implementation — 2026-10-15
 

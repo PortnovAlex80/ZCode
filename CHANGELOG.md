@@ -1,12 +1,17 @@
 # Changelog
 
-## 3.15.1 fork — 2026-10-15
+## 3.15.1 fork — 2026-10-17
 
 ### Added
 
 - Replace the artifact passport form with five prose blocks: role, template,
   data, assembly and acceptance. Send readable instructions to the agent,
   preserve detailed legacy procedures, and migrate only on save to store v2.
+
+## 3.15.1 fork — 2026-10-15
+
+### Added
+
 - Add a project-local DOCX title-sheet renderer with explicit counted text
   replacements, template hashes and output receipts. Preserve the real Word
   template layout and refuse to overwrite an author-modified output.
