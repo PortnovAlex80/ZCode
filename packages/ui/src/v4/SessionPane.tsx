@@ -287,7 +287,14 @@ import {
 import { useSlashCommands } from "@/hooks/useSlashCommands.js";
 import { useV4Conversation } from "@/v4/V4ConversationContext.js";
 import { useConversationProjection } from "@/v4/useConversationProjection.js";
-import { useCombinedPresentationVisibility } from "@/v4/usePresentationVisibility.js";
+import {
+  useCombinedPresentationVisibility,
+  usePresentationDocument,
+} from "@/v4/usePresentationVisibility.js";
+import {
+  subscribePresentationKeydown,
+  usePresentationInteractionFocus,
+} from "@/v4/presentationInteractionFocus.js";
 import { usePendingCommandRecovery } from "@/v4/usePendingCommandRecovery.js";
 import { useV4SessionQuotaBanner } from "@/v4/useV4SessionQuotaBanner.js";
 import { resolveMcpUnavailableNotice } from "@/v4/mcpUnavailableBannerNotice.js";
@@ -713,6 +720,11 @@ export function SessionPane({
   // document 即该 PiP 文档）。投影订阅、permissions/lifecycle、execution-config 源、
   // 后台聚合与插件 live feed 不读该值，保持存活。
   const panePresented = useCombinedPresentationVisibility(presentationVisible);
+  // 修复原因：多个原生窗口各有 focused pane，不能都消费主窗口的一次性输入事件；
+  // 交互必须再按实际 portal 宿主文档的焦点裁决，展示与订阅不受此门禁影响。
+  const presentationDocument = usePresentationDocument();
+  const presentationWindowFocused = usePresentationInteractionFocus(presentationDocument);
+  const interactionFocused = focused && presentationWindowFocused;
   // Presentation visibility（Wave A）：隐藏期间把纯展示派生的 rows 输入钉在最后一次
   // 展示的窗口上（与 EMPTY_SHARE_ROWS_WINDOW 同一模式）。订阅继续实时更新
   // snapshot/rows（控制面读取不受影响）；恢复展示的首个 render 切换回最新窗口，
@@ -4691,9 +4703,8 @@ export function SessionPane({
       event.preventDefault();
       handleStop("escape");
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [focused, handleStop, readOnly, sessionId, snapshot?.control.canStop]);
+    return subscribePresentationKeydown(presentationDocument, handleKeyDown);
+  }, [focused, handleStop, presentationDocument, readOnly, sessionId, snapshot?.control.canStop]);
 
   // handleStop 带 source 参数（button / escape 两个调用点），但 ConversationComposer 是 memo：
   // 直接写 onStop={() => handleStop("button")} 每次 render 都换引用，memo 白做，而 composer
@@ -5480,10 +5491,12 @@ export function SessionPane({
       contextHeader={isDraft ? draftComposerHeader : undefined}
       centered={isDraft}
       blockingRequestId={blockingInteractionId}
-      listenAddToChatEvents={focused}
-      externalTextInsertRequest={focused && sessionId === null ? composerTextInsertRequest : null}
+      listenAddToChatEvents={interactionFocused}
+      externalTextInsertRequest={
+        interactionFocused && sessionId === null ? composerTextInsertRequest : null
+      }
       onExternalTextInsertApplied={handleExternalTextInsertApplied}
-      autoFocusEnabled={focused}
+      autoFocusEnabled={interactionFocused}
       disabled={
         connecting ||
         draftRuntimeRebuilding ||

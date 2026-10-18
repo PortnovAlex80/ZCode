@@ -24,6 +24,8 @@
 export interface SpecPopoutWindow {
   document: Document;
   close(): void;
+  focus?(): void;
+  readonly closed?: boolean;
   innerWidth: number;
   innerHeight: number;
   addEventListener(type: "pagehide", listener: () => void): void;

@@ -95,6 +95,8 @@ export interface SpecDocumentPaneProps {
   onOpenCodeViewer?: (source: CodeViewerSource) => void;
   visible?: boolean;
   onActivate?: () => void;
+  popoutPersistenceKey?: string;
+  onPoppedChange?: (popped: boolean) => void;
   /**
    * U-12 多开：文档 tab 实例的稳定身份（宿主传 tab id）。缺省回退 initialPath
    * （旧单实例语义）；提供后 tab 内切换文档不再因 initialPath 变化重挂面板。
@@ -125,54 +127,47 @@ function Documents({
   onActivate,
   autoOpenLastDocument = true,
   onDocumentOpen,
+  instanceKey,
+  popoutPersistenceKey,
+  onPoppedChange,
 }: SpecDocumentPaneProps) {
   const nativeDiscussionWindows = Boolean(useOptionalPlatform()?.openConversationPopout);
-  const { specDocumentService: documentService, fileWatcherService, projectMetadataService } =
-    useServices();
+  const {
+    specDocumentService: documentService,
+    fileWatcherService,
+    projectMetadataService,
+  } = useServices();
   // Capture this pane's project in every IO request; no shared mutable workspace.
   const documents = useMemo(
     () =>
       documentService && {
         getWorkspace: () => documentService.getWorkspace({ workspacePath }),
         list: () => documentService.list({ workspacePath }),
-        read: (params: { path: string }) =>
-          documentService.read({ ...params, workspacePath }),
-        save: (params: {
-          path: string;
-          content: string;
-          expectedSha256: string;
-        }) => documentService.save({ ...params, workspacePath }),
-        remove: (params: { path: string }) =>
-          documentService.remove({ ...params, workspacePath }),
+        read: (params: { path: string }) => documentService.read({ ...params, workspacePath }),
+        save: (params: { path: string; content: string; expectedSha256: string }) =>
+          documentService.save({ ...params, workspacePath }),
+        remove: (params: { path: string }) => documentService.remove({ ...params, workspacePath }),
       },
     [documentService, workspacePath],
   );
-  const executionSource = useNativeExecutionSource(
-    workspaceIdentity?.trim() || workspacePath,
-  );
-  const parentSessionId = resolveSpecExecutionSessionId(
-    shellParentSessionId,
-    executionSource,
-  );
+  const executionSource = useNativeExecutionSource(workspaceIdentity?.trim() || workspacePath);
+  const parentSessionId = resolveSpecExecutionSessionId(shellParentSessionId, executionSource);
   const storageKey = specThreadStorageKey(workspacePath, workspaceIdentity);
-  const discussionWriter = useSpecDiscussionWriter(
-    workspaceIdentity?.trim() || workspacePath,
-  );
-  const presentationKey = documentPresentationKey(
-    workspacePath,
-    workspaceIdentity,
-  );
+  const discussionWriter = useSpecDiscussionWriter(workspaceIdentity?.trim() || workspacePath);
+  const draftStorageKey = documentPresentationKey(workspacePath, workspaceIdentity);
+  const presentationKey = instanceKey
+    ? `${draftStorageKey}:pane:${JSON.stringify([shellParentSessionId, instanceKey])}`
+    : draftStorageKey;
   const [restoredPresentation] = useState(() =>
-    readDocumentPresentation(presentationKey),
+    readDocumentPresentation(presentationKey, undefined, draftStorageKey),
   );
-  const presentationRef =
-    useRef<DocumentPresentationState>(restoredPresentation);
+  const presentationRef = useRef<DocumentPresentationState>(restoredPresentation);
   // 本面板的草稿写入令牌：卸载清理时退役，之后任何迟到写入都不得覆盖
   // 接管面板（子窗口/重新挂载的源面板）已经持久化的草稿。
   const [paneWriteToken] = useState(() => newDocumentPaneWriteToken());
   useEffect(
-    () => () => retireDocumentPaneWrites(presentationKey, paneWriteToken),
-    [presentationKey, paneWriteToken],
+    () => () => retireDocumentPaneWrites(draftStorageKey, paneWriteToken),
+    [draftStorageKey, paneWriteToken],
   );
   const onActivateRef = useRef(onActivate);
   onActivateRef.current = onActivate;
@@ -203,9 +198,7 @@ function Documents({
   const [discussionMode, setDiscussionMode] = useState<DiscussionMode>(
     restoredPresentation.discussionMode,
   );
-  const [discussionRect, setDiscussionRect] = useState(
-    restoredPresentation.discussionRect,
-  );
+  const [discussionRect, setDiscussionRect] = useState(restoredPresentation.discussionRect);
   const [discussionBounds, setDiscussionBounds] = useState<DiscussionBounds>({
     width: 720,
     height: 600,
@@ -214,8 +207,7 @@ function Documents({
   const discussionRectRef = useRef(discussionRect);
   const discussionBoundsRef = useRef(discussionBounds);
   const discussionGestureRef = useRef<
-    | (DiscussionGesture & { pointerId: number; target: HTMLButtonElement })
-    | null
+    (DiscussionGesture & { pointerId: number; target: HTMLButtonElement }) | null
   >(null);
   discussionRectRef.current = discussionRect;
   discussionBoundsRef.current = discussionBounds;
@@ -242,10 +234,7 @@ function Documents({
     const gesture = discussionGestureRef.current;
     if (!gesture) return;
     discussionGestureRef.current = null;
-    if (canceled)
-      setDiscussionRect(
-        cancelDiscussionGesture(gesture, discussionBoundsRef.current),
-      );
+    if (canceled) setDiscussionRect(cancelDiscussionGesture(gesture, discussionBoundsRef.current));
     if (gesture.target.hasPointerCapture(gesture.pointerId))
       gesture.target.releasePointerCapture(gesture.pointerId);
   }
@@ -273,12 +262,7 @@ function Documents({
     const gesture = discussionGestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     setDiscussionRect(
-      updateDiscussionGesture(
-        gesture,
-        event.clientX,
-        event.clientY,
-        discussionBoundsRef.current,
-      ),
+      updateDiscussionGesture(gesture, event.clientX, event.clientY, discussionBoundsRef.current),
     );
   }
   function keyboardDiscussion(
@@ -290,10 +274,7 @@ function Documents({
       event.stopPropagation();
       return;
     }
-    if (
-      !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
-    )
-      return;
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
     event.preventDefault();
     setDiscussionRect((current) =>
       keyboardDiscussionGeometry(
@@ -337,7 +318,7 @@ function Documents({
     if (!document) return;
     if (
       !writeDocumentDraft(
-        presentationKey,
+        draftStorageKey,
         document.path,
         dirty ? { content: draft, baseSha256 } : null,
         undefined,
@@ -348,7 +329,7 @@ function Documents({
         "The unsaved document draft could not be retained for reopening. Keep this pane open until saved.",
       );
     }
-  }, [presentationKey, document, draft, baseSha256, dirty, paneWriteToken]);
+  }, [draftStorageKey, document, draft, baseSha256, dirty, paneWriteToken]);
   useEffect(() => {
     if (!document) return;
     presentationRef.current = {
@@ -376,9 +357,7 @@ function Documents({
       restoringScrollRef.current ||
       !(target instanceof HTMLElement) ||
       // U-09：[data-document-prose] 是 txt 只读正文视图（本面板自带，见 sourceEditor 槽）。
-      !target.matches(
-        "textarea, [data-markdown-preview], [data-document-prose]",
-      )
+      !target.matches("textarea, [data-markdown-preview], [data-document-prose]")
     )
       return;
     presentationRef.current = {
@@ -417,13 +396,10 @@ function Documents({
   }, [document?.path, editing]);
   const writeGuard = useSpecWriteGuard([
     ...(parentSessionId ? [parentSessionId] : []),
-    ...threads.flatMap((thread) =>
-      thread.sessionId ? [thread.sessionId] : [],
-    ),
+    ...threads.flatMap((thread) => (thread.sessionId ? [thread.sessionId] : [])),
     ...threads.map((thread) => thread.parentSessionId),
   ]);
-  const writers =
-    writeGuard.blocked || threads.some((thread) => Boolean(thread.pending));
+  const writers = writeGuard.blocked || threads.some((thread) => Boolean(thread.pending));
   useEffect(() => {
     if (!documents || !document?.path) return;
     return watchSpecDocument({
@@ -440,8 +416,7 @@ function Documents({
         const preview = contentRef.current?.querySelector<HTMLElement>(
           "[data-markdown-preview], [data-document-prose]",
         );
-        const scrollTop =
-          preview?.scrollTop ?? editorRef.current?.scrollTop ?? 0;
+        const scrollTop = preview?.scrollTop ?? editorRef.current?.scrollTop ?? 0;
         const start = editorRef.current?.selectionStart;
         const end = editorRef.current?.selectionEnd;
         install(next);
@@ -469,9 +444,7 @@ function Documents({
         );
       },
       error: (cause) =>
-        setError(
-          `Document watch/read failed: ${String(cause)}. Use Reload to recover.`,
-        ),
+        setError(`Document watch/read failed: ${String(cause)}. Use Reload to recover.`),
     });
   }, [documents, fileWatcherService, document?.path, workspacePath]);
   useEffect(() => {
@@ -479,10 +452,7 @@ function Documents({
     setBindingReady(false);
     let releaseThreads: (() => void) | undefined;
     try {
-      const store = getSpecThreadStore(
-        storageKey,
-        workspaceIdentity?.trim() || workspacePath,
-      );
+      const store = getSpecThreadStore(storageKey, workspaceIdentity?.trim() || workspacePath);
       threadStoreRef.current = store;
       const refresh = () => {
         const current = store.get();
@@ -510,8 +480,7 @@ function Documents({
       // 上一次文档——新 tab 必须停在「未选文档」初始态，标题维持 Open doc；
       // 有 initialPath（tab 绑定的文件 / 消息链接）时优先 initialPath，行为不变。
       const requestedPath =
-        initialPath ||
-        (autoOpenLastDocument ? restoredPresentation.path : null);
+        initialPath || (autoOpenLastDocument ? restoredPresentation.path : null);
       void documents
         .getWorkspace()
         .then(async (grant) => {
@@ -522,9 +491,7 @@ function Documents({
             setStatus(`${next.length} documents · local UTF-8 files`);
           }
           if (requestedPath) {
-            const normalizedRoot = grant.root
-              .replaceAll("\\", "/")
-              .replace(/\/$/, "");
+            const normalizedRoot = grant.root.replaceAll("\\", "/").replace(/\/$/, "");
             const normalizedPath = requestedPath.replaceAll("\\", "/");
             const relativePath = normalizedPath
               .toLowerCase()
@@ -538,7 +505,7 @@ function Documents({
               notifyDocumentOpen(opened.path);
               const restored = restoreDocumentDraft(
                 opened,
-                readDocumentDraft(presentationKey, opened.path),
+                readDocumentDraft(draftStorageKey, opened.path),
               );
               draftRef.current = restored.content;
               setDraft(restored.content);
@@ -556,9 +523,7 @@ function Documents({
                 setDiscussionsVisible(false);
               }
               setStatus(
-                restored.content !== opened.content
-                  ? "Unsaved draft restored"
-                  : "Saved on disk",
+                restored.content !== opened.content ? "Unsaved draft restored" : "Saved on disk",
               );
               if (restored.conflict)
                 setError(
@@ -574,8 +539,7 @@ function Documents({
           // 修复：文件缺失时清掉过期的 path/线程选择/滚动（草稿条目保留），
           // 显示可恢复状态：文件回来或再次选择该文件时草稿会自动恢复。
           if (requestedPath && isMissingDocumentError(cause)) {
-            const recovered =
-              recoverMissingDocumentPresentation(presentationKey);
+            const recovered = recoverMissingDocumentPresentation(presentationKey);
             presentationRef.current = recovered ?? {
               ...presentationRef.current,
               path: null,
@@ -609,15 +573,9 @@ function Documents({
   function updateThread(next: SpecThread) {
     // Command acknowledgements may finish after the user has changed the composer draft.
     if (discussionWriter.canWrite())
-      threadStoreRef.current?.update((current) =>
-        mergeSpecThreadUpdate(current, next),
-      );
+      threadStoreRef.current?.update((current) => mergeSpecThreadUpdate(current, next));
   }
-  function updateQuestionDraft(
-    threadId: string,
-    questionDraft: string,
-    expected?: string,
-  ) {
+  function updateQuestionDraft(threadId: string, questionDraft: string, expected?: string) {
     if (discussionWriter.canWrite())
       threadStoreRef.current?.update((current) =>
         changeSpecQuestionDraft(current, threadId, questionDraft, expected),
@@ -626,7 +584,9 @@ function Documents({
   async function open(path: string) {
     if (!documents || !path || ioPending) return;
     if (discussionPopout.popped && document?.path !== path) {
-      setError("Сначала верните обсуждение в приложение, затем смените документ в этой вкладке. Другой документ можно открыть в новой вкладке.");
+      setError(
+        "Сначала верните обсуждение в приложение, затем смените документ в этой вкладке. Другой документ можно открыть в новой вкладке.",
+      );
       return;
     }
     // Bug 修复（U-11 活体回归 2026-10-14）：原先缓冲区一旦有未保存修改（dirty）就静默
@@ -637,7 +597,7 @@ function Documents({
     // 只有持久化失败（存储不可用）才阻止切换并给出原因；之后照常读取新文件。
     if (document && dirty) {
       const retained = writeDocumentDraft(
-        presentationKey,
+        draftStorageKey,
         document.path,
         { content: draft, baseSha256: baseSha256Ref.current },
         undefined,
@@ -664,19 +624,12 @@ function Documents({
       setActiveThreadId(null);
       // U-12：tab 内切换文档后回填 tab 身份（标题=文件名、sourceKey=该文件稳定 key）。
       notifyDocumentOpen(next.path);
-      const restored = restoreDocumentDraft(
-        next,
-        readDocumentDraft(presentationKey, next.path),
-      );
+      const restored = restoreDocumentDraft(next, readDocumentDraft(draftStorageKey, next.path));
       draftRef.current = restored.content;
       setDraft(restored.content);
       baseSha256Ref.current = restored.baseSha256;
       setBaseSha256(restored.baseSha256);
-      setStatus(
-        restored.content !== next.content
-          ? "Unsaved draft restored"
-          : "Saved on disk",
-      );
+      setStatus(restored.content !== next.content ? "Unsaved draft restored" : "Saved on disk");
       if (restored.conflict)
         setError(
           "Document changed on disk while closed. Your unsaved draft is retained; Save checks its original hash. Reload discards the draft and uses current disk content.",
@@ -688,8 +641,7 @@ function Documents({
     }
   }
   async function save() {
-    if (!documents || !document || !writable || writers || !dirty || ioPending)
-      return;
+    if (!documents || !document || !writable || writers || !dirty || ioPending) return;
     setIoPending(true);
     setError("");
     setStatus("Saving…");
@@ -738,7 +690,7 @@ function Documents({
     setError("");
     try {
       await documents.remove({ path });
-      writeDocumentDraft(presentationKey, path, null, undefined, paneWriteToken);
+      writeDocumentDraft(draftStorageKey, path, null, undefined, paneWriteToken);
       const next = await documents.list();
       setFiles(next);
       if (documentRef.current?.path === path) {
@@ -811,21 +763,35 @@ function Documents({
     }
   }
   const documentThreads = threads.filter(
-    (thread) => thread.documentPath === document?.path,
+    (thread) =>
+      thread.documentPath === document?.path &&
+      (!shellParentSessionId || thread.parentSessionId === shellParentSessionId),
   );
-  const activeThread = documentThreads.find(
-    (thread) => thread.id === activeThreadId,
-  );
+  const activeThread = documentThreads.find((thread) => thread.id === activeThreadId);
   function discussDocument() {
     if (!document) return;
-    const existing = documentThreads.find(thread => thread.scope === "document");
+    const existing = documentThreads.find((thread) => thread.scope === "document");
     if (existing) {
       setActiveThreadId(existing.id);
       setDiscussionsVisible(true);
       return;
     }
-    discuss({ quote: document.path, prefix: "", suffix: "", start: -1, sha256: document.sha256 }, undefined, "document");
+    discuss(
+      { quote: document.path, prefix: "", suffix: "", start: -1, sha256: document.sha256 },
+      undefined,
+      "document",
+    );
   }
+  const discussionPopout = useSpecPopoutRegion({
+    regionId: "spec-discussion",
+    workspaceKey: workspaceIdentity?.trim() || workspacePath,
+    title: "Дискуссия документа",
+    enabled: Boolean(document) && bindingReady && discussionsVisible,
+    persistenceKey: popoutPersistenceKey,
+    autoRestore: Boolean(popoutPersistenceKey),
+    onPoppedChange,
+    onReturn: () => onActivateRef.current?.(),
+  });
   useEffect(() => {
     const activate = (event: Event) => {
       const request = (event as CustomEvent<ManagedNativeDiscussionOpenRequest>).detail;
@@ -837,25 +803,30 @@ function Documents({
           (workspaceIdentity?.trim() || workspacePath) ||
         !threadsRef.current.some(
           (thread) =>
-            thread.id === request.threadId && thread.documentPath === request.documentPath,
+            thread.id === request.threadId &&
+            thread.documentPath === request.documentPath &&
+            (!shellParentSessionId || thread.parentSessionId === shellParentSessionId),
         )
       )
         return;
       setActiveThreadId(request.threadId);
       setDiscussionsVisible(true);
-      onActivateRef.current?.();
+      if (discussionPopout.popped) discussionPopout.focus();
+      else onActivateRef.current?.();
     };
     window.addEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, activate);
     return () => {
       window.removeEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, activate);
     };
-  }, [workspaceIdentity, workspacePath]);
+  }, [
+    workspaceIdentity,
+    workspacePath,
+    shellParentSessionId,
+    discussionPopout.popped,
+    discussionPopout.focus,
+  ]);
   useEffect(() => {
-    if (
-      bindingReady &&
-      activeThreadId &&
-      !threads.some((thread) => thread.id === activeThreadId)
-    ) {
+    if (bindingReady && activeThreadId && !threads.some((thread) => thread.id === activeThreadId)) {
       setActiveThreadId(null);
       setDiscussionsVisible(false);
     }
@@ -876,19 +847,11 @@ function Documents({
     [document?.path, draft, workspacePath, workspaceIdentity],
   );
   // U-08：.txt 是一等文档（服务端已列出；文件链接路由已覆盖 txt），只读视图按正文渲染。
-  const isPlainProseDocument = Boolean(
-    document && document.path.toLowerCase().endsWith(".txt"),
-  );
+  const isPlainProseDocument = Boolean(document && document.path.toLowerCase().endsWith(".txt"));
   // U-06：讨论可“вынести в окно”——Document PiP 真 OS 窗口（自动置顶、可拖到其它显示器），
   // 同一棵 React 子树经稳定 portal host 移入 PiP 文档，会话/线程/草稿不丢；共享槽位
   // （U-07：聊天弹出时这里自动回位）。API 不可用时按钮为 absent-with-reason 禁用态，
   // 面板内浮动（discussionMode === floating）保持原样。
-  const discussionPopout = useSpecPopoutRegion({
-    regionId: "spec-discussion",
-    workspaceKey: workspaceIdentity?.trim() || workspacePath,
-    title: "Дискуссия документа",
-    enabled: Boolean(document) && discussionsVisible,
-  });
   return (
     <div
       className="flex h-full min-h-0 flex-col bg-background text-foreground"
@@ -930,19 +893,14 @@ function Documents({
         ) : null}
       </div>
       {error ? (
-        <div
-          role="alert"
-          className="border-b border-border px-3 py-2 text-ui-sm text-destructive"
-        >
+        <div role="alert" className="border-b border-border px-3 py-2 text-ui-sm text-destructive">
           {error}
         </div>
       ) : null}
       <div
         ref={discussionContainerRef}
         className={
-          discussionMode === "docked" &&
-          discussionsVisible &&
-          dockedLayout.stacked
+          discussionMode === "docked" && discussionsVisible && dockedLayout.stacked
             ? "relative flex min-h-0 flex-1 flex-col overflow-y-auto"
             : "relative flex min-h-0 flex-1"
         }
@@ -952,9 +910,7 @@ function Documents({
           onScrollCapture={captureScroll}
           className="relative flex min-w-0 flex-1 flex-col"
           style={
-            discussionMode === "docked" &&
-            discussionsVisible &&
-            dockedLayout.stacked
+            discussionMode === "docked" && discussionsVisible && dockedLayout.stacked
               ? { minHeight: MIN_DOCUMENT_HEIGHT }
               : undefined
           }
@@ -1017,7 +973,15 @@ function Documents({
                     title="Discussions"
                     aria-label="Discussions"
                     aria-pressed={discussionsVisible}
-                    disabled={!discussionsVisible && !documentThreads.length && (!parentSessionId || dirty || !bindingReady || !discussionWriter.writable || ioPending)}
+                    disabled={
+                      !discussionsVisible &&
+                      !documentThreads.length &&
+                      (!parentSessionId ||
+                        dirty ||
+                        !bindingReady ||
+                        !discussionWriter.writable ||
+                        ioPending)
+                    }
                     onClick={() => {
                       if (discussionsVisible) setDiscussionsVisible(false);
                       else if (documentThreads.length) {
@@ -1061,16 +1025,12 @@ function Documents({
                 </>
               }
               onDocumentComment={
-                !dirty &&
-                parentSessionId &&
-                bindingReady &&
-                discussionWriter.writable
+                !dirty && parentSessionId && bindingReady && discussionWriter.writable
                   ? ({ selectedText, comment, range }) => {
                       const lines = draft.split("\n");
                       const start =
-                        lines
-                          .slice(0, Math.max(0, range.startLine - 1))
-                          .join("\n").length + (range.startLine > 1 ? 1 : 0);
+                        lines.slice(0, Math.max(0, range.startLine - 1)).join("\n").length +
+                        (range.startLine > 1 ? 1 : 0);
                       discuss(
                         {
                           start,
@@ -1092,26 +1052,17 @@ function Documents({
                 workspaceKey: workspaceIdentity?.trim() || workspacePath,
               }}
               onDiscussFragment={
-                !dirty &&
-                parentSessionId &&
-                bindingReady &&
-                discussionWriter.writable
+                !dirty && parentSessionId && bindingReady && discussionWriter.writable
                   ? (quote) => {
                       const first = draft.indexOf(quote);
-                      const unique =
-                        first >= 0 && draft.indexOf(quote, first + 1) < 0;
+                      const unique = first >= 0 && draft.indexOf(quote, first + 1) < 0;
                       const start = unique ? first : -1;
                       discuss({
                         start,
                         quote,
-                        prefix: unique
-                          ? draft.slice(Math.max(0, start - 120), start)
-                          : "",
+                        prefix: unique ? draft.slice(Math.max(0, start - 120), start) : "",
                         suffix: unique
-                          ? draft.slice(
-                              start + quote.length,
-                              start + quote.length + 120,
-                            )
+                          ? draft.slice(start + quote.length, start + quote.length + 120)
                           : "",
                         sha256: document!.sha256,
                       });
@@ -1131,7 +1082,7 @@ function Documents({
                       setSelection(null);
                       if (
                         !writeDocumentDraft(
-                          presentationKey,
+                          draftStorageKey,
                           document!.path,
                           content !== document!.content
                             ? { content, baseSha256: baseSha256Ref.current }
@@ -1202,10 +1153,7 @@ function Documents({
                 />
               </>
             ) : null}
-            <SpecPopoutRegionPortal
-              region={discussionPopout}
-              title="Дискуссия документа"
-            >
+            <SpecPopoutRegionPortal region={discussionPopout} title="Дискуссия документа">
               <aside
                 data-discussion-mode={discussionMode}
                 className={
@@ -1237,211 +1185,194 @@ function Documents({
                   if (
                     event.key === "Escape" &&
                     !event.defaultPrevented &&
-                    !(
-                      event.target instanceof Element &&
-                      event.target.closest('[role="dialog"]')
-                    )
+                    !(event.target instanceof Element && event.target.closest('[role="dialog"]'))
                   )
                     event.stopPropagation();
                 }}
               >
-            {!discussionPopout.popped && discussionMode === "docked" && !dockedLayout.stacked ? (
-              <button
-                type="button"
-                role="separator"
-                aria-orientation="vertical"
-                aria-label="Resize discussion panel"
-                aria-valuenow={Math.round(dockedLayout.width)}
-                title="Resize discussion · arrow keys"
-                className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize touch-none outline-none focus:bg-primary/20 hover:bg-primary/10"
-                onPointerDown={(event) =>
-                  startDiscussionGesture(event, "resize-docked")
-                }
-                onPointerMove={moveDiscussionGesture}
-                onPointerUp={() => finishDiscussionGesture()}
-                onPointerCancel={() => finishDiscussionGesture(true)}
-                onLostPointerCapture={() => finishDiscussionGesture(true)}
-                onKeyDown={(event) =>
-                  keyboardDiscussion(event, "resize-docked")
-                }
-              />
-            ) : null}
-            <div
-              className="flex shrink-0 items-center gap-1 border-b border-border p-2"
-              style={
-                !discussionPopout.popped && discussionMode === "floating"
-                  ? { minWidth: MIN_DISCUSSION_WIDTH }
-                  : undefined
-              }
-            >
-              {!discussionPopout.popped && discussionMode === "floating" ? (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Move discussion"
-                  title="Move discussion · arrow keys"
-                  className="cursor-move touch-none"
-                  onPointerDown={(event) =>
-                    startDiscussionGesture(event, "move")
-                  }
-                  onPointerMove={moveDiscussionGesture}
-                  onPointerUp={() => finishDiscussionGesture()}
-                  onPointerCancel={() => finishDiscussionGesture(true)}
-                  onLostPointerCapture={() => finishDiscussionGesture(true)}
-                  onKeyDown={(event) => keyboardDiscussion(event, "move")}
-                >
-                  <GripHorizontal />
-                </Button>
-              ) : null}
-              <select
-                aria-label="Fragment discussion"
-                value={activeThreadId || ""}
-                className="min-w-0 flex-1 rounded-md border border-input-border bg-background px-2 py-1 text-ui-sm"
-                onChange={(event) => setActiveThreadId(event.target.value)}
-              >
-                <option value="">Discussions ({documentThreads.length})</option>
-                {documentThreads.map((thread, index) => (
-                  <option key={thread.id} value={thread.id}>
-                    {index + 1}. {thread.anchor.quote.slice(0, 45)} ·{" "}
-                    {thread.pending
-                      ? "command pending"
-                      : thread.sessionId
-                        ? writeGuard.phases[thread.sessionId] || "connecting"
-                        : "new"}
-                  </option>
-                ))}
-              </select>
-              <SpecPopoutIconButton
-                region={discussionPopout}
-                popLabel="Вынести дискуссию в окно"
-                restoreLabel="Вернуть дискуссию"
-                popIcon={nativeDiscussionWindows ? <Maximize2 /> : undefined}
-              />
-              {/* 修复原因：桌面原先相邻的“放大”只开文档内浮层，用户无法移到桌面。
-                  桌面只保留一个放大入口，直达原生窗口；Web 仍保留内部浮动布局。 */}
-              {!nativeDiscussionWindows && !discussionPopout.popped ? <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={
-                  discussionMode === "floating"
-                    ? "Dock discussion"
-                    : "Float discussion"
-                }
-                title={
-                  discussionMode === "floating"
-                    ? "Dock discussion"
-                    : "Float discussion within this window"
-                }
-                onClick={() => {
-                  finishDiscussionGesture(true);
-                  setDiscussionMode(
-                    discussionMode === "floating" ? "docked" : "floating",
-                  );
-                }}
-              >
-                {discussionMode === "floating" ? <Minimize2 /> : <Maximize2 />}
-              </Button> : null}
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-label="Hide discussions"
-                onClick={() => {
-                  if (discussionPopout.popped) discussionPopout.close();
-                  setDiscussionsVisible(false);
-                }}
-              >
-                ×
-              </Button>
-            </div>
-            {discussionWriter.writable ? (
-              documentThreads.map((thread) => (
+                {!discussionPopout.popped &&
+                discussionMode === "docked" &&
+                !dockedLayout.stacked ? (
+                  <button
+                    type="button"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize discussion panel"
+                    aria-valuenow={Math.round(dockedLayout.width)}
+                    title="Resize discussion · arrow keys"
+                    className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize touch-none outline-none focus:bg-primary/20 hover:bg-primary/10"
+                    onPointerDown={(event) => startDiscussionGesture(event, "resize-docked")}
+                    onPointerMove={moveDiscussionGesture}
+                    onPointerUp={() => finishDiscussionGesture()}
+                    onPointerCancel={() => finishDiscussionGesture(true)}
+                    onLostPointerCapture={() => finishDiscussionGesture(true)}
+                    onKeyDown={(event) => keyboardDiscussion(event, "resize-docked")}
+                  />
+                ) : null}
                 <div
-                  key={thread.id}
-                  className={
-                    thread.id === activeThreadId
-                      ? "flex min-h-0 flex-1 flex-col"
-                      : "hidden"
-                  }
+                  className="flex shrink-0 items-center gap-1 border-b border-border p-2"
                   style={
                     !discussionPopout.popped && discussionMode === "floating"
-                      ? {
-                          minWidth: MIN_DISCUSSION_WIDTH,
-                          minHeight: MIN_DISCUSSION_HEIGHT,
-                          flexShrink: 0,
-                        }
+                      ? { minWidth: MIN_DISCUSSION_WIDTH }
                       : undefined
                   }
                 >
-                  <SpecDiscussionPane
-                    thread={thread}
-                    update={updateThread}
-                    updateQuestionDraft={updateQuestionDraft}
-                    workspacePath={workspacePath}
-                    workspaceIdentity={workspaceIdentity}
-                    visible={
-                      /* Wave A × U-06 集成（评审 #2 修复）：活跃线程判定保持在 popped OR
+                  {!discussionPopout.popped && discussionMode === "floating" ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Move discussion"
+                      title="Move discussion · arrow keys"
+                      className="cursor-move touch-none"
+                      onPointerDown={(event) => startDiscussionGesture(event, "move")}
+                      onPointerMove={moveDiscussionGesture}
+                      onPointerUp={() => finishDiscussionGesture()}
+                      onPointerCancel={() => finishDiscussionGesture(true)}
+                      onLostPointerCapture={() => finishDiscussionGesture(true)}
+                      onKeyDown={(event) => keyboardDiscussion(event, "move")}
+                    >
+                      <GripHorizontal />
+                    </Button>
+                  ) : null}
+                  <select
+                    aria-label="Fragment discussion"
+                    value={activeThreadId || ""}
+                    className="min-w-0 flex-1 rounded-md border border-input-border bg-background px-2 py-1 text-ui-sm"
+                    onChange={(event) => setActiveThreadId(event.target.value)}
+                  >
+                    <option value="">Discussions ({documentThreads.length})</option>
+                    {documentThreads.map((thread, index) => (
+                      <option key={thread.id} value={thread.id}>
+                        {index + 1}. {thread.anchor.quote.slice(0, 45)} ·{" "}
+                        {thread.pending
+                          ? "command pending"
+                          : thread.sessionId
+                            ? writeGuard.phases[thread.sessionId] || "connecting"
+                            : "new"}
+                      </option>
+                    ))}
+                  </select>
+                  <SpecPopoutIconButton
+                    region={discussionPopout}
+                    popLabel="Вынести дискуссию в окно"
+                    restoreLabel="Вернуть дискуссию"
+                    popIcon={nativeDiscussionWindows ? <Maximize2 /> : undefined}
+                  />
+                  {/* 修复原因：桌面原先相邻的“放大”只开文档内浮层，用户无法移到桌面。
+                  桌面只保留一个放大入口，直达原生窗口；Web 仍保留内部浮动布局。 */}
+                  {!nativeDiscussionWindows && !discussionPopout.popped ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={
+                        discussionMode === "floating" ? "Dock discussion" : "Float discussion"
+                      }
+                      title={
+                        discussionMode === "floating"
+                          ? "Dock discussion"
+                          : "Float discussion within this window"
+                      }
+                      onClick={() => {
+                        finishDiscussionGesture(true);
+                        setDiscussionMode(discussionMode === "floating" ? "docked" : "floating");
+                      }}
+                    >
+                      {discussionMode === "floating" ? <Minimize2 /> : <Maximize2 />}
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Hide discussions"
+                    onClick={() => {
+                      if (discussionPopout.popped) discussionPopout.close();
+                      setDiscussionsVisible(false);
+                    }}
+                  >
+                    ×
+                  </Button>
+                </div>
+                {discussionWriter.writable ? (
+                  documentThreads.map((thread) => (
+                    <div
+                      key={thread.id}
+                      className={
+                        thread.id === activeThreadId ? "flex min-h-0 flex-1 flex-col" : "hidden"
+                      }
+                      style={
+                        !discussionPopout.popped && discussionMode === "floating"
+                          ? {
+                              minWidth: MIN_DISCUSSION_WIDTH,
+                              minHeight: MIN_DISCUSSION_HEIGHT,
+                              flexShrink: 0,
+                            }
+                          : undefined
+                      }
+                    >
+                      <SpecDiscussionPane
+                        thread={thread}
+                        update={updateThread}
+                        updateQuestionDraft={updateQuestionDraft}
+                        workspacePath={workspacePath}
+                        workspaceIdentity={workspaceIdentity}
+                        visible={
+                          /* Wave A × U-06 集成（评审 #2 修复）：活跃线程判定保持在 popped OR
                          之外——弹出为 PiP 窗口时也只有当前展示的线程 visible，非活跃
                          线程的包装仍是 hidden（presentation/telemetry/问答门/
                          native prepare 都不得为不可见线程开启，含未发送草稿线程）。
                          停靠时表达式与集成前逐字节一致。 */
-                      (discussionPopout.popped ||
-                        (visible && discussionsVisible)) &&
-                        thread.id === activeThreadId
-                    }
-                    onOpenBrowserUrl={onOpenBrowserUrl}
-                    onOpenCodeViewer={onOpenCodeViewer}
-                    onActivate={() => {
-                      setActiveThreadId(thread.id);
-                      setDiscussionsVisible(true);
-                      onActivate?.();
-                    }}
-                    anchorCurrent={
-                      document.sha256 === thread.anchor.sha256 &&
-                      draft.slice(
-                        thread.anchor.start,
-                        thread.anchor.start + thread.anchor.quote.length,
-                      ) === thread.anchor.quote
-                    }
-                  />
-                </div>
-              ))
-            ) : (
-              <p
-                role="status"
-                className="p-3 text-ui-sm text-foreground-subtle"
-              >
-                {discussionWriter.phase === "busy"
-                  ? "Document discussions are controlled in another window. This document remains available to read."
-                  : discussionWriter.phase === "checking"
-                    ? "Checking exclusive document discussion control…"
-                    : "Exclusive document discussion control is unavailable in this window. This document remains available to read."}
-              </p>
-            )}
-            {discussionWriter.writable && !activeThread ? (
-              <p className="p-3 text-ui-sm text-foreground-subtle">
-                Select saved document text and choose Discuss selection.
-              </p>
-            ) : null}
-            {!discussionPopout.popped && (discussionMode === "floating" || dockedLayout.stacked) ? (
-              <button
-                type="button"
-                aria-label="Resize discussion"
-                title="Resize discussion · arrow keys"
-                className="absolute bottom-0 right-0 z-20 size-5 cursor-se-resize touch-none rounded-br-xl text-foreground-subtle outline-none focus:bg-primary/20"
-                onPointerDown={(event) =>
-                  startDiscussionGesture(event, "resize-floating")
-                }
-                onPointerMove={moveDiscussionGesture}
-                onPointerUp={() => finishDiscussionGesture()}
-                onPointerCancel={() => finishDiscussionGesture(true)}
-                onLostPointerCapture={() => finishDiscussionGesture(true)}
-                onKeyDown={(event) =>
-                  keyboardDiscussion(event, "resize-floating")
-                }
-              >
-                <Maximize2 className="size-3" />
-              </button>
-            ) : null}
+                          (discussionPopout.popped || (visible && discussionsVisible)) &&
+                          thread.id === activeThreadId
+                        }
+                        onOpenBrowserUrl={onOpenBrowserUrl}
+                        onOpenCodeViewer={onOpenCodeViewer}
+                        onActivate={() => {
+                          setActiveThreadId(thread.id);
+                          setDiscussionsVisible(true);
+                          if (discussionPopout.popped) discussionPopout.focus();
+                          else onActivate?.();
+                        }}
+                        anchorCurrent={
+                          document.sha256 === thread.anchor.sha256 &&
+                          draft.slice(
+                            thread.anchor.start,
+                            thread.anchor.start + thread.anchor.quote.length,
+                          ) === thread.anchor.quote
+                        }
+                      />
+                    </div>
+                  ))
+                ) : (
+                  <p role="status" className="p-3 text-ui-sm text-foreground-subtle">
+                    {discussionWriter.phase === "busy"
+                      ? "Document discussions are controlled in another window. This document remains available to read."
+                      : discussionWriter.phase === "checking"
+                        ? "Checking exclusive document discussion control…"
+                        : "Exclusive document discussion control is unavailable in this window. This document remains available to read."}
+                  </p>
+                )}
+                {discussionWriter.writable && !activeThread ? (
+                  <p className="p-3 text-ui-sm text-foreground-subtle">
+                    Select saved document text and choose Discuss selection.
+                  </p>
+                ) : null}
+                {!discussionPopout.popped &&
+                (discussionMode === "floating" || dockedLayout.stacked) ? (
+                  <button
+                    type="button"
+                    aria-label="Resize discussion"
+                    title="Resize discussion · arrow keys"
+                    className="absolute bottom-0 right-0 z-20 size-5 cursor-se-resize touch-none rounded-br-xl text-foreground-subtle outline-none focus:bg-primary/20"
+                    onPointerDown={(event) => startDiscussionGesture(event, "resize-floating")}
+                    onPointerMove={moveDiscussionGesture}
+                    onPointerUp={() => finishDiscussionGesture()}
+                    onPointerCancel={() => finishDiscussionGesture(true)}
+                    onLostPointerCapture={() => finishDiscussionGesture(true)}
+                    onKeyDown={(event) => keyboardDiscussion(event, "resize-floating")}
+                  >
+                    <Maximize2 className="size-3" />
+                  </button>
+                ) : null}
               </aside>
             </SpecPopoutRegionPortal>
           </div>
@@ -1454,13 +1385,10 @@ function Documents({
         ) : null}
         {!parentSessionId && document ? (
           <p role={executionSource?.phase === "error" ? "alert" : "status"}>
-            {executionSource?.error ||
-              "Preparing the native ZCODE model for fragment discussions…"}
+            {executionSource?.error || "Preparing the native ZCODE model for fragment discussions…"}
           </p>
         ) : null}
-        {writable && writers ? (
-          <p>Save waits for active conversations to finish.</p>
-        ) : null}
+        {writable && writers ? <p>Save waits for active conversations to finish.</p> : null}
       </div>
     </div>
   );
@@ -1470,9 +1398,7 @@ export function SpecDocumentPane(props: SpecDocumentPaneProps) {
   const scope = useMemo(
     () => ({
       workspacePath: props.workspacePath,
-      ...(props.workspaceIdentity
-        ? { workspaceIdentity: props.workspaceIdentity }
-        : {}),
+      ...(props.workspaceIdentity ? { workspaceIdentity: props.workspaceIdentity } : {}),
     }),
     [props.workspacePath, props.workspaceIdentity],
   );

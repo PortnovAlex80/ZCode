@@ -9,6 +9,7 @@ import { sidePaneTerminalSessionRegistry } from "@/terminal/sidePaneTerminalSess
 import {
   buildTaskSidePaneMemoryKey,
   getSidePaneCollapsedPreference,
+  getSidePaneActiveTabPreference,
   readTaskSidePaneMemoryState,
   saveTaskSidePaneCollapsedPreference,
   saveTaskSidePaneMemoryState,
@@ -331,6 +332,7 @@ export function useAppPanels(options: {
       const scopeKey = `${activeWorkspaceKey}::${sidePaneOwnerId ?? "__draft__"}`;
       const preferredTabId =
         activeTabByOwnerRef.current.get(scopeKey) ??
+        getSidePaneActiveTabPreference(readTaskSidePaneMemoryState(activeSidePaneMemoryKeyRef.current), sidePaneOwnerId) ??
         (activeTaskId ? lastActiveSubagentTabByRootRef.current.get(activeTaskId) : undefined);
       const collapsedPreference = getSidePaneCollapsedPreference(
         readTaskSidePaneMemoryState(activeSidePaneMemoryKeyRef.current),

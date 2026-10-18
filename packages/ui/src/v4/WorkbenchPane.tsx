@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { TID_V4_PANE_SHELL, testId } from "@zcode/shared";
+import { useZCodeIntl as useIntl } from "@/i18n/IntlProvider.js";
 import type {
   GitChangeSourceId,
   GitRepositorySummary,
@@ -39,6 +40,7 @@ import type {
   SyncSubagentSessionTabsRequest,
 } from "@/lib/workspaceSidePane.js";
 import { SessionPane } from "@/v4/SessionPane.js";
+import { findConversationWindow, focusConversationWindow, useConversationWindows } from "@/spec-document/conversationWindows.js";
 import {
   activateManagedNativeDiscussionOwner,
   useManagedNativeDiscussionOwner,
@@ -193,16 +195,25 @@ function SpecManagedSessionGuard({
   remoteSessionId,
   sessionId,
   children,
+  floating = false,
 }: {
   workspacePath: string;
   workspaceIdentity?: string;
   remoteSessionId?: string;
   sessionId: string | null;
   children: ReactNode;
+  floating?: boolean;
 }) {
+  useConversationWindows();
+  const { intl } = useIntl();
+  const detached = !floating ? findConversationWindow({ workspacePath, workspaceIdentity, remoteSessionId }, sessionId) : undefined;
   const managedSessionId =
     !remoteSessionId && sessionId && sessionId !== "__draft__" ? sessionId : null;
   const owner = useManagedNativeDiscussionOwner(workspacePath, workspaceIdentity, managedSessionId);
+  if (detached) return <div className="flex flex-col items-start gap-3 p-4 text-ui-sm" data-detached-session-guard={sessionId}>
+    <p>{intl.formatMessage({ id: "conversation.window.detached" })}</p>
+    <Button variant="outline" onClick={() => focusConversationWindow(detached.id)}>{intl.formatMessage({ id: "conversation.window.show" })}</Button>
+  </div>;
   if (!owner) return children;
   return (
     <div
@@ -612,6 +623,7 @@ export function WorkbenchLeafPane({
           workspaceIdentity={scope.workspaceIdentity}
           remoteSessionId={scope.remoteSessionId}
           sessionId={sessionId}
+          floating={paneId.startsWith("floating-")}
         >
           <SessionPane
             paneId={paneId}

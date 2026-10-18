@@ -14,7 +14,10 @@
  */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement, useState } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { IPlatformService } from "@zcode/shared";
+import { PlatformProvider } from "@/hooks/usePlatform.js";
+import { readPopoutOpenIntent } from "./popoutOpenIntent.js";
 import {
   SpecPopoutIconButton,
   SpecPopoutRegionPortal,
@@ -125,6 +128,8 @@ function RegionHost({
   popLabel,
   enabled = true,
   onRegion,
+  persistenceKey,
+  onReturn,
 }: {
   regionId: string;
   workspaceKey: string;
@@ -133,12 +138,16 @@ function RegionHost({
   popLabel: string;
   enabled?: boolean;
   onRegion?: (region: SpecPopoutRegion) => void;
+  persistenceKey?: string;
+  onReturn?: () => void;
 }) {
   const region = useSpecPopoutRegion({
     regionId,
     workspaceKey,
     title,
     enabled,
+    persistenceKey,
+    onReturn,
   });
   onRegion?.(region);
   const [count, setCount] = useState(0);
@@ -174,6 +183,43 @@ function RegionHost({
 }
 
 describe("U-06/U-07 spec popout controller (mocked documentPictureInPicture)", () => {
+  it("preserves native reopen intent when child pagehide precedes owner unload", async () => {
+    const fake = installFakePiP();
+    const onReturn = vi.fn();
+    let region: SpecPopoutRegion | undefined;
+    const platform = { openConversationPopout: async () => (window as any).documentPictureInPicture.requestWindow() } as unknown as IPlatformService;
+    render(createElement(PlatformProvider, { platform, children: createElement(RegionHost, {
+      regionId: "native-reload", workspaceKey: "/a", title: "native", label: "native content",
+      popLabel: "Open native", persistenceKey: "native-reload", onReturn, onRegion: value => { region = value; },
+    }) }));
+    fireEvent.click(screen.getByLabelText("Open native"));
+    await waitFor(() => expect(region?.popped).toBe(true));
+    fake.windows[0]!.close();
+    window.dispatchEvent(new Event("beforeunload"));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(onReturn).not.toHaveBeenCalled();
+    expect(readPopoutOpenIntent("native-reload")).toBe(true);
+  });
+  it("clears native reopen intent only for an explicit child close", async () => {
+    const fake = installFakePiP();
+    const onReturn = vi.fn();
+    let region: SpecPopoutRegion | undefined;
+    const platform = { openConversationPopout: async () => (window as any).documentPictureInPicture.requestWindow() } as unknown as IPlatformService;
+    render(createElement(PlatformProvider, { platform, children: createElement(RegionHost, {
+      regionId: "native-close", workspaceKey: "/a", title: "native", label: "native content",
+      popLabel: "Open native", persistenceKey: "native-close", onReturn, onRegion: value => { region = value; },
+    }) }));
+    fireEvent.click(screen.getByLabelText("Open native"));
+    await waitFor(() => expect(region?.popped).toBe(true));
+    let closed = false;
+    Object.defineProperty(fake.windows[0]!, "closed", { get: () => closed });
+    fake.windows[0]!.close();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(onReturn).not.toHaveBeenCalled();
+    closed = true;
+    await waitFor(() => expect(onReturn).toHaveBeenCalledOnce());
+    expect(readPopoutOpenIntent("native-close")).toBe(false);
+  });
   it("open adopts styles, moves the stable host into the PiP document and keeps subtree state", async () => {
     const { windows, requests } = installFakePiP();
     let region: SpecPopoutRegion | undefined;

@@ -33,6 +33,37 @@ recheck those items before restoring their accepted status.
 
 ## Exclusive write assignments
 
+### Persistent conversation windows — 2026-10-18
+
+User authorized concurrent conversations from the same/different projects, saved
+native placement and document state, and production packaging. Contract:
+[Persistent conversation windows](PERSISTENT-CONVERSATION-WINDOWS.md),
+[ADR 004](../architecture/decisions/004-persistent-conversation-windows.md).
+
+- Retained, addressed Workbench leaves reuse existing scoped providers/Host.
+  Sidebar selection reveals an existing window; ordinary split leaves cannot
+  mount a duplicate composer. Session action callbacks address the original project.
+- Main saves normal bounds/maximized/display hint. UI persists the open roster,
+  document owner/thread and per-conversation panel preferences. Explicit close is
+  distinct from reload/quit. Quit acknowledges owners and flushes Chromium storage
+  before exit; named blank-window reuse cannot wipe a restored portal.
+- Focused integration/regression batch: 11 files / 72 tests passed. Subsequent
+  shutdown regression: 5 tests passed; final native pagehide/close suite: 15 passed
+  (overlaps the batch). Missing displays/negative coordinates are covered by pure
+  geometry tests; physical mixed-DPI hardware acceptance remains separate.
+- Source GUI `scripts/test-conversation-windows-gui.mjs` passed A1+A2+B1 across two
+  projects, independent drafts, sidebar reveal without duplicate composers,
+  renderer reload, full process restart, exact native bounds (100,120,540,660),
+  and closing A2 while A1/B1 remain available. No model prompts.
+- Source GUI `scripts/test-discussion-recovery-gui.mjs --persistent-windows`
+  passed sidebar return/closed-owner recovery and a detached document discussion
+  retained through another project, renderer reload and full process restart.
+  Original child/session, unsent draft and bounds (180,140,600,700) were restored.
+  No renderer errors or model prompts. Profiles and raw evidence are isolated/ignored.
+- Production source compilation passed. Final typecheck/lint/architecture evidence
+  is recorded with the source commit; packaged delivery evidence follows separately.
+  These checks do not close unrelated live provider, install or performance gates.
+
 ### Production update status ? 2026-10-18
 
 The packaged fork keeps official auto-update disabled (R-10); this does not make

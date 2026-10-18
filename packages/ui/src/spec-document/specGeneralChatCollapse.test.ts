@@ -423,12 +423,8 @@ test("actual side panel keeps a restore route in the caption and relaxes bounds 
       ts.isJsxSelfClosingElement(node) &&
       node.tagName.getText(source) === "SpecDocumentPane",
   )[0] as ts.JsxSelfClosingElement;
-  assert.equal(
-    prop(documentPane, "onActivate", source),
-    // U-12 多开：讨论回流/激活只聚焦本 tab（tab.id），不再经
-    // onOpenCodeViewer(picker source) 另开新 tab。
-    "onActivate={() => onActivateTab(tab.id)}",
-  );
+  assert.match(prop(documentPane, "onActivate", source) ?? "", /activateRetainedDocument\(documentContext\)/);
+  assert.match(prop(documentPane, "onActivate", source) ?? "", /onActivateTab\(tab.id\)/);
   assert.equal(prop(documentPane, "generalChatCollapsed", source), undefined);
   assert.equal(prop(documentPane, "onToggleGeneralChat", source), undefined);
   const panel = descendants(
@@ -582,9 +578,13 @@ test("actual Workbench admission guard prevents a second managed discussion cont
     "require",
     "useManagedNativeDiscussionOwner",
     "activateManagedNativeDiscussionOwner",
+    "useConversationWindows",
+    "findConversationWindow",
+    "focusConversationWindow",
+    "useIntl",
     "Button",
     compiled,
-  )(exported, createRequire(import.meta.url), lookup, () => true, Button);
+  )(exported, createRequire(import.meta.url), lookup, () => true, () => [], () => undefined, () => {}, () => ({ intl: { formatMessage: ({ id }: { id: string }) => id } }), Button);
   assert.ok(exported.default);
   let mounts = 0;
   const Controller = () => {

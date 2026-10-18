@@ -31,6 +31,17 @@ import {
   type ManagedNativeDiscussionOpenRequest,
 } from "@/spec-document/nativeDiscussionHandoff.js";
 import { SpecDocumentPane } from "@/spec-document/SpecDocumentPane.js";
+import {
+  activateRetainedDocument,
+  readRetainedDocumentWindows,
+  retainedDocumentPlacementKey,
+  writeRetainedDocumentWindows,
+  type RetainedDocumentWindow,
+} from "@/spec-document/retainedDocumentWindows.js";
+import {
+  readTaskSidePaneMemoryState,
+  saveTaskSidePaneMemoryState,
+} from "@/lib/taskSidePaneMemory.js";
 import { joinFilePath } from "@/lib/path.js";
 import type { ResolvedSpecDocumentWorkspace } from "@/spec-document/specDocumentWorkspace.js";
 import { PreviewPane } from "@/PreviewPane.js";
@@ -474,6 +485,93 @@ export function AnimatedSidePanePanel({
   const isResizeDisabled = !isVisible;
   const workspaceKey = workspaceIdentity?.trim() || workspaceAbsPath;
   const tabs = sidePaneState?.tabs ?? EMPTY_SIDE_PANE_TABS;
+  // One document owner survives shell project navigation; only its portal moves.
+  const [detachedDocuments, setDetachedDocuments] = useState(
+    () => new Map(readRetainedDocumentWindows().map((entry) => [entry.tab.id, entry])),
+  );
+  const documentContexts = useRef(new Map<string, RetainedDocumentWindow>(detachedDocuments));
+  for (const tab of tabs) {
+    if (
+      tab.type !== "code-viewer" ||
+      tab.source.type !== "file" ||
+      !tab.source.specDocument ||
+      tab.source.workspaceRemoteSessionId
+    )
+      continue;
+    const previous = documentContexts.current.get(tab.id);
+    const context: RetainedDocumentWindow = previous
+      ? { ...previous, tab }
+      : {
+          tab,
+          workspacePath: tab.source.workspacePath || workspaceAbsPath,
+          ...(tab.source.workspaceIdentity
+            ? { workspaceIdentity: tab.source.workspaceIdentity }
+            : {}),
+          parentSessionId:
+            tab.ownerTaskId ?? specDocumentWorkspace?.sessionId ?? activeTaskId ?? sidePaneOwnerId,
+        };
+    documentContexts.current.set(tab.id, context);
+  }
+  for (const id of documentContexts.current.keys()) {
+    if (!tabs.some((tab) => tab.id === id) && !detachedDocuments.has(id))
+      documentContexts.current.delete(id);
+  }
+  const renderedTabs = [
+    ...tabs,
+    ...Array.from(detachedDocuments.values())
+      .filter((entry) => !tabs.some((tab) => tab.id === entry.tab.id))
+      .map((entry) => entry.tab),
+  ];
+  const setDocumentDetached = (entry: RetainedDocumentWindow, popped: boolean) => {
+    setDetachedDocuments((previous) => {
+      if (popped === previous.has(entry.tab.id)) return previous;
+      const next = new Map(previous);
+      if (popped) next.set(entry.tab.id, documentContexts.current.get(entry.tab.id) ?? entry);
+      else next.delete(entry.tab.id);
+      writeRetainedDocumentWindows(Array.from(next.values()));
+      return next;
+    });
+  };
+  const closeDocument = (entry: RetainedDocumentWindow) => {
+    setDocumentDetached(entry, false);
+    const key = entry.workspaceIdentity?.trim() || entry.workspacePath;
+    if (key === workspaceKey) onCloseTab(entry.tab.id);
+    else {
+      const memory = readTaskSidePaneMemoryState(key);
+      const remaining = memory.sidePaneState?.tabs.filter((tab) => tab.id !== entry.tab.id) ?? [];
+      saveTaskSidePaneMemoryState(key, {
+        sidePaneState: remaining.length
+          ? {
+              tabs: remaining,
+              activeTabId:
+                memory.sidePaneState?.activeTabId === entry.tab.id
+                  ? remaining[0]!.id
+                  : memory.sidePaneState!.activeTabId,
+            }
+          : null,
+      });
+    }
+  };
+  const updateDocumentPath = (entry: RetainedDocumentWindow, path: string) => {
+    const key = entry.workspaceIdentity?.trim() || entry.workspacePath;
+    if (key === workspaceKey) onSpecDocumentPathChange(entry.tab.id, path);
+    // Detached windows keep their addressed descriptor; background writes cannot mutate the active project.
+    if (detachedDocuments.has(entry.tab.id)) {
+      const next = {
+        ...entry,
+        tab: {
+          ...entry.tab,
+          source: { ...entry.tab.source, path: joinFilePath(entry.workspacePath, path) },
+        },
+      };
+      documentContexts.current.set(entry.tab.id, next);
+      setDetachedDocuments((previous) => {
+        const updated = new Map(previous).set(entry.tab.id, next);
+        writeRetainedDocumentWindows(Array.from(updated.values()));
+        return updated;
+      });
+    }
+  };
   const screenshotSurfaceRequest = screenshotSurfaceRequestProp;
   const isScreenshotSurfaceActive = Boolean(screenshotSurfaceRequest);
   const screenshotSurfaceTab = screenshotSurfaceTabId
@@ -635,7 +733,9 @@ export function AnimatedSidePanePanel({
   const tabsScrollContentRef = useRef<HTMLDivElement | null>(null);
   const [lockedContentWidthPx, setLockedContentWidthPx] = useState<number | null>(null);
   const shouldMountContent = shouldMountSidePaneContent(isVisible, tabs);
-  const [hasRenderedSidePane, setHasRenderedSidePane] = useState(shouldMountContent);
+  const [hasRenderedSidePane, setHasRenderedSidePane] = useState(
+    shouldMountContent || detachedDocuments.size > 0,
+  );
   const [isTabsOverflowing, setIsTabsOverflowing] = useState(false);
   const [tabsScrollMaskEdges, setTabsScrollMaskEdges] = useState<TabsScrollMaskEdges>({
     left: false,
@@ -1210,7 +1310,7 @@ export function AnimatedSidePanePanel({
         variant="panel"
         className="h-full"
       >
-        {hasRenderedSidePane && sidePaneState ? (
+        {hasRenderedSidePane && (sidePaneState || detachedDocuments.size > 0) ? (
           <>
             {visibleTabs.length === 0 ? openTabLauncher : null}
             {/* Bugfix：sidePaneState 是 workspace 级 registry，fork/切换任务后可能只剩其他
@@ -1338,7 +1438,8 @@ export function AnimatedSidePanePanel({
                 </TabsList>
 
                 <div className={cn("relative min-h-0 flex-1 isolate", mobileOverlay && "min-w-0")}>
-                  {tabs.map((tab) => {
+                  {renderedTabs.map((tab) => {
+                    const documentContext = documentContexts.current.get(tab.id);
                     if (
                       (tab.type === "browser" || tab.type === "browser-use") &&
                       !shouldMountBrowserTabGuest(tab)
@@ -1477,41 +1578,72 @@ export function AnimatedSidePanePanel({
                         ) : tab.type === "code-viewer" &&
                           tab.source.type === "file" &&
                           isDesktop &&
-                          !workspaceRemoteSessionId &&
-                          canOpenSpecDocument(tab.source) ? (
+                          (documentContext ||
+                            (!workspaceRemoteSessionId && canOpenSpecDocument(tab.source))) ? (
                           <SpecDocumentPane
-                            // U-15：面板的文档根/身份用解析后的「对话项目」workspace——
-                            // list/read/save、documentDisplayParts(workspaceRoot)、讨论与
-                            // 草稿键全部跟随项目；parentSessionId 仍来自宿主，讨论继续
-                            // 挂到当前对话的会话上，不因换根丢绑定。
-                            workspacePath={specDocumentWorkspacePath}
-                            workspaceIdentity={specDocumentWorkspaceIdentity}
-                            visible={isVisible && tab.id === visibleActiveTabId}
-                            parentSessionId={
-                              specDocumentWorkspace
-                                ? (specDocumentWorkspace.sessionId ?? null)
-                                : (activeTaskId ?? sidePaneOwnerId)
+                            workspacePath={
+                              documentContext?.workspacePath ?? specDocumentWorkspacePath
                             }
-                            // U-12 多开：面板实例键 = tab id（tab 内切换文档不重挂）；
-                            // 恢复目标 = tab 已绑定的文件路径，纯选择器入口（未绑定）
-                            // 不自动打开上一次文档，保持 Open doc 初始态。
+                            workspaceIdentity={
+                              documentContext
+                                ? documentContext.workspaceIdentity
+                                : specDocumentWorkspaceIdentity
+                            }
+                            visible={
+                              isVisible &&
+                              tab.id === visibleActiveTabId &&
+                              tabs.some((item) => item.id === tab.id)
+                            }
+                            parentSessionId={
+                              documentContext
+                                ? documentContext.parentSessionId
+                                : specDocumentWorkspace
+                                  ? (specDocumentWorkspace.sessionId ?? null)
+                                  : (activeTaskId ?? sidePaneOwnerId)
+                            }
                             instanceKey={tab.id}
                             initialPath={
-                              tab.source.specDocument &&
                               isUnboundSpecDocumentPickerSource(tab.source)
                                 ? undefined
                                 : tab.source.path
                             }
                             autoOpenLastDocument={false}
-                            onDocumentOpen={(relativePath) =>
-                              onSpecDocumentPathChange(tab.id, relativePath)
+                            popoutPersistenceKey={
+                              documentContext
+                                ? retainedDocumentPlacementKey(documentContext)
+                                : undefined
                             }
-                            onClose={onCloseCodeViewer}
-                            onOpenBrowserUrl={onOpenBrowserUrl}
-                            onOpenCodeViewer={onOpenCodeViewer}
-                            // U-12：讨论回流/激活只聚焦本 tab，不再经
-                            // onOpenCodeViewer(picker source) 另开新 tab。
-                            onActivate={() => onActivateTab(tab.id)}
+                            onPoppedChange={
+                              documentContext
+                                ? (popped) => setDocumentDetached(documentContext, popped)
+                                : undefined
+                            }
+                            onDocumentOpen={(path) =>
+                              documentContext
+                                ? updateDocumentPath(documentContext, path)
+                                : onSpecDocumentPathChange(tab.id, path)
+                            }
+                            onClose={() =>
+                              documentContext ? closeDocument(documentContext) : onCloseTab(tab.id)
+                            }
+                            onOpenBrowserUrl={
+                              !documentContext ||
+                              (documentContext.workspaceIdentity?.trim() ||
+                                documentContext.workspacePath) === workspaceKey
+                                ? onOpenBrowserUrl
+                                : undefined
+                            }
+                            onOpenCodeViewer={
+                              !documentContext ||
+                              (documentContext.workspaceIdentity?.trim() ||
+                                documentContext.workspacePath) === workspaceKey
+                                ? onOpenCodeViewer
+                                : undefined
+                            }
+                            onActivate={() => {
+                              if (documentContext) activateRetainedDocument(documentContext);
+                              else onActivateTab(tab.id);
+                            }}
                           />
                         ) : tab.type === "code-viewer" ? (
                           <PreviewPane

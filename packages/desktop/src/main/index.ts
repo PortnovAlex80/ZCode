@@ -1,4 +1,5 @@
 import "./desktopEarlyDataBaseDirBootstrap.js";
+import { flushNativeConversationGeometry, markNativeConversationOwnersClosing } from "./nativeConversationPopouts.js";
 import { installRequestSecurityDiagnostics } from "./request-security-edition/index.js";
 
 import { createLocalTtftExporter } from "./localTtftExporter.js";
@@ -1142,6 +1143,8 @@ async function setAutoDownloadAndInstallUpdates(enabled: boolean) {
 }
 
 async function prepareAppQuit(reason: string, kind: AppShutdownKind = "normal"): Promise<void> {
+  await markNativeConversationOwnersClosing();
+  await flushNativeConversationGeometry();
   const selection = selectAppShutdownPolicy(activeAppShutdownKind, kind, process.platform);
   activeAppShutdownKind = selection.kind;
   activeAppShutdownPolicy = selection.policy;

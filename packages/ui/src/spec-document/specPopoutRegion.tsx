@@ -15,6 +15,7 @@ import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { PortalHostContext } from "@/components/ui/portal-host.js";
 import { movePresentationHost } from "@/lib/presentationDocumentMove.js";
 import { PresentationHostDocumentContext } from "@/v4/usePresentationVisibility.js";
+import { readPopoutOpenIntent, writePopoutOpenIntent } from "./popoutOpenIntent.js";
 import {
   adoptSpecPopoutStyles,
   forceReturnSpecPopoutOwner,
@@ -51,6 +52,7 @@ export interface SpecPopoutRegion {
   open: () => void;
   close: () => void;
   toggle: () => void;
+  focus: () => void;
 }
 
 /**
@@ -73,6 +75,9 @@ export function useSpecPopoutRegion(options: {
   enabled?: boolean;
   /** Restore addressed navigation only on explicit Return / OS close, never teardown. */
   onReturn?: () => void;
+  persistenceKey?: string;
+  autoRestore?: boolean;
+  onPoppedChange?: (popped: boolean) => void;
 }): SpecPopoutRegion {
   const { regionId, workspaceKey, enabled = true } = options;
   const platform = useOptionalPlatform();
@@ -81,8 +86,21 @@ export function useSpecPopoutRegion(options: {
   const disposed = useRef(false);
   const onReturnRef = useRef(options.onReturn);
   onReturnRef.current = options.onReturn;
+  const onPoppedChangeRef = useRef(options.onPoppedChange);
+  onPoppedChangeRef.current = options.onPoppedChange;
+  const ownerClosing = useRef(false);
+  useEffect(() => {
+    const markClosing = () => { ownerClosing.current = true; };
+    window.addEventListener("beforeunload", markClosing);
+    window.addEventListener("zcode:conversation-owner-closing", markClosing);
+    return () => {
+      window.removeEventListener("beforeunload", markClosing);
+      window.removeEventListener("zcode:conversation-owner-closing", markClosing);
+    };
+  }, []);
   const [popped, setPopped] = useState(false);
   const [opening, setOpening] = useState(false);
+  const openingRef = useRef(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const availability = useMemo<SpecPopoutAvailability>(
     () => (nativeOpen ? { supported: true } : readSpecPopoutAvailability()),
@@ -98,7 +116,7 @@ export function useSpecPopoutRegion(options: {
   const hostNode = hostRef.current;
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const pipRef = useRef<SpecPopoutWindow | null>(null);
-  const sizeKey = specPopoutSizeKey(regionId, workspaceKey);
+  const sizeKey = options.persistenceKey ?? specPopoutSizeKey(regionId, workspaceKey);
 
   const persistSize = useCallback(() => {
     const pip = pipRef.current;
@@ -110,20 +128,46 @@ export function useSpecPopoutRegion(options: {
   }, [sizeKey]);
 
   const handleClosedRef = useRef<() => void>(() => {});
+  // A native child may hide before its opener's beforeunload. Defer only that
+  // notification to the opener's next task: explicit child X remains actionable,
+  // while reload/quit establishes ownerClosing or destroys the old JS context.
+  const handlePageHide = useCallback(() => {
+    if (nativeOpen) {
+      const source = pipRef.current;
+      let checks = 0;
+      const confirmClose = () => {
+        if (disposed.current || ownerClosing.current || pipRef.current !== source) return;
+        // A live named target can hide its previous blank document on reuse;
+        // that is navigation, not an explicit OS close. Native closed arrives
+        // after pagehide, so give that acknowledgement a bounded interval.
+        if (source?.closed === false) {
+          if (++checks < 40) window.setTimeout(confirmClose, 50);
+          return;
+        }
+        handleClosedRef.current();
+      };
+      window.setTimeout(confirmClose, 0);
+    }
+    else handleClosedRef.current();
+  }, [nativeOpen]);
   const handleClosed = useCallback(() => {
-    const returningOpenWindow = pipRef.current !== null && !disposed.current;
+    const returningOpenWindow = pipRef.current !== null && !disposed.current && !ownerClosing.current;
     // pagehide（OS 关闭按钮）与主动 close() 都走这里：先记尺寸再回状态。
     persistSize();
-    pipRef.current?.removeEventListener("pagehide", handleClosedRef.current);
+    pipRef.current?.removeEventListener("pagehide", handlePageHide);
     pipRef.current = null;
     // 原节点同步归位，避免关闭子文档时 React 效果尚未运行而丢失输入/选区。
     if (hostNode && anchorRef.current) {
       hostNode.className = POPOUT_HOST_DOCKED_CLASS;
       movePresentationHost(hostNode, anchorRef.current, true);
     }
-    if (returningOpenWindow) onReturnRef.current?.();
+    if (returningOpenWindow) {
+      writePopoutOpenIntent(sizeKey, false);
+      onPoppedChangeRef.current?.(false);
+      onReturnRef.current?.();
+    }
     setPopped(false);
-  }, [hostNode, persistSize]);
+  }, [hostNode, persistSize, sizeKey, handlePageHide]);
   handleClosedRef.current = handleClosed;
 
   const close = useCallback(() => {
@@ -141,7 +185,7 @@ export function useSpecPopoutRegion(options: {
   }, [handleClosed]);
 
   const open = useCallback(() => {
-    if (pipRef.current || opening) return;
+    if (pipRef.current || openingRef.current) return;
     const availabilityNow = nativeOpen
       ? { supported: true as const }
       : readSpecPopoutAvailability();
@@ -149,7 +193,7 @@ export function useSpecPopoutRegion(options: {
       ? {
           requestWindow: (size: { width?: number; height?: number } = {}) =>
             nativeOpen({
-              id: nativeId.current,
+              id: options.persistenceKey ?? nativeId.current,
               title: options.title,
               width: size.width ?? 480,
               height: size.height ?? 640,
@@ -165,9 +209,11 @@ export function useSpecPopoutRegion(options: {
       return;
     }
     setLastError(null);
+    if (nativeOpen) writePopoutOpenIntent(sizeKey, true);
     // 共享槽位：先让其它区域（若有）自动返回原面板，再申请本 App 唯一的 PiP 窗口。
     if (!nativeOpen) forceReturnSpecPopoutOwner(regionId);
     setOpening(true);
+    openingRef.current = true;
     const size = readSpecPopoutSize(sizeKey);
     // 修复原因（活体缺陷 2026-10-14）：requestWindow 在部分运行时（Electron：API 存在
     // 但窗口从不创建，electron/electron#39633）会同步 throw 而不是 reject——原实现直接
@@ -181,6 +227,7 @@ export function useSpecPopoutRegion(options: {
       });
     } catch (cause) {
       setOpening(false);
+      openingRef.current = false;
       setLastError(
         cause instanceof Error ? cause.message : "The separate window could not be opened.",
       );
@@ -223,19 +270,31 @@ export function useSpecPopoutRegion(options: {
           return;
         }
         pipRef.current = pip;
-        pip.addEventListener("pagehide", handleClosedRef.current);
+        pip.addEventListener("pagehide", handlePageHide);
         adoptSpecPopoutStyles(document, pip.document);
         // 进入 PiP 文档才切换为填充布局；面板内保持 contents 透传（见常量注释）。
         hostNode.className = POPOUT_HOST_PINNED_CLASS;
         setPopped(true);
+        onPoppedChangeRef.current?.(true);
       })
       .catch((cause: unknown) => {
         setLastError(
           cause instanceof Error ? cause.message : "The separate window could not be opened.",
         );
       })
-      .finally(() => setOpening(false));
-  }, [handleClosed, hostNode, nativeOpen, opening, options.title, regionId, sizeKey]);
+      .finally(() => { openingRef.current = false; setOpening(false); });
+  }, [handleClosed, handlePageHide, hostNode, nativeOpen, opening, options.title, options.persistenceKey, regionId, sizeKey]);
+
+  const focus = useCallback(() => {
+    if (pipRef.current) pipRef.current.focus?.();
+    else open();
+  }, [open]);
+  const restoredKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!nativeOpen || !options.autoRestore || !enabled || restoredKey.current === sizeKey) return;
+    restoredKey.current = sizeKey;
+    if (readPopoutOpenIntent(sizeKey)) open();
+  }, [enabled, nativeOpen, open, options.autoRestore, sizeKey]);
 
   const toggle = useCallback(() => {
     if (pipRef.current) close();
@@ -290,6 +349,7 @@ export function useSpecPopoutRegion(options: {
     open,
     close,
     toggle,
+    focus,
   };
 }
 

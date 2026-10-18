@@ -665,6 +665,8 @@ export interface IPlatformService {
     innerWidth: number;
     innerHeight: number;
     close(): void;
+    focus?(): void;
+    readonly closed?: boolean;
     addEventListener(type: "pagehide", listener: () => void): void;
     removeEventListener(type: "pagehide", listener: () => void): void;
   }>;

@@ -47,11 +47,14 @@ function finite(value: unknown, fallback: number) {
 export function readDocumentPresentation(
   key: string,
   storage?: StoragePort,
+  legacyKey?: string,
 ): DocumentPresentationState {
   const defaults = defaultDocumentPresentation();
   try {
     storage ??= globalThis.localStorage;
-    const value = JSON.parse(storage?.getItem(key) || "null");
+    const value = JSON.parse(
+      storage?.getItem(key) || (legacyKey ? storage?.getItem(legacyKey) : null) || "null",
+    );
     if (!value || value.version !== 1) return defaults;
     return {
       path: relativeDocumentPath(value.path),
@@ -137,7 +140,9 @@ export function retireDocumentPaneWrites(
     if (!storage) return;
     const raw = JSON.parse(storage.getItem(retiredTokensKey(key)) || "null");
     const retired =
-      raw?.version === 1 && Array.isArray(raw.retired) && raw.retired.every((item: unknown) => typeof item === "string")
+      raw?.version === 1 &&
+      Array.isArray(raw.retired) &&
+      raw.retired.every((item: unknown) => typeof item === "string")
         ? (raw.retired as string[])
         : [];
     if (retired[retired.length - 1] === token) return;
@@ -158,9 +163,7 @@ export function documentPaneWritesRetired(
   try {
     storage ??= globalThis.localStorage;
     const raw = JSON.parse(storage?.getItem(retiredTokensKey(key)) || "null");
-    return raw?.version === 1 && Array.isArray(raw.retired)
-      ? raw.retired.includes(token)
-      : false;
+    return raw?.version === 1 && Array.isArray(raw.retired) ? raw.retired.includes(token) : false;
   } catch {
     return false;
   }

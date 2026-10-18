@@ -24,10 +24,11 @@ export function specShellLayoutSwapKey(workspacePath: string, workspaceIdentity?
 export function readSpecShellLayoutSwap(
   key: string,
   storage?: StoragePort,
+  legacyKey?: string,
 ): SpecShellLayoutSwapMode {
   try {
     storage ??= globalThis.localStorage;
-    const value = JSON.parse(storage?.getItem(key) || "null");
+    const value = JSON.parse(storage?.getItem(key) || (legacyKey ? storage?.getItem(legacyKey) : null) || "null");
     return value?.version === 1 && value.mode === "document-center"
       ? "document-center"
       : "chat-center";

@@ -9,6 +9,7 @@ export interface TaskSidePaneMemoryState {
   isSidePaneCollapsed: boolean;
   /** 对话级展开/收起偏好；tabs 本身仍按 workspace 复用。 */
   sidePaneCollapsedByOwner: Record<string, boolean>;
+  sidePaneActiveTabByOwner: Record<string, string>;
   /** 工具调用的自动打开已消费记录；不随消息行卸载清空。 */
   pluginUiAutoOpenKeys: ReadonlySet<string>;
   activeGitSourceId: GitChangeSourceId;
@@ -21,6 +22,7 @@ const DEFAULT_TASK_SIDE_PANE_MEMORY_STATE: TaskSidePaneMemoryState = {
   sidePaneState: null,
   isSidePaneCollapsed: true,
   sidePaneCollapsedByOwner: {},
+  sidePaneActiveTabByOwner: {},
   pluginUiAutoOpenKeys: new Set(),
   activeGitSourceId: "unstaged",
   browserUrls: {},
@@ -49,7 +51,18 @@ function readDurableMemory(key: string): TaskSidePaneMemoryState | undefined {
     if (!tabs.length) return;
     return {
       ...DEFAULT_TASK_SIDE_PANE_MEMORY_STATE,
-      isSidePaneCollapsed: false,
+      isSidePaneCollapsed: value.state.isSidePaneCollapsed === true,
+      sidePaneCollapsedByOwner: Object.fromEntries(
+        Object.entries(value.state.sidePaneCollapsedByOwner ?? {}).filter(
+          (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
+        ),
+      ),
+      sidePaneActiveTabByOwner: Object.fromEntries(
+        Object.entries(value.state.sidePaneActiveTabByOwner ?? {}).filter(
+          ([, entry]) =>
+            typeof entry === "string" && tabs.some((tab: { id: string }) => tab.id === entry),
+        ),
+      ) as Record<string, string>,
       sidePaneState: {
         tabs,
         activeTabId: tabs.some((tab: any) => tab.id === value.state.sidePaneState.activeTabId)
@@ -119,6 +132,7 @@ export function readTaskSidePaneMemoryState(key: string | null): TaskSidePaneMem
       ...DEFAULT_TASK_SIDE_PANE_MEMORY_STATE.sidePaneCollapsedByOwner,
       ...state.sidePaneCollapsedByOwner,
     },
+    sidePaneActiveTabByOwner: { ...state.sidePaneActiveTabByOwner },
   };
   return touchTaskSidePaneMemoryEntry(key, normalizedState);
 }
@@ -143,8 +157,18 @@ export function saveTaskSidePaneMemoryState(
       ...taskSidePaneMemory.get(key)?.sidePaneCollapsedByOwner,
       ...patch.sidePaneCollapsedByOwner,
     },
+    sidePaneActiveTabByOwner: {
+      ...taskSidePaneMemory.get(key)?.sidePaneActiveTabByOwner,
+      ...patch.sidePaneActiveTabByOwner,
+    },
   };
   nextState.sidePaneState = normalizeWorkspaceSidePaneState(nextState.sidePaneState);
+  const selected = nextState.sidePaneState?.tabs.find(
+    (tab) => tab.id === nextState.sidePaneState?.activeTabId,
+  );
+  if (selected)
+    nextState.sidePaneActiveTabByOwner[selected.ownerTaskId ?? DRAFT_SIDE_PANE_OWNER_KEY] =
+      selected.id;
   touchTaskSidePaneMemoryEntry(key, nextState);
   try {
     // Persist document tab descriptors only; Git owns diffs and runtime owns conversations.
@@ -160,6 +184,9 @@ export function saveTaskSidePaneMemoryState(
           version: 1,
           state: {
             sidePaneState: { tabs, activeTabId: nextState.sidePaneState?.activeTabId },
+            isSidePaneCollapsed: nextState.isSidePaneCollapsed,
+            sidePaneCollapsedByOwner: nextState.sidePaneCollapsedByOwner,
+            sidePaneActiveTabByOwner: nextState.sidePaneActiveTabByOwner,
           },
         }),
       );
@@ -212,4 +239,11 @@ export function claimPluginUiSidePaneAutoOpen(
     pluginUiAutoOpenKeys: new Set([...state.pluginUiAutoOpenKeys, requestKey]),
   });
   return true;
+}
+
+export function getSidePaneActiveTabPreference(
+  state: TaskSidePaneMemoryState,
+  ownerTaskId: string | null | undefined,
+): string | undefined {
+  return state.sidePaneActiveTabByOwner?.[ownerTaskId ?? DRAFT_SIDE_PANE_OWNER_KEY];
 }
