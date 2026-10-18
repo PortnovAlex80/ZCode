@@ -73,7 +73,31 @@ Implementation/source acceptance verified 2026-10-18:
   fixture has no rendered usage ring; physical mixed-DPI popup placement remains
   unverified. No paid prompts, user-profile changes or document writes in GUI tests.
 
-Production package and shortcut delivery pending after the source commit.
+Production delivery verified 2026-10-18 (source `b2097248`):
+
+- Canonical `node scripts/spec-harness-production.mjs build` exited 0 with a
+  fresh source/output receipt; `Build-Installer.cmd fast` then exited 0.
+  An earlier fast attempt correctly rejected the stale previous receipt.
+  Runtime closure/native policy and bundle size audits passed. Shell Node
+  24.13.1 differs from pinned 24.14.0; existing engine warnings remain.
+- Artifact: `packages/desktop/dist/independent-documents-20261018/ZCode-3.15.1-win-x64.exe`,
+  170146307 bytes, SHA-256
+  `6ebb5087dd0a246c15c8ea4d7550c1d8fd25edda17240a67e43c1f37fc10d5c0`.
+  Independent inspection verified its PE header, latest.yml size/SHA-512,
+  production 3.15.1 identity and embedded source revision `b2097248`.
+  All 4225 receipt outputs match the packaged archive, allowing only omitted
+  source maps (2480) and one sourceMappingURL cleanup. The wrapper's legacy
+  final root-dist artifact report ignores the nested output override; the
+  exact nested artifact above was checked independently.
+- Packaged `scripts/test-discussion-recovery-gui.mjs --executable <win-unpacked/ZCode.exe>
+  --check-updates` exited 0: sidebar/mounted return, closed-document recovery,
+  renderer reload and original child/draft passed without renderer errors or
+  model prompts. Updates returned `updates-disabled` and the correct fork
+  message. Full concurrent document/pair/restart coverage is source GUI evidence
+  above, not an additional packaged multiwindow acceptance claim.
+- Desktop `ZCode.lnk` now targets this verified `win-unpacked/ZCode.exe`; the
+  previous shortcut is backed up under ignored `.tmp`. The installer was not
+  launched, no existing user process/profile was changed, and no refs were pushed.
 
 ### Persistent conversation windows — 2026-10-18
 
