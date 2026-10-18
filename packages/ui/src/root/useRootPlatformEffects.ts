@@ -270,6 +270,9 @@ export function useRootPlatformEffects({
             case "ready":
               toast(intl.formatMessage({ id: "update.toast.ready" }, { version: payload.version }));
               return;
+            case "updates-disabled":
+              toast(intl.formatMessage({ id: "update.toast.updatesDisabled" }));
+              return;
             case "dev-skipped":
               toast(intl.formatMessage({ id: "update.toast.devSkipped" }));
               return;

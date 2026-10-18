@@ -1651,6 +1651,7 @@ const zhCN: Record<string, string> = {
   "update.toast.downloading": "正在下载新版本 v{version}",
   "update.toast.alreadyDownloading": "正在下载新版本（{progress}%）",
   "update.toast.ready": "v{version} 已下载，重启即可安装",
+  "update.toast.updatesDisabled": "此分支已禁用自动更新。请手动安装新版分支构建。",
   "update.toast.devSkipped": "开发环境不检查更新",
   "update.toast.error": "检查更新失败：{error}",
   "forceUpdate.title": "需要升级 ZCode 后继续使用",

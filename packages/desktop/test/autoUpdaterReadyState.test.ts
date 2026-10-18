@@ -282,7 +282,7 @@ describe("autoUpdater ready state sync", () => {
     expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
     expect(autoUpdaterMock.setFeedURL).not.toHaveBeenCalled();
     expect(win.webContents.send).toHaveBeenCalledWith(PlatformChannels.UpdateCheckResult, {
-      kind: "dev-skipped",
+      kind: "updates-disabled",
     });
     expect(loggerInfoMock).toHaveBeenCalledWith(
       "[auto-update] skip manual check: updater disabled for this product flavor",
@@ -303,6 +303,21 @@ describe("autoUpdater ready state sync", () => {
       }),
     );
     expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports dev-skipped only for an unpackaged manual update check", async () => {
+    appMock.isPackaged = false;
+    const win = {
+      isDestroyed: () => false,
+      webContents: { id: 10, send: vi.fn() },
+    };
+    const { initAutoUpdater, checkForUpdateMenuClick } = await import("../src/main/autoUpdater.js");
+    await initAutoUpdater();
+    checkForUpdateMenuClick(win as never);
+    expect(win.webContents.send).toHaveBeenCalledWith(PlatformChannels.UpdateCheckResult, {
+      kind: "dev-skipped",
+    });
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
   });
 
   it("开发态默认不初始化自动更新", async () => {

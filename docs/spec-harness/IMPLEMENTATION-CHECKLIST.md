@@ -33,6 +33,16 @@ recheck those items before restoring their accepted status.
 
 ## Exclusive write assignments
 
+### Production update status ? 2026-10-18
+
+The packaged fork keeps official auto-update disabled (R-10); this does not make
+it a development build. Manual checks report `updates-disabled` with a localized
+manual-install explanation. Only unpackaged development runtimes report
+`dev-skipped`. Desktop remains the policy owner and renderer only presents the
+result. No update feed, download, install or upstream replacement is enabled.
+Regression: the packaged disabled-policy case must emit `updates-disabled`
+without initializing or contacting the updater.
+
 ### Discussion recovery — 2026-10-18
 
 User reports a running document discussion becomes unreachable after navigating

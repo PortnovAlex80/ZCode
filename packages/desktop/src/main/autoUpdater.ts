@@ -1996,10 +1996,11 @@ export function checkForUpdateMenuClick(originWindow?: BrowserWindow | null) {
   }
 
   if (autoUpdaterDisabledForProductFlavor) {
+    // 打包版禁用更新不代表开发构建，单独报告策略以免 UI 误标产品身份。
     // 入口本应已按产品身份隐藏；这里是最后一道闸，不让未初始化的 updater 实例向占位 feed 发请求。
     logger.info("[auto-update] skip manual check: updater disabled for this product flavor");
     targetWindow.webContents.send(PlatformChannels.UpdateCheckResult, {
-      kind: "dev-skipped",
+      kind: "updates-disabled",
     } satisfies UpdateCheckResultPayload);
     return;
   }

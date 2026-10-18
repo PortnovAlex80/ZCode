@@ -222,6 +222,33 @@ try {
     )
   )
     throw new Error("Draft lost after reload");
+  if (process.argv.includes("--check-updates")) {
+    const updateResult = await page.evaluate(() => new Promise((accept, reject) => {
+      const timer = setTimeout(() => {
+        dispose();
+        reject(new Error("Update result timed out"));
+      }, 10000);
+      const dispose = window.zcode.onUpdateCheckResult(result => {
+        clearTimeout(timer);
+        dispose();
+        accept(result);
+      });
+      window.zcode.executeDesktopCommand("checkForUpdates").catch(error => {
+        clearTimeout(timer);
+        dispose();
+        reject(error);
+      });
+    }));
+    const expected = packaged ? "updates-disabled" : "dev-skipped";
+    if (updateResult.kind !== expected)
+      throw new Error("Wrong update status: " + JSON.stringify(updateResult));
+    const text = packaged
+      ? "Automatic updates are disabled for this fork. Install a newer fork build manually."
+      : "Updates are disabled in dev builds";
+    await page.getByText(text, { exact: true }).waitFor();
+    await page.screenshot({ path: resolve(".tmp/production-update-status.png") });
+    console.log(JSON.stringify({ updateResult, localizedToast: text }));
+  }
   console.log(
     JSON.stringify({
       mountedReturn: true,
