@@ -33,6 +33,55 @@ recheck those items before restoring their accepted status.
 
 ## Exclusive write assignments
 
+### Discussion recovery — 2026-10-18
+
+User reports a running document discussion becomes unreachable after navigating
+away. Root owns recovery UI/tests and delivery. Contract:
+[DISCUSSION-RECOVERY.md](DISCUSSION-RECOVERY.md). Saved `SpecThread` resolves the
+parent's side-pane scope; selecting a local child restores its exact document
+after the grant is ready. Closed-owner recovery stays enabled. Recovery broadcasts
+do not replace other open documents, and no native/model command is sent.
+
+- Focused registry/guard/navigation: 24 tests passed (3 files).
+- Document persistence/entry points/multi-tab/navigation: 22 tests passed (4 files;
+  includes the earlier two navigation cases). Missing workspace/remote/draft guard
+  was added afterward and passed with the 24-test run.
+- Typecheck passed; lint 0 errors / 63 existing warnings; changed architecture
+  0 violations (broad UI remains unmanaged).
+- Final canonical tab persistence + browser lifecycle: 23 tests passed (2 files).
+- Stable production UI rebuild passed with matching staged Agent bundle. An earlier
+  full build correctly rejected its receipt because the persistence fix landed
+  during compilation; only the stable rebuild is the delivery input.
+- Isolated source GUI passed: sidebar return to the same child; closed-tab reopen;
+  history and unsent draft retained; renderer reload returns to the discussion;
+  zero renderer errors and model prompts. Reproducible scenario:
+  `scripts/test-discussion-recovery-gui.mjs`. Screenshots in ignored `.tmp`.
+- Packaged production GUI passed the same navigation/close/reload scenarios,
+  retained the unsent draft after reload, and verified one native discussion
+  composer. Zero renderer errors/model prompts. Packaged smoke uses Chromium CDP;
+  the Node-inspector Electron launch mode is not available in this release build.
+- Packaging exited 0; runtime-closure/native/size audits passed. Independent
+  verification matched installer SHA-512/size to `latest.yml`, checked Windows PE
+  and production identity/revision, and compared all 4,221 shipped compiled outputs
+  to the production receipt (2,480 source maps intentionally omitted; one source
+  mapping comment removed by the existing packaging transform).
+- Delivery: `packages/desktop/dist/discussion-recovery-20261018/ZCode-3.15.1-win-x64.exe`,
+  170143399 bytes, SHA-256
+  `90f2109e4f375ef08f02b191e48042ae95c9820c196b4d405e15ffe075ed11f2`.
+  Existing Desktop ZCode shortcut now targets this output's `win-unpacked/ZCode.exe`;
+  original shortcut backed up in ignored `.tmp`. The existing `text-blocks-20261017`
+  executable was not modified/stopped; user restarts normally to use the repair.
+  Installer was not executed. This closes this recovery scenario, not all D-01
+  layout/performance/native-host acceptance.
+
+Upstream version check requested by user on 2026-10-18: the official
+[changelog](https://zcode.z.ai/_next/changelog) lists **3.15.3**, released
+2026-10-13 (login/onboarding/parallel-request/update-exit fixes). Our manifest and
+build metadata remain **3.15.1**, revision `8fe2dbf1`. Live `git ls-remote`
+verified upstream main/HEAD at `aac47556` (v3.15.1); published tags only v3.14.3
+and v3.15.1; the other branch is `feat/ui-plugin`. No published v3.15.3 source tag
+was found and no upstream merge or binary-source substitution was performed.
+
 ### Five prose passport blocks — 2026-10-17
 
 User requested simplifying the model to ordinary text blocks. Contract:

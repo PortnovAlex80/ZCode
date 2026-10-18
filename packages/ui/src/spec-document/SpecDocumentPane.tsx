@@ -827,99 +827,29 @@ function Documents({
     discuss({ quote: document.path, prefix: "", suffix: "", start: -1, sha256: document.sha256 }, undefined, "document");
   }
   useEffect(() => {
-    let live = true;
     const activate = (event: Event) => {
-      const request = (event as CustomEvent<ManagedNativeDiscussionOpenRequest>)
-        .detail;
+      const request = (event as CustomEvent<ManagedNativeDiscussionOpenRequest>).detail;
       if (
         !request ||
+        // 每张文档 tab 只接收自己的讨论；广播不能把其它已打开文件全部切成目标文件。
+        request.documentPath !== documentRef.current?.path ||
         (request.workspaceIdentity?.trim() || request.workspacePath) !==
           (workspaceIdentity?.trim() || workspacePath) ||
         !threadsRef.current.some(
           (thread) =>
-            thread.id === request.threadId &&
-            thread.documentPath === request.documentPath,
+            thread.id === request.threadId && thread.documentPath === request.documentPath,
         )
       )
         return;
-      if (request.documentPath === documentRef.current?.path) {
-        setActiveThreadId(request.threadId);
-        setDiscussionsVisible(true);
-        onActivateRef.current?.();
-        return;
-      }
-      if (!documents || ioPendingRef.current) return;
-      const previous = documentRef.current;
-      if (
-        previous &&
-        draftRef.current !== previous.content &&
-        !writeDocumentDraft(
-          presentationKey,
-          previous.path,
-          {
-            content: draftRef.current,
-            baseSha256: baseSha256Ref.current,
-          },
-          undefined,
-          paneWriteToken,
-        )
-      ) {
-        setError(
-          "The unsaved document draft could not be retained. Save it before opening another discussion.",
-        );
-        return;
-      }
-      setIoPending(true);
-      setError("");
+      setActiveThreadId(request.threadId);
+      setDiscussionsVisible(true);
       onActivateRef.current?.();
-      void documents
-        .read({ path: request.documentPath })
-        .then((next) => {
-          if (!live) return;
-          const restored = restoreDocumentDraft(
-            next,
-            readDocumentDraft(presentationKey, next.path),
-          );
-          presentationRef.current = {
-            ...presentationRef.current,
-            path: next.path,
-            scrollTop: 0,
-          };
-          install(next);
-          // U-12：原生讨论把面板切到目标文档，同样回填 tab 身份。
-          notifyDocumentOpen(next.path);
-          draftRef.current = restored.content;
-          setDraft(restored.content);
-          baseSha256Ref.current = restored.baseSha256;
-          setBaseSha256(restored.baseSha256);
-          setActiveThreadId(request.threadId);
-          setDiscussionsVisible(true);
-          setStatus(
-            restored.content !== next.content
-              ? "Unsaved draft restored"
-              : "Saved on disk",
-          );
-          if (restored.conflict)
-            setError(
-              "Document changed on disk while closed. Your unsaved draft is retained; Save checks its original hash. Reload discards the draft and uses current disk content.",
-            );
-        })
-        .catch((cause) => {
-          if (live) setError(String(cause));
-        })
-        .finally(() => {
-          if (live) setIoPending(false);
-        });
     };
     window.addEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, activate);
     return () => {
-      live = false;
-      window.removeEventListener(
-        MANAGED_NATIVE_DISCUSSION_OPEN_EVENT,
-        activate,
-      );
+      window.removeEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, activate);
     };
-  }, [documents, workspaceIdentity, workspacePath, presentationKey]);
+  }, [workspaceIdentity, workspacePath]);
   useEffect(() => {
     if (
       bindingReady &&

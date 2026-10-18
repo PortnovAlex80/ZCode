@@ -35,6 +35,7 @@ import {
 import type { FileCodeViewerSource } from "@/lib/codeViewer.js";
 import { ServiceProvider } from "@/hooks/useServices.js";
 import { SpecDocumentPane } from "@/spec-document/SpecDocumentPane.js";
+import { MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, specThreadStorageKey } from "@/spec-document/nativeDiscussionHandoff.js";
 import {
   defaultDocumentPresentation,
   documentPresentationKey,
@@ -372,6 +373,50 @@ describe("U-12 multi-tab document panes (SpecDocumentPane instances)", () => {
       );
       expect(triggerA.textContent).toContain("a.md");
       expect(triggerB.textContent).toContain("b.md");
+
+      // 讨论恢复广播只选中目标文件，不能把其它文档 tab 也切成同一文件。
+      const thread = {
+        id: "recover-a",
+        documentPath: "docs/a.md",
+        parentSessionId: "parent",
+        sessionId: "child-a",
+        anchor: {
+          start: 0,
+          quote: "content",
+          prefix: "",
+          suffix: "",
+          sha256: "sha-docs/a.md",
+        },
+      };
+      const key = specThreadStorageKey(WORKSPACE_PATH, undefined);
+      localStorage.setItem(key, JSON.stringify([thread]));
+      fireEvent(
+        window,
+        new StorageEvent("storage", {
+          key,
+          newValue: JSON.stringify([thread]),
+        }),
+      );
+      fireEvent(
+        window,
+        new CustomEvent(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, {
+          detail: {
+            workspacePath: WORKSPACE_PATH,
+            documentPath: "docs/a.md",
+            threadId: thread.id,
+          },
+        }),
+      );
+      await waitFor(() =>
+        expect(within(containerA).getByLabelText("Fragment discussion")).toBeTruthy(),
+      );
+      expect(triggerB.textContent).toContain("b.md");
+      expect(opened.filter((item) => item.tabId === "tab-b").map((item) => item.path)).toEqual([
+        "docs/b.md",
+      ]);
+      expect(triggerA.textContent).not.toContain("b.md");
+      expect(triggerB.textContent).not.toContain("a.md");
+
       expect(triggerA.textContent).not.toContain("b.md");
       expect(triggerB.textContent).not.toContain("a.md");
     } finally {

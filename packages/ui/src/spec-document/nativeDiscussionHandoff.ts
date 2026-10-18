@@ -301,6 +301,28 @@ export function activateManagedNativeDiscussionOwner(
   }
 }
 
+/** Saved discussion context survives closing its document or restarting the renderer. */
+export function useManagedNativeDiscussionThread(
+  workspacePath: string,
+  workspaceIdentity: string | undefined,
+  sessionId: string | null,
+): SpecThread | null {
+  const owner = useManagedNativeDiscussionOwner(
+    workspacePath,
+    workspaceIdentity,
+    workspacePath.trim() ? sessionId : null,
+  );
+  if (!owner) return null;
+  return (
+    getSpecThreadStore(
+      specThreadStorageKey(workspacePath, workspaceIdentity),
+      workspaceIdentity?.trim() || workspacePath,
+    )
+      .get()
+      .find((thread) => thread.id === owner.threadId && thread.sessionId === sessionId) ?? null
+  );
+}
+
 export function transferNativeDiscussionDraft(
   workspacePath: string,
   workspaceIdentity: string | undefined,

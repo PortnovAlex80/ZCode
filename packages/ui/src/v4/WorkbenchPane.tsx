@@ -217,7 +217,6 @@ function SpecManagedSessionGuard({
       <Button
         variant="outline"
         size="sm"
-        disabled={!owner.ownerToken}
         onClick={() => {
           if (managedSessionId)
             activateManagedNativeDiscussionOwner(

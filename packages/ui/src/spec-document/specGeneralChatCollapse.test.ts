@@ -607,7 +607,9 @@ test("actual Workbench admission guard prevents a second managed discussion cont
   assert.match(ownerView, /Open existing discussion/);
   assert.doesNotMatch(ownerView, /native composer/);
   managed = { ownerToken: null };
-  assert.match(render("managed-child"), /Reopen its document/);
+  const closedOwnerView = render("managed-child");
+  assert.match(closedOwnerView, /Reopen its document/);
+  assert.doesNotMatch(closedOwnerView, /disabled/, "a saved discussion can reopen without a mounted owner");
   assert.equal(mounts, 0);
   for (const sessionId of ["ordinary-session", null, "__draft__"])
     render(sessionId);

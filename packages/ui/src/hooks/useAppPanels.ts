@@ -251,6 +251,11 @@ export function useAppPanels(options: {
         ...latestSidePaneMemoryRef.current,
         sidePaneState: next,
       };
+      // 刷新/进程退出不会保证 React unmount；文档 tab 描述必须随 canonical 更新落盘。
+      saveTaskSidePaneMemoryState(
+        activeSidePaneMemoryKeyRef.current,
+        latestSidePaneMemoryRef.current,
+      );
       setSidePaneState(next);
       return next;
     },
@@ -1329,6 +1334,8 @@ export function useAppPanels(options: {
 
   const handleActivateSidePaneTab = useCallback(
     (tabId: string) => {
+      // 已挂载的讨论回流也必须展开宿主，不能只激活仍处于折叠态的文档 tab。
+      revealSidePaneForCurrentOwner();
       const tab = latestSidePaneMemoryRef.current.sidePaneState?.tabs.find(
         (candidate) => candidate.id === tabId,
       );
@@ -1366,7 +1373,7 @@ export function useAppPanels(options: {
         return setActiveSidePaneTab(current, tabId);
       });
     },
-    [commitSidePaneState, platform, workspaceRemoteSessionId],
+    [commitSidePaneState, platform, revealSidePaneForCurrentOwner, workspaceRemoteSessionId],
   );
 
   const handleReorderSidePaneTab = useCallback(

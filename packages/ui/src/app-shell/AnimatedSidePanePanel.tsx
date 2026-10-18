@@ -26,9 +26,12 @@ import { horizontalListSortingStrategy, SortableContext } from "@dnd-kit/sortabl
 import type { BrowserViewScreenshotSurfacePreparePayload, GitChangeSourceId } from "@zcode/shared";
 import {
   MANAGED_NATIVE_DISCUSSION_OPEN_EVENT,
+  activateManagedNativeDiscussionOwner,
+  useManagedNativeDiscussionThread,
   type ManagedNativeDiscussionOpenRequest,
 } from "@/spec-document/nativeDiscussionHandoff.js";
 import { SpecDocumentPane } from "@/spec-document/SpecDocumentPane.js";
+import { joinFilePath } from "@/lib/path.js";
 import type { ResolvedSpecDocumentWorkspace } from "@/spec-document/specDocumentWorkspace.js";
 import { PreviewPane } from "@/PreviewPane.js";
 import { SidePaneTerminalPane } from "@/SidePaneTerminalPane.js";
@@ -548,7 +551,7 @@ export function AnimatedSidePanePanel({
   };
   // reopen 监听需要“当前”可见 tabs 来复用已有文档 tab；effect 依赖保持稳定
   //（不随 tabs 变化重挂监听），经 ref 读最新值（与 SpecDocumentPane 的回调 ref 同款）。
-  const reopenSpecDocumentRef = useRef(() => {});
+  const reopenSpecDocumentRef = useRef((_target: ManagedNativeDiscussionOpenRequest) => {});
   useEffect(() => {
     const reopen = (event: Event) => {
       const target = (event as CustomEvent<ManagedNativeDiscussionOpenRequest>).detail;
@@ -561,9 +564,8 @@ export function AnimatedSidePanePanel({
         target.workspaceIdentity !== specDocumentWorkspaceIdentity
       )
         return;
-      // U-12 多开：原生讨论回流优先激活既有文档 tab（其面板自身监听会切到目标文档），
-      // 只有当前没有任何文档 tab 时才新开——否则每次回流都会多开一张选择器 tab。
-      reopenSpecDocumentRef.current();
+      // 复用同文件同 owner 的 tab；目标文件未打开时新建已绑定文件的 tab。
+      reopenSpecDocumentRef.current(target);
     };
     window.addEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, reopen);
     return () => window.removeEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, reopen);
@@ -591,16 +593,36 @@ export function AnimatedSidePanePanel({
       !relativePath.split("/").some((part) => part === ".." || part === "")
     );
   };
-  reopenSpecDocumentRef.current = () => {
-    const existingSpecTab = visibleTabs.find(
-      (tab) => tab.type === "code-viewer" && canOpenSpecDocument(tab.source),
-    );
-    if (existingSpecTab) {
-      onActivateTab(existingSpecTab.id);
-      return;
-    }
-    openSpecDocument();
+  reopenSpecDocumentRef.current = (target) => {
+    // 回流必须指定文件；任意 tab/未绑定选择器不能恢复已关闭讨论的文档身份。
+    onOpenCodeViewer({
+      type: "file",
+      specDocument: true,
+      workspacePath: target.workspacePath,
+      ...(target.workspaceIdentity ? { workspaceIdentity: target.workspaceIdentity } : {}),
+      path: joinFilePath(target.workspacePath, target.documentPath),
+      title: target.documentPath.split("/").at(-1) ?? target.documentPath,
+    });
   };
+  const managedDiscussion = useManagedNativeDiscussionThread(
+    specDocumentWorkspacePath,
+    specDocumentWorkspaceIdentity,
+    isDesktop && !workspaceRemoteSessionId ? activeTaskId : null,
+  );
+  useEffect(() => {
+    // 等待文档授权及回流监听就绪后恢复，避免目录导航早于异步授权而丢失事件。
+    if (hasSpecDocumentGrant && managedDiscussion?.sessionId)
+      activateManagedNativeDiscussionOwner(
+        specDocumentWorkspacePath,
+        specDocumentWorkspaceIdentity,
+        managedDiscussion.sessionId,
+      );
+  }, [
+    hasSpecDocumentGrant,
+    specDocumentWorkspacePath,
+    specDocumentWorkspaceIdentity,
+    managedDiscussion?.sessionId,
+  ]);
   const activeSpecTab = visibleTabs.find((tab) => tab.id === visibleActiveTabId);
   const specDocumentActive = Boolean(
     isVisible && activeSpecTab?.type === "code-viewer" && canOpenSpecDocument(activeSpecTab.source),
@@ -1465,9 +1487,11 @@ export function AnimatedSidePanePanel({
                             workspacePath={specDocumentWorkspacePath}
                             workspaceIdentity={specDocumentWorkspaceIdentity}
                             visible={isVisible && tab.id === visibleActiveTabId}
-                            parentSessionId={specDocumentWorkspace
-                              ? specDocumentWorkspace.sessionId ?? null
-                              : activeTaskId ?? sidePaneOwnerId}
+                            parentSessionId={
+                              specDocumentWorkspace
+                                ? (specDocumentWorkspace.sessionId ?? null)
+                                : (activeTaskId ?? sidePaneOwnerId)
+                            }
                             // U-12 多开：面板实例键 = tab id（tab 内切换文档不重挂）；
                             // 恢复目标 = tab 已绑定的文件路径，纯选择器入口（未绑定）
                             // 不自动打开上一次文档，保持 Open doc 初始态。

@@ -8,6 +8,7 @@ import { useZCodeStore } from "@/store/StoreProvider.js";
 import { getVisibleTaskMetas, useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { useTaskQueryCacheStore } from "@/store/taskQueryCacheStore.js";
 import { useAppPanels } from "@/hooks/useAppPanels.js";
+import { useManagedNativeDiscussionThread } from "@/spec-document/nativeDiscussionHandoff.js";
 import { useGitAutoRefresh } from "@/hooks/useGitAutoRefresh.js";
 import { useGitRepository } from "@/hooks/useGitRepository.js";
 import { useAppKeyboard } from "@/hooks/useAppKeyboard.js";
@@ -217,7 +218,14 @@ export function App({
   const draftSessionId = useZCodeSessionStore(
     (state) => state.getWorkspaceState(workspaceAbsPath, workspaceIdentity).draftSessionId,
   );
-  const sidePaneOwnerId = activeTaskId ?? draftSessionId ?? null;
+  const managedDiscussion = useManagedNativeDiscussionThread(
+    workspaceAbsPath,
+    workspaceIdentity,
+    workspaceRemoteSessionId ? null : activeTaskId,
+  );
+  // 子讨论沿用父会话的文档工作区；否则目录选中子会话会把仍持有 composer 的文档隐藏。
+  const sidePaneOwnerId =
+    managedDiscussion?.parentSessionId ?? activeTaskId ?? draftSessionId ?? null;
   const [summaryPanelVariantOverride, setSummaryPanelVariantOverride] =
     useState<ChatViewSummaryPanelVariant | null>(null);
   const draftFocusVersion = workspaceShellZCodeState.draftFocusVersion;
