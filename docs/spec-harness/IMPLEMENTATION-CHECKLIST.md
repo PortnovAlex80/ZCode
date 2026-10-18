@@ -64,6 +64,34 @@ native placement and document state, and production packaging. Contract:
   is recorded with the source commit; packaged delivery evidence follows separately.
   These checks do not close unrelated live provider, install or performance gates.
 
+Delivery verified 2026-10-18 (source `51001376`):
+
+- `Build-Installer.cmd full` exited 0 with production flavor, Windows x64,
+  version 3.15.1 and official auto-update compiled OFF. Runtime closure, native
+  resource policy and size audits passed. Shell Node 24.13.1 differs from the
+  repository's pinned 24.14.0; the build reports this existing engine warning.
+- Artifact: `packages/desktop/dist/persistent-windows-20261018/ZCode-3.15.1-win-x64.exe`,
+  170145255 bytes, SHA-256
+  `efc153aa50bd333f86fcae18b158a4a18bb23286dcf3d0d85212973c4419d46f`.
+  Independent verification matched `latest.yml` SHA-512/size, checked Windows PE,
+  production package identity and embedded commit `51001376`, and verified 4224
+  compiled outputs against the production receipt (2480 maps omitted, one output
+  changed only by removal of its sourceMappingURL comment).
+- The wrapper's final artifact report still scans the root `dist` directory when
+  a nested output override is used; its reported artifact hash is stale. The
+  independently verified nested artifact above is the delivered build.
+- Packaged GUI command:
+  `node scripts/test-discussion-recovery-gui.mjs --executable packages/desktop/dist/persistent-windows-20261018/win-unpacked/ZCode.exe --check-updates`.
+  Exit 0: mounted/closed-owner return, renderer reload, same child session and
+  unsent draft restored; no renderer errors/model prompts. Manual update check
+  returned `updates-disabled` and the localized fork/manual-install explanation.
+  Full concurrent-window/cold-restart scenarios above were run against the source
+  build; the packaged payload was independently matched to the production receipt.
+- Existing Desktop `ZCode.lnk` now targets this build's `win-unpacked/ZCode.exe`;
+  its previous shortcut is backed up in ignored local evidence. No installer was
+  launched, existing user process stopped, profile changed, source pushed or
+  additional branch/worktree created. Relaunch through the shortcut to use it.
+
 ### Production update status ? 2026-10-18
 
 The packaged fork keeps official auto-update disabled (R-10); this does not make
