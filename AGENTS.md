@@ -5,6 +5,17 @@
 - 定位问题时，未明确要求修改代码就先调查原因。结合源码、日志和运行时证据，区分已确认原因与待验证假设。
 - 保留与任务无关的本地改动，不自行恢复已移除的模块或内部依赖。
 
+## Git workflow and completion
+
+- Follow [the repository Git workflow](docs/git/workflow.md). The default is the existing `dev` branch in the main checkout; `master` holds accepted releases.
+- Do not automatically create task branches, worktrees, clones or detached checkouts. Additional checkouts/branches require an explicit user instruction for that task. Agent skills and delegation templates must honor this restriction.
+- Parallel agents share the checkout with exclusive file ownership. Only the coordinator stages, commits or changes Git refs. Serialize overlapping edits instead of creating more trees.
+- Inspect branch, status, index and worktrees before editing. Preserve unrelated staged/unstaged changes; stage explicit paths/hunks, never the whole dirty repository by default.
+- Commit each completed, verified logical change before reporting an implementation task done. Do not wait for a second request to commit. Exceptions: an explicit request for investigation only, to leave changes uncommitted, or a concrete unresolved validation/ownership blocker; report that exception honestly.
+- Keep code, regression tests and required contract/spec changes in one coherent commit. Separate unrelated workflow/release work. Follow [commit message conventions](docs/git/ai-agent-commit-message-guidelines.md); no empty/WIP checkpoint noise or rewriting published history.
+- Commit release source before production packaging so embedded revision identifies the source. Record subsequent delivery evidence separately; do not rebuild solely for documentation changes or misrepresent an earlier dirty build as built from a later commit.
+- Clean up task refs/checkouts after integration: verify ancestry, preserve unique commits under a named archive ref, and never discard dirty worktrees or another worker's changes. Pushes, remote deletions and `master` promotion remain separate actions requiring session authorization.
+
 ## 命令与仓库结构
 
 开工前运行 `node scripts/check-workspace-freshness.mjs` 检查基线。Node 版本以 `mise.toml` 为准。
