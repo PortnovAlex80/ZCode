@@ -78,6 +78,11 @@ declare global {
       consumeUserGesture(sandboxId: string): Promise<boolean>;
     };
     zcode: {
+      setConversationWindowAttachment?(request: {
+        documentFrame: string;
+        conversationFrame: string | null;
+        side?: "left" | "right";
+      }): Promise<{ attached: boolean }>;
       connectRemote(
         options: RemoteTarget,
         requestId?: string,

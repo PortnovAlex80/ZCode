@@ -732,8 +732,9 @@ export function PreviewPane({
   }, [source, preserveDocumentViewState]);
 
   useEffect(() => {
+    // 切换文件也会重置 markdown 模式；编辑器仍在场时必须继续显示同一个编辑表面。
     if (sourceEditor) setMarkdownViewMode("code");
-  }, [Boolean(sourceEditor)]);
+  }, [Boolean(sourceEditor), source]);
 
   const handleSubmitCodeComment = useCallback(
     (params: { range: CodeCommentRange; selectedText: string; comment: string }) => {

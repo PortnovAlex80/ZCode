@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import {
   acquireDiscussionWriter,
   discussionWriterAllowed,
@@ -26,6 +26,60 @@ function fakeLocks() {
   };
   return { locks, held, requests: () => requests };
 }
+test("a native-window callback rejection retries exclusive admission without granting early writes", async () => {
+  vi.useFakeTimers();
+  const manager = fakeLocks();
+  let attempts = 0;
+  const locks: DiscussionLockManager = {
+    request: async (...args) => {
+      if (++attempts === 1) throw new Error("The provided callback is no longer runnable");
+      return manager.locks.request(...args);
+    },
+  };
+  const phases: DiscussionWriterPhase[] = [];
+  const release = retainDiscussionWriter("native-callback-retry", locks, (phase) =>
+    phases.push(phase),
+  );
+  try {
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(phases.at(-1), "error");
+    assert.equal(discussionWriterAllowed("native-callback-retry"), false);
+    await vi.advanceTimersByTimeAsync(999);
+    assert.equal(attempts, 1);
+    await vi.advanceTimersByTimeAsync(1);
+    assert.equal(attempts, 2);
+    assert.equal(phases.at(-1), "owned");
+    assert.equal(discussionWriterAllowed("native-callback-retry"), true);
+    assert.equal(manager.held.size, 1);
+  } finally {
+    release();
+    await Promise.resolve();
+    vi.useRealTimers();
+  }
+});
+test("disposing a failed document owner cancels its admission retry", async () => {
+  vi.useFakeTimers();
+  let attempts = 0;
+  const locks: DiscussionLockManager = {
+    request: async () => {
+      attempts++;
+      throw new Error("retired callback");
+    },
+  };
+  const release = retainDiscussionWriter("native-callback-dispose", locks, () => {});
+  try {
+    await Promise.resolve();
+    await Promise.resolve();
+    release();
+    await vi.advanceTimersByTimeAsync(2000);
+    assert.equal(attempts, 1);
+    assert.equal(discussionWriterAllowed("native-callback-dispose"), false);
+  } finally {
+    release();
+    vi.useRealTimers();
+  }
+});
 test("exclusive workspace ownership blocks a competing document window and is released only on dispose", async () => {
   const manager = fakeLocks();
   const first: DiscussionWriterPhase[] = [];

@@ -5,6 +5,7 @@ import { useServices } from "@/hooks/useServices.js";
 import { V4PaneConversationProvider } from "@/v4/V4ConversationContext.js";
 import { WorkbenchLeafPane, type WorkbenchShellBinding } from "@/v4/WorkbenchPane.js";
 import { paneWorkspaceKey } from "@/v4/paneLayoutStore.js";
+import { buildSpecDocumentPickerSource } from "@/lib/workspaceSidePane.js";
 import { SpecPopoutRegionPortal, useSpecPopoutRegion } from "./specPopoutRegion.js";
 import {
   bindConversationWindow,
@@ -63,15 +64,28 @@ export function AdmittedConversation({
     // Saved open windows are explicit history views. Passive sessions-index uses
     // existing-only and cannot bootstrap a cold runtime; a filtered durable list can, with
     // no create/resume command or model request, before mounting the composer.
-    void agent.listSessions({ ...entry.scope, sessionIds: [entry.sessionId], includeArchived: true, limit: 1 })
-      .then(sessions => { if (!disposed) setAdmission(sessions.some(session => session.sessionId === entry.sessionId) ? "ready" : "missing"); })
+    void agent
+      .listSessions({
+        ...entry.scope,
+        sessionIds: [entry.sessionId],
+        includeArchived: true,
+        limit: 1,
+      })
+      .then((sessions) => {
+        if (!disposed)
+          setAdmission(
+            sessions.some((session) => session.sessionId === entry.sessionId) ? "ready" : "missing",
+          );
+      })
       .catch((error: unknown) => {
         if (disposed) return;
         const message = error instanceof Error ? error.message : String(error);
         setAdmissionError(message);
         if (/session.*not.?found|session.*missing/i.test(message)) setAdmission("missing");
       });
-    return () => { disposed = true; };
+    return () => {
+      disposed = true;
+    };
   }, [entry.scope, entry.sessionId, services, retry]);
   const binding = useMemo(
     () => ({ workspaceScope: entry.scope, sessionId: entry.sessionId, readOnly: entry.readOnly }),
@@ -96,7 +110,14 @@ export function AdmittedConversation({
         {admission === "missing"
           ? intl.formatMessage({ id: "conversation.window.unavailable" })
           : intl.formatMessage({ id: "conversation.window.connecting" })}
-        {admissionError ? <><p>{admissionError}</p><Button variant="outline" onClick={() => setRetry(value => value + 1)}>{intl.formatMessage({ id: "conversation.window.retryConnection" })}</Button></> : null}
+        {admissionError ? (
+          <>
+            <p>{admissionError}</p>
+            <Button variant="outline" onClick={() => setRetry((value) => value + 1)}>
+              {intl.formatMessage({ id: "conversation.window.retryConnection" })}
+            </Button>
+          </>
+        ) : null}
         <Button variant="outline" onClick={() => closeConversationWindow(entry.id)}>
           {intl.formatMessage({ id: "conversation.window.close" })}
         </Button>
@@ -158,8 +179,17 @@ function ConversationWindow({
       {region.lastError ? (
         <div role="alert" className="flex gap-2 p-2 text-ui-sm">
           {entry.title}: {region.lastError}
-          <Button onClick={region.open}>{intl.formatMessage({ id: "conversation.window.retryOpening" })}</Button>
-          <Button onClick={() => { closeConversationWindow(entry.id); onReturn(entry); }}>{intl.formatMessage({ id: "conversation.window.return" })}</Button>
+          <Button onClick={region.open}>
+            {intl.formatMessage({ id: "conversation.window.retryOpening" })}
+          </Button>
+          <Button
+            onClick={() => {
+              closeConversationWindow(entry.id);
+              onReturn(entry);
+            }}
+          >
+            {intl.formatMessage({ id: "conversation.window.return" })}
+          </Button>
         </div>
       ) : null}
       <SpecPopoutRegionPortal region={region} title={entry.title}>
@@ -169,7 +199,23 @@ function ConversationWindow({
           data-floating-workspace={entry.scope.workspacePath}
         >
           <V4PaneConversationProvider scope={entry.scope}>
-            <AdmittedConversation entry={entry} routeAction={routeAction} />
+            {!entry.scope.remoteSessionId ? (
+              <div className="flex shrink-0 justify-end border-b border-border px-2 py-1">
+                <Button
+                  variant="ghost"
+                  onClick={() =>
+                    routeAction(entry, "onOpenCodeViewer", [
+                      buildSpecDocumentPickerSource(entry.scope),
+                    ])
+                  }
+                >
+                  Open doc
+                </Button>
+              </div>
+            ) : null}
+            <div className="relative min-h-0 flex-1">
+              <AdmittedConversation entry={entry} routeAction={routeAction} />
+            </div>
           </V4PaneConversationProvider>
         </div>
       </SpecPopoutRegionPortal>

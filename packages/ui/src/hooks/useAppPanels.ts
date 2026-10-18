@@ -3,6 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createUuid } from "@zcode/shared";
 import type { EmbeddedBrowserOpenUrlRequest, IPlatformService } from "@zcode/shared";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
+import { upsertDocumentWindowTab } from "@/spec-document/documentWindowTabs.js";
+import {
+  RETAINED_DOCUMENT_ACTIVATE_EVENT,
+  type RetainedDocumentActivation,
+} from "@/spec-document/retainedDocumentWindows.js";
 // 保活：side pane terminal 跨 workspace 会话上移到模块级 registry。
 // 关闭 terminal tab 时必须显式 release，杀掉 PTY，避免常驻 registry 造成孤儿进程。
 import { sidePaneTerminalSessionRegistry } from "@/terminal/sidePaneTerminalSessionRegistry.js";
@@ -277,6 +282,21 @@ export function useAppPanels(options: {
   );
 
   useEffect(() => {
+    const restoreDocumentTab = (event: Event) => {
+      const target = (event as CustomEvent<RetainedDocumentActivation>).detail;
+      if (
+        !target?.tab ||
+        (target.workspaceIdentity?.trim() || target.workspacePath) !== activeWorkspaceKeyRef.current
+      )
+        return;
+      // 独立文档可以没有主窗口 tab；返回时沿 canonical 写路径恢复同一个身份。
+      commitSidePaneState((current) => upsertDocumentWindowTab(current, target.tab!));
+    };
+    window.addEventListener(RETAINED_DOCUMENT_ACTIVATE_EVENT, restoreDocumentTab);
+    return () => window.removeEventListener(RETAINED_DOCUMENT_ACTIVATE_EVENT, restoreDocumentTab);
+  }, [commitSidePaneState]);
+
+  useEffect(() => {
     const previousKey = activeSidePaneMemoryKeyRef.current;
     if (previousKey === sidePaneMemoryKey) {
       return;
@@ -332,7 +352,10 @@ export function useAppPanels(options: {
       const scopeKey = `${activeWorkspaceKey}::${sidePaneOwnerId ?? "__draft__"}`;
       const preferredTabId =
         activeTabByOwnerRef.current.get(scopeKey) ??
-        getSidePaneActiveTabPreference(readTaskSidePaneMemoryState(activeSidePaneMemoryKeyRef.current), sidePaneOwnerId) ??
+        getSidePaneActiveTabPreference(
+          readTaskSidePaneMemoryState(activeSidePaneMemoryKeyRef.current),
+          sidePaneOwnerId,
+        ) ??
         (activeTaskId ? lastActiveSubagentTabByRootRef.current.get(activeTaskId) : undefined);
       const collapsedPreference = getSidePaneCollapsedPreference(
         readTaskSidePaneMemoryState(activeSidePaneMemoryKeyRef.current),

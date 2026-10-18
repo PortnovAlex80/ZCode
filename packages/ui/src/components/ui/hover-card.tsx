@@ -2,6 +2,7 @@ import * as React from "react";
 import { HoverCard as HoverCardPrimitive } from "radix-ui";
 
 import { cn } from "../lib/utils.js";
+import { usePortalHost } from "./portal-host.js";
 
 function HoverCard({ ...props }: React.ComponentProps<typeof HoverCardPrimitive.Root>) {
   return <HoverCardPrimitive.Root data-slot="hover-card" {...props} />;
@@ -18,7 +19,9 @@ function HoverCardContent({
   ...props
 }: React.ComponentProps<typeof HoverCardPrimitive.Content>) {
   return (
-    <HoverCardPrimitive.Portal data-slot="hover-card-portal">
+    // 弹出会话中的锚点属于另一个 document；Portal 必须跟随其 host，
+    // 否则局部坐标会在主窗口中定位，导致上下文用量面板出现在错误窗口。
+    <HoverCardPrimitive.Portal data-slot="hover-card-portal" container={usePortalHost()}>
       <HoverCardPrimitive.Content
         data-slot="hover-card-content"
         align={align}

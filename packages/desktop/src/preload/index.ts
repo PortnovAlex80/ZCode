@@ -313,6 +313,13 @@ contextBridge.exposeInMainWorld("zcode", {
   /** renderer 日志通过 IPC 传到 main 进程统一存储 */
   log: (level: "info" | "warn" | "error", args: unknown[]) =>
     ipcRenderer.send(PlatformChannels.Log, { level, args }),
+  /** Only the trusted shell may attach its own controlled native surfaces. */
+  setConversationWindowAttachment: (request: {
+    documentFrame: string;
+    conversationFrame: string | null;
+    side?: "left" | "right";
+  }): Promise<{ attached: boolean }> =>
+    ipcRenderer.invoke(PlatformChannels.SetConversationWindowAttachment, request),
   /** 打开系统目录选择框，返回选中路径或 null */
   selectDirectory: (): Promise<string | null> =>
     ipcRenderer.invoke(PlatformChannels.SelectDirectory),

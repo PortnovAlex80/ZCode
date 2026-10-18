@@ -27,7 +27,12 @@ execFileSync(
     "--prepare-storage",
   ],
   {
-    env: { ...process.env, HOME: home, USERPROFILE: home, ZCODE_DATA_BASE_DIR: home },
+    env: {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      ZCODE_DATA_BASE_DIR: home,
+    },
     input: JSON.stringify({ method: "startup/storagePathReady", reuse: false }) + "\n",
     windowsHide: true,
     timeout: 30000,
@@ -173,10 +178,36 @@ try {
   const select = async (title) => {
     await page.getByText(title, { exact: true }).first().click();
   };
+  // Open doc now defaults to an independent whole-document surface. This fixture
+  // deliberately returns that surface so its legacy inline/discussion-only route
+  // remains covered separately from test-independent-document-windows-gui.mjs.
+  const returnWholeDocumentToOwner = async () => {
+    const deadline = Date.now() + 60000;
+    while (Date.now() < deadline) {
+      const candidates = packaged ? browser.contexts()[0].pages() : app.windows();
+      for (const candidate of candidates) {
+        if (candidate === page || candidate.isClosed()) continue;
+        const document = candidate.locator(
+          '[data-document-window][data-document-session="sess_recovery_parent"]',
+        );
+        if (!(await document.isVisible().catch(() => false))) continue;
+        candidate.setDefaultTimeout(60000);
+        candidate.on("pageerror", (error) => errors.push(error.message));
+        // The outer portal's Return precedes any nested discussion control.
+        await candidate.locator('[data-spec-popout-control="restore"]').first().click();
+        await page.locator("[data-spec-document-pane]").first().waitFor({ state: "visible" });
+        console.log("Returned whole document to exercise inline discussion recovery");
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("Independent document did not open before inline recovery check");
+  };
   await select("Recovery parent");
   console.log("GUI parent selected");
   await page.getByTestId("side-pane-toggle").click();
   await page.getByRole("button", { name: "Open doc", exact: true }).click();
+  await returnWholeDocumentToOwner();
   await page.getByLabel("Choose project document", { exact: true }).click();
   await page.locator('[data-picker-path="docs/a.md"]').click();
   await page.getByRole("button", { name: "Discussions", exact: true }).click();
@@ -196,13 +227,16 @@ try {
   if (await ownerFallback.isVisible()) await ownerFallback.click();
   await native.waitFor({ state: "visible", timeout: 60000 });
   await native.getByText("Saved response for Recovery discussion", { exact: true }).waitFor();
-  await page.screenshot({ path: resolve(".tmp/discussion-recovery-mounted.png") });
+  await page.screenshot({
+    path: resolve(".tmp/discussion-recovery-mounted.png"),
+  });
   // Closing the document exercises the durable route without an in-memory owner.
-  const tabs = await page
-    .locator("[data-side-pane-tab-id]")
-    .evaluateAll((nodes) =>
-      nodes.map((n) => ({ id: n.getAttribute("data-side-pane-tab-id"), text: n.textContent })),
-    );
+  const tabs = await page.locator("[data-side-pane-tab-id]").evaluateAll((nodes) =>
+    nodes.map((n) => ({
+      id: n.getAttribute("data-side-pane-tab-id"),
+      text: n.textContent,
+    })),
+  );
   console.log(JSON.stringify({ phase: "mounted-return", tabs, root, errors }));
   // Use the existing document header close action; no session-delete command is sent.
   await page
@@ -218,6 +252,7 @@ try {
     if (!(await reopen.isEnabled())) throw new Error("Recovery button disabled after close");
     await reopen.click();
   } else await select("Recovery discussion");
+  await returnWholeDocumentToOwner();
   await native.waitFor({ state: "visible", timeout: 60000 });
   await native.getByText("Saved response for Recovery discussion", { exact: true }).waitFor();
   if (
@@ -228,7 +263,9 @@ try {
       .then((text) => text.includes("Recovery unsent draft")))
   )
     throw new Error("Draft lost after close");
-  await page.screenshot({ path: resolve(".tmp/discussion-recovery-closed.png") });
+  await page.screenshot({
+    path: resolve(".tmp/discussion-recovery-closed.png"),
+  });
   await page.reload();
   // Skip is intentionally renderer-local; the fixture has no account/credentials.
   const welcome = page.getByTestId("login-use-api-key-button");
@@ -308,6 +345,15 @@ try {
     };
     const finishOnboarding = async () => {
       const welcome = page.getByTestId("login-use-api-key-button");
+      // Cold startup may still be initializing the Host after five seconds.
+      // Wait for an actual app route before deciding onboarding is absent.
+      await Promise.race([
+        welcome.waitFor({ state: "visible", timeout: 60000 }),
+        page
+          .getByText("Second project conversation", { exact: true })
+          .first()
+          .waitFor({ state: "visible", timeout: 60000 }),
+      ]);
       if (
         await welcome.waitFor({ state: "visible", timeout: 5000 }).then(
           () => true,
@@ -336,7 +382,10 @@ try {
       win.setBounds({ x: 180, y: 140, width: 600, height: 700 }),
     );
     await app.evaluate(({ dialog }, target) => {
-      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [target] });
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: [target],
+      });
     }, secondProject);
     await page.evaluate(() => window.zcode.executeDesktopCommand("openWorkspace"));
     await select("Second project conversation");
@@ -376,7 +425,9 @@ try {
     page.on("pageerror", (error) => errors.push(error.message));
     await finishOnboarding();
     const afterRestart = await readyDiscussion();
-    await afterRestart.screenshot({ path: resolve(".tmp/document-window-restart.png") });
+    await afterRestart.screenshot({
+      path: resolve(".tmp/document-window-restart.png"),
+    });
     if (errors.length) throw new Error("Renderer errors: " + JSON.stringify(errors));
     console.log(
       JSON.stringify({
@@ -420,7 +471,9 @@ try {
       ? "Automatic updates are disabled for this fork. Install a newer fork build manually."
       : "Updates are disabled in dev builds";
     await page.getByText(text, { exact: true }).waitFor();
-    await page.screenshot({ path: resolve(".tmp/production-update-status.png") });
+    await page.screenshot({
+      path: resolve(".tmp/production-update-status.png"),
+    });
     console.log(JSON.stringify({ updateResult, localizedToast: text }));
   }
   console.log(

@@ -1661,6 +1661,13 @@ const zhCN: Record<string, string> = {
   "conversation.window.retryConnection": "重试连接",
   "conversation.window.retryOpening": "重试打开窗口",
   "conversation.window.return": "返回主窗口",
+  "document.window.open": "显示文档窗口",
+  "document.window.attach": "贴靠到对话",
+  "document.window.detach": "取消贴靠对话",
+  "document.window.attachmentUnavailable": "请将此文档的对话在独立窗口中打开后再贴靠。",
+  "document.window.opening": "正在打开文档窗口…",
+  "document.window.detached": "此文档已在独立窗口中打开。",
+  "document.window.openError": "无法打开文档窗口。仍可在此处访问文档。",
   "update.toast.error": "检查更新失败：{error}",
   "forceUpdate.title": "需要升级 ZCode 后继续使用",
   "forceUpdate.description":

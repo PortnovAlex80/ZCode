@@ -187,6 +187,7 @@ export type ServiceChannelName = (typeof ServiceChannels)[keyof typeof ServiceCh
 
 /** Electron IPC 频道名。仅在 preload ↔ main 之间使用。 */
 export const PlatformChannels = {
+  SetConversationWindowAttachment: "zcode:set-conversation-window-attachment",
   /** renderer → main：释放插件 UI 沙箱（关闭 ports、撤 protocol handler、清 partition） */
   PluginSandboxDispose: "zcode:plugin-sandbox-dispose",
   PluginSandboxCopyImage: "zcode:plugin-sandbox-copy-image",
@@ -755,6 +756,10 @@ export const HostResponseTypes = {
 
 /** 平台频道的请求/响应类型映射 */
 export interface PlatformChannelMap {
+  [PlatformChannels.SetConversationWindowAttachment]: {
+    request: { documentFrame: string; conversationFrame: string | null; side?: "left" | "right" };
+    response: { attached: boolean };
+  };
   [PlatformChannels.SelectDirectory]: {
     request: void;
     response: string | null;

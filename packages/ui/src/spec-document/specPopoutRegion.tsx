@@ -1,5 +1,7 @@
+/* eslint-disable max-lines -- Stable portal ownership and native close/restore lifecycle share one controller. */
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -63,7 +65,8 @@ export interface SpecPopoutRegion {
  *   原布局直接参与锚点的布局上下文，与引入弹窗之前完全一致。
  * - PiP 文档内：占满弹出窗口（body margin 已清零）。
  */
-const POPOUT_HOST_PINNED_CLASS = "flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground";
+const POPOUT_HOST_PINNED_CLASS =
+  "flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground";
 const POPOUT_HOST_DOCKED_CLASS = "contents";
 
 export function useSpecPopoutRegion(options: {
@@ -90,7 +93,9 @@ export function useSpecPopoutRegion(options: {
   onPoppedChangeRef.current = options.onPoppedChange;
   const ownerClosing = useRef(false);
   useEffect(() => {
-    const markClosing = () => { ownerClosing.current = true; };
+    const markClosing = () => {
+      ownerClosing.current = true;
+    };
     window.addEventListener("beforeunload", markClosing);
     window.addEventListener("zcode:conversation-owner-closing", markClosing);
     return () => {
@@ -116,6 +121,7 @@ export function useSpecPopoutRegion(options: {
   const hostNode = hostRef.current;
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const pipRef = useRef<SpecPopoutWindow | null>(null);
+  const childUnloadWindow = useRef<Window | null>(null);
   const sizeKey = options.persistenceKey ?? specPopoutSizeKey(regionId, workspaceKey);
 
   const persistSize = useCallback(() => {
@@ -128,6 +134,12 @@ export function useSpecPopoutRegion(options: {
   }, [sizeKey]);
 
   const handleClosedRef = useRef<() => void>(() => {});
+  const handleBeforeChildUnload = useCallback(() => {
+    if (disposed.current || ownerClosing.current || !hostNode || !anchorRef.current) return;
+    // 这里只迁移 DOM；关闭确认仍由 pagehide 延迟完成，避免 owner reload 清除重开意图。
+    hostNode.className = POPOUT_HOST_DOCKED_CLASS;
+    movePresentationHost(hostNode, anchorRef.current, true);
+  }, [hostNode]);
   // A native child may hide before its opener's beforeunload. Defer only that
   // notification to the opener's next task: explicit child X remains actionable,
   // while reload/quit establishes ownerClosing or destroys the old JS context.
@@ -147,13 +159,15 @@ export function useSpecPopoutRegion(options: {
         handleClosedRef.current();
       };
       window.setTimeout(confirmClose, 0);
-    }
-    else handleClosedRef.current();
+    } else handleClosedRef.current();
   }, [nativeOpen]);
   const handleClosed = useCallback(() => {
-    const returningOpenWindow = pipRef.current !== null && !disposed.current && !ownerClosing.current;
+    const returningOpenWindow =
+      pipRef.current !== null && !disposed.current && !ownerClosing.current;
     // pagehide（OS 关闭按钮）与主动 close() 都走这里：先记尺寸再回状态。
     persistSize();
+    childUnloadWindow.current?.removeEventListener("beforeunload", handleBeforeChildUnload);
+    childUnloadWindow.current = null;
     pipRef.current?.removeEventListener("pagehide", handlePageHide);
     pipRef.current = null;
     // 原节点同步归位，避免关闭子文档时 React 效果尚未运行而丢失输入/选区。
@@ -167,7 +181,7 @@ export function useSpecPopoutRegion(options: {
       onReturnRef.current?.();
     }
     setPopped(false);
-  }, [hostNode, persistSize, sizeKey, handlePageHide]);
+  }, [hostNode, persistSize, sizeKey, handlePageHide, handleBeforeChildUnload]);
   handleClosedRef.current = handleClosed;
 
   const close = useCallback(() => {
@@ -185,6 +199,8 @@ export function useSpecPopoutRegion(options: {
   }, [handleClosed]);
 
   const open = useCallback(() => {
+    // Electron 的 closed 确认可能迟于 pagehide；显式重开不能停在已关闭的句柄。
+    if (pipRef.current?.closed === true) handleClosed();
     if (pipRef.current || openingRef.current) return;
     const availabilityNow = nativeOpen
       ? { supported: true as const }
@@ -270,6 +286,10 @@ export function useSpecPopoutRegion(options: {
           return;
         }
         pipRef.current = pip;
+        // pagehide 已晚于子文档销毁：可见 DOM 虽能搬回，但 React 委托监听会失效。
+        // 在 beforeunload 同步搬回稳定 host，保留按钮/编辑器的事件监听。
+        childUnloadWindow.current = pip.document.defaultView;
+        childUnloadWindow.current?.addEventListener("beforeunload", handleBeforeChildUnload);
         pip.addEventListener("pagehide", handlePageHide);
         adoptSpecPopoutStyles(document, pip.document);
         // 进入 PiP 文档才切换为填充布局；面板内保持 contents 透传（见常量注释）。
@@ -282,11 +302,25 @@ export function useSpecPopoutRegion(options: {
           cause instanceof Error ? cause.message : "The separate window could not be opened.",
         );
       })
-      .finally(() => { openingRef.current = false; setOpening(false); });
-  }, [handleClosed, handlePageHide, hostNode, nativeOpen, opening, options.title, options.persistenceKey, regionId, sizeKey]);
+      .finally(() => {
+        openingRef.current = false;
+        setOpening(false);
+      });
+  }, [
+    handleClosed,
+    handlePageHide,
+    handleBeforeChildUnload,
+    hostNode,
+    nativeOpen,
+    opening,
+    options.title,
+    options.persistenceKey,
+    regionId,
+    sizeKey,
+  ]);
 
   const focus = useCallback(() => {
-    if (pipRef.current) pipRef.current.focus?.();
+    if (pipRef.current && pipRef.current.closed !== true) pipRef.current.focus?.();
     else open();
   }, [open]);
   const restoredKey = useRef<string | null>(null);
@@ -301,6 +335,11 @@ export function useSpecPopoutRegion(options: {
     else open();
   }, [close, open]);
 
+  useEffect(() => {
+    const child = pipRef.current;
+    if (child && child.closed !== true) child.document.title = `ZCode — ${options.title}`;
+  }, [options.title, popped]);
+
   // 强制返回注册：共享槽位被新区域占用时，本区域无条件回位（状态保活，见上）。
   useEffect(
     () => (nativeOpen ? undefined : registerSpecPopoutForcedReturn(regionId, close)),
@@ -310,7 +349,8 @@ export function useSpecPopoutRegion(options: {
   // 未弹出时 host 必须住回主文档锚点（首次挂载与每次返回都经此恢复），并恢复
   // display:contents 透传布局——绝不把 PiP 的填充 class 留在面板布局里。
   useEffect(() => {
-    if (popped || !hostNode) return;
+    // 异步开窗已经迁移 host 时，旧 render 排队的 effect 不得把它拖回主文档。
+    if (popped || pipRef.current || !hostNode) return;
     hostNode.className = POPOUT_HOST_DOCKED_CLASS;
     const anchor = anchorRef.current;
     if (anchor && hostNode.parentElement !== anchor) anchor.appendChild(hostNode);
@@ -326,6 +366,8 @@ export function useSpecPopoutRegion(options: {
     disposed.current = false;
     return () => {
       disposed.current = true;
+      childUnloadWindow.current?.removeEventListener("beforeunload", handleBeforeChildUnload);
+      childUnloadWindow.current = null;
       if (pipRef.current) {
         const pip = pipRef.current;
         persistSize();
@@ -337,7 +379,7 @@ export function useSpecPopoutRegion(options: {
         }
       }
     };
-  }, [persistSize]);
+  }, [persistSize, handleBeforeChildUnload]);
 
   return {
     popped,
@@ -420,7 +462,7 @@ export function SpecPopoutIconButton({
       ) : region.popped ? (
         <Undo2 />
       ) : (
-        popIcon ?? <PictureInPicture2 />
+        (popIcon ?? <PictureInPicture2 />)
       )}
     </Button>
   );
@@ -469,7 +511,7 @@ function useIsServerRender(): boolean {
  * 挂载在 PiP 文档里，这里向子树声明该文档（PresentationHostDocumentContext）——
  * 会话表面（SessionPane/ConversationTimeline）的文档级可见性/visibilitychange 追平
  * 随之改读 PiP 文档：主文档最小化不冻结 PiP 里仍展示的会话，PiP 最小化则照常冻结。
- * 未弹出时不提供覆盖（值 null = 主文档），行为与集成前一致。
+ * 未弹出时继承外层文档；整篇文档已弹出时，内嵌讨论不能把菜单/可见性重置到主窗口。
  */
 export function SpecPopoutRegionPortal({
   region,
@@ -481,15 +523,17 @@ export function SpecPopoutRegionPortal({
   children: ReactNode;
 }) {
   const serverRender = useIsServerRender();
+  const inheritedDocument = useContext(PresentationHostDocumentContext);
+  const inheritedPortalHost = useContext(PortalHostContext);
   const hostDocument =
     region.popped && region.hostNode && region.hostNode.ownerDocument !== document
       ? region.hostNode.ownerDocument
-      : null;
+      : inheritedDocument;
   // 无 DOM 环境或服务器渲染：退化为原位渲染，不做 portal。
   if (!region.hostNode || serverRender) return <>{children}</>;
   return createPortal(
     <PresentationHostDocumentContext.Provider value={hostDocument}>
-      <PortalHostContext.Provider value={hostDocument?.body}>
+      <PortalHostContext.Provider value={hostDocument?.body ?? inheritedPortalHost}>
         <div className={region.popped ? "flex h-full min-h-0 w-full flex-col" : "contents"}>
           {region.popped ? <SpecPopoutHostHeader region={region} title={title} /> : null}
           <div

@@ -14,11 +14,23 @@ import { TID_APP_HEADER } from "@zcode/shared";
 import { sidePaneTerminalSessionRegistry } from "@/terminal/sidePaneTerminalSessionRegistry.js";
 import { V4ChatPane } from "@/v4/V4ChatPane.js";
 import { V4WorkspaceChatArea } from "@/v4/V4WorkspaceChatArea.js";
-import { ConversationWindows, type ConversationWindowActions } from "@/spec-document/ConversationWindowHost.js";
+import {
+  ConversationWindows,
+  type ConversationWindowActions,
+} from "@/spec-document/ConversationWindowHost.js";
 import type { ConversationWindowEntry } from "@/spec-document/conversationWindows.js";
 import { activateManagedNativeDiscussionOwner } from "@/spec-document/nativeDiscussionHandoff.js";
-import { findConversationWindow, focusConversationWindow, openConversationWindow } from "@/spec-document/conversationWindows.js";
-import { RETAINED_DOCUMENT_ACTIVATE_EVENT } from "@/spec-document/retainedDocumentWindows.js";
+import {
+  findConversationWindow,
+  focusConversationWindow,
+  openConversationWindow,
+} from "@/spec-document/conversationWindows.js";
+import {
+  RETAINED_DOCUMENT_ACTIVATE_EVENT,
+  requestIndependentDocument,
+  revealRetainedDocumentsForParent,
+} from "@/spec-document/retainedDocumentWindows.js";
+import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import {
   applySpecGeneralChatColumn,
   canCollapseSpecGeneralChat,
@@ -500,7 +512,10 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   const webRemoteControlNavigationDragRef = useRef<WebRemoteNavigationDragSession | null>(null);
   const suppressWebRemoteControlNavigationClickRef = useRef(false);
   const workspaceKey = workspaceIdentity?.trim() || workspaceAbsPath;
-  const conversationLayoutKey = JSON.stringify([workspaceKey, sidePaneOwnerId ?? activeTaskId ?? "__draft__"]);
+  const conversationLayoutKey = JSON.stringify([
+    workspaceKey,
+    sidePaneOwnerId ?? activeTaskId ?? "__draft__",
+  ]);
   const screenshotSurfaceRequest = useBrowserScreenshotSurfaceRequest(sidePaneState?.tabs ?? []);
   const screenshotSurfaceTab = screenshotSurfaceRequest
     ? findScreenshotSurfaceTabForRender(sidePaneState?.tabs ?? [], screenshotSurfaceRequest)
@@ -580,8 +595,14 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   >(null);
   useEffect(() => {
     try {
-      setGeneralChatCollapsedWorkspaceKey(localStorage.getItem(`zcode-chat-collapsed:${conversationLayoutKey}`) === "true" ? conversationLayoutKey : null);
-    } catch { setGeneralChatCollapsedWorkspaceKey(null); }
+      setGeneralChatCollapsedWorkspaceKey(
+        localStorage.getItem(`zcode-chat-collapsed:${conversationLayoutKey}`) === "true"
+          ? conversationLayoutKey
+          : null,
+      );
+    } catch {
+      setGeneralChatCollapsedWorkspaceKey(null);
+    }
   }, [conversationLayoutKey]);
   // U-01 «Документ в центре」：中心聊天与整个右侧 tabs 容器互换的呈现偏好，按
   // workspaceIdentity 持久化；切换 workspace 时在渲染期同步重读，避免旧排列闪一帧。
@@ -591,12 +612,20 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
     mode: SpecShellLayoutSwapMode;
   }>(() => ({
     key: shellLayoutSwapStorageKey,
-    mode: readSpecShellLayoutSwap(shellLayoutSwapStorageKey, undefined, specShellLayoutSwapKey(workspaceAbsPath, workspaceIdentity)),
+    mode: readSpecShellLayoutSwap(
+      shellLayoutSwapStorageKey,
+      undefined,
+      specShellLayoutSwapKey(workspaceAbsPath, workspaceIdentity),
+    ),
   }));
   if (shellLayoutSwapMemory.key !== shellLayoutSwapStorageKey) {
     setShellLayoutSwapMemory({
       key: shellLayoutSwapStorageKey,
-      mode: readSpecShellLayoutSwap(shellLayoutSwapStorageKey, undefined, specShellLayoutSwapKey(workspaceAbsPath, workspaceIdentity)),
+      mode: readSpecShellLayoutSwap(
+        shellLayoutSwapStorageKey,
+        undefined,
+        specShellLayoutSwapKey(workspaceAbsPath, workspaceIdentity),
+      ),
     });
   }
   const isDocumentCenterLayout =
@@ -737,7 +766,14 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
         sidePaneOpen: isSidePaneOpen,
         workspaceMainView,
       });
-      try { localStorage.setItem(`zcode-chat-collapsed:${conversationLayoutKey}`, String(next === conversationLayoutKey)); } catch { /* Keep the current layout usable. */ }
+      try {
+        localStorage.setItem(
+          `zcode-chat-collapsed:${conversationLayoutKey}`,
+          String(next === conversationLayoutKey),
+        );
+      } catch {
+        /* Keep the current layout usable. */
+      }
       return next;
     });
   }, [conversationLayoutKey, isSpecDocumentActive, isSidePaneOpen, workspaceMainView]);
@@ -1458,7 +1494,18 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
       targetRemoteSessionId?: string,
       expectedUnreadAt?: number,
     ) => {
-      const existingWindow = findConversationWindow({ workspacePath: targetWorkspacePath, workspaceIdentity: targetWorkspaceIdentity, remoteSessionId: targetRemoteSessionId }, taskId);
+      const existingWindow = findConversationWindow(
+        {
+          workspacePath: targetWorkspacePath,
+          workspaceIdentity: targetWorkspaceIdentity,
+          remoteSessionId: targetRemoteSessionId,
+        },
+        taskId,
+      );
+      revealRetainedDocumentsForParent(
+        { workspacePath: targetWorkspacePath, workspaceIdentity: targetWorkspaceIdentity },
+        taskId,
+      );
       if (existingWindow) {
         focusConversationWindow(existingWindow.id);
         return;
@@ -2143,48 +2190,103 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   const workspaceOnlyResetKeys = useMemo(() => [workspaceKey], [workspaceKey]);
   const windowActionHandlers = useRef<ConversationWindowActions>({});
   windowActionHandlers.current = {
-    onOpenBrowserUrl: handleOpenBrowserUrl, onOpenCodeViewer: handleOpenCodeViewer,
-    onOpenFileLink: handleOpenMarkdownFileLink, onOpenSelectionSideChat: handleOpenSelectionSideChat,
-    onOpenSubagentSession: handleOpenSubagentSession, onOpenSubagentDirectory: handleOpenSubagentDirectory,
-    onOpenBackgroundBash: handleOpenBackgroundBash, onSyncSubagentSessionTabs: handleSyncSubagentSessionTabs,
-    onOpenPlanDetail: handleOpenPlanDetail, onOpenWorkflowRun: handleOpenWorkflowRun,
-    onOpenWorkflowArtifact: handleOpenWorkflowArtifact, onOpenWorkflowRunDirectory: handleOpenWorkflowRunDirectory,
-    onOpenWorkflowActorSession: handleOpenWorkflowActorSession, onOpenWorkflowWorkspace: handleOpenWorkflowWorkspace,
-    onOpenAutomationsMain: handleOpenAutomations, onAutoOpenAssistantPptx: handleAutoOpenAssistantPptx,
+    onOpenBrowserUrl: handleOpenBrowserUrl,
+    onOpenCodeViewer: handleOpenCodeViewer,
+    onOpenFileLink: handleOpenMarkdownFileLink,
+    onOpenSelectionSideChat: handleOpenSelectionSideChat,
+    onOpenSubagentSession: handleOpenSubagentSession,
+    onOpenSubagentDirectory: handleOpenSubagentDirectory,
+    onOpenBackgroundBash: handleOpenBackgroundBash,
+    onSyncSubagentSessionTabs: handleSyncSubagentSessionTabs,
+    onOpenPlanDetail: handleOpenPlanDetail,
+    onOpenWorkflowRun: handleOpenWorkflowRun,
+    onOpenWorkflowArtifact: handleOpenWorkflowArtifact,
+    onOpenWorkflowRunDirectory: handleOpenWorkflowRunDirectory,
+    onOpenWorkflowActorSession: handleOpenWorkflowActorSession,
+    onOpenWorkflowWorkspace: handleOpenWorkflowWorkspace,
+    onOpenAutomationsMain: handleOpenAutomations,
+    onAutoOpenAssistantPptx: handleAutoOpenAssistantPptx,
   };
-  const [windowAction, setWindowAction] = useState<{ entry: ConversationWindowEntry; action: keyof ConversationWindowActions; args: unknown[] } | null>(null);
-  const routeWindowAction = useCallback((entry: ConversationWindowEntry, action: keyof ConversationWindowActions, args: unknown[]) => {
-    setWindowAction({ entry, action, args });
-  }, []);
+  const [windowAction, setWindowAction] = useState<{
+    entry: ConversationWindowEntry;
+    action: keyof ConversationWindowActions;
+    args: unknown[];
+  } | null>(null);
+  const routeWindowAction = useCallback(
+    (entry: ConversationWindowEntry, action: keyof ConversationWindowActions, args: unknown[]) => {
+      const source =
+        action === "onOpenCodeViewer" ? (args[0] as CodeViewerSource | undefined) : undefined;
+      if (!entry.scope.remoteSessionId && source?.type === "file" && source.specDocument) {
+        // 文档是独立表面；不能为了打开文件把主窗口从另一个项目切回来。
+        requestIndependentDocument({ ...entry.scope, parentSessionId: entry.sessionId, source });
+        return;
+      }
+      setWindowAction({ entry, action, args });
+    },
+    [],
+  );
   useEffect(() => {
     if (!windowAction) return;
     const target = windowAction.entry;
-    if ((target.scope.workspaceIdentity?.trim() || target.scope.workspacePath) !== workspaceKey || target.sessionId !== activeTaskId) {
-      handleSelectTask(target.scope.workspacePath, target.sessionId, target.scope.workspaceIdentity);
+    if (
+      (target.scope.workspaceIdentity?.trim() || target.scope.workspacePath) !== workspaceKey ||
+      target.sessionId !== activeTaskId
+    ) {
+      handleSelectTask(
+        target.scope.workspacePath,
+        target.sessionId,
+        target.scope.workspaceIdentity,
+      );
       return;
     }
-    const handler = windowActionHandlers.current[windowAction.action] as ((...args: unknown[]) => unknown) | undefined;
+    const handler = windowActionHandlers.current[windowAction.action] as
+      | ((...args: unknown[]) => unknown)
+      | undefined;
     handler?.(...windowAction.args);
     setWindowAction(null);
   }, [windowAction, workspaceKey, activeTaskId, handleSelectTask]);
-  const [documentActivation, setDocumentActivation] = useState<{ workspacePath: string; workspaceIdentity?: string; sessionId: string | null; tabId: string } | null>(null);
+  const [documentActivation, setDocumentActivation] = useState<{
+    workspacePath: string;
+    workspaceIdentity?: string;
+    sessionId: string | null;
+    tabId: string;
+  } | null>(null);
   useEffect(() => {
-    const activate = (event: Event) => setDocumentActivation((event as CustomEvent<NonNullable<typeof documentActivation>>).detail);
+    const activate = (event: Event) =>
+      setDocumentActivation((event as CustomEvent<NonNullable<typeof documentActivation>>).detail);
     window.addEventListener(RETAINED_DOCUMENT_ACTIVATE_EVENT, activate);
     return () => window.removeEventListener(RETAINED_DOCUMENT_ACTIVATE_EVENT, activate);
   }, []);
   useEffect(() => {
     if (!documentActivation) return;
     const target = documentActivation;
-    if ((target.workspaceIdentity?.trim() || target.workspacePath) !== workspaceKey || target.sessionId !== activeTaskId) {
-      if (target.sessionId) handleSelectTask(target.workspacePath, target.sessionId, target.workspaceIdentity);
-      else tabStoreApi.getState().activateTabByPath(target.workspacePath, target.workspaceIdentity ? { workspaceIdentity: target.workspaceIdentity } : undefined);
+    if (
+      (target.workspaceIdentity?.trim() || target.workspacePath) !== workspaceKey ||
+      target.sessionId !== activeTaskId
+    ) {
+      if (target.sessionId)
+        handleSelectTask(target.workspacePath, target.sessionId, target.workspaceIdentity);
+      else
+        tabStoreApi
+          .getState()
+          .activateTabByPath(
+            target.workspacePath,
+            target.workspaceIdentity ? { workspaceIdentity: target.workspaceIdentity } : undefined,
+          );
       return;
     }
-    if (!sidePaneState?.tabs.some(tab => tab.id === target.tabId)) return;
+    if (!sidePaneState?.tabs.some((tab) => tab.id === target.tabId)) return;
     handleActivateSidePaneTab(target.tabId);
     setDocumentActivation(null);
-  }, [documentActivation, workspaceKey, activeTaskId, sidePaneState, handleSelectTask, handleActivateSidePaneTab, tabStoreApi]);
+  }, [
+    documentActivation,
+    workspaceKey,
+    activeTaskId,
+    sidePaneState,
+    handleSelectTask,
+    handleActivateSidePaneTab,
+    tabStoreApi,
+  ]);
   const workspaceDraftResetKeys = useMemo(
     () => [workspaceKey, activeTaskId ?? "draft"],
     [workspaceKey, activeTaskId],
@@ -2439,9 +2541,18 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
       openWorkflow={handleOpenSavedWorkflowInHub}
       navigateToRun={handleNavigateToLaunchedRun}
     >
-      {isDesktop ? <ConversationWindows routeAction={routeWindowAction} onReturn={(entry) => {
-        handleSelectTask(entry.scope.workspacePath, entry.sessionId, entry.scope.workspaceIdentity);
-      }} /> : null}
+      {isDesktop ? (
+        <ConversationWindows
+          routeAction={routeWindowAction}
+          onReturn={(entry) => {
+            handleSelectTask(
+              entry.scope.workspacePath,
+              entry.sessionId,
+              entry.scope.workspaceIdentity,
+            );
+          }}
+        />
+      ) : null}
       <DesktopWindowFrame
         title={`ZCode / ${getPathLeaf(workspaceAbsPath)}`}
         showHeader
@@ -2767,17 +2878,35 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                               API 不可用时为 absent-with-reason 禁用态。 */
                         <div className="absolute right-0 top-13 z-30 flex items-center pr-1 [app-region:no-drag]">
                           <SpecPopoutIconButton
-                            region={activeTaskId && platform.openConversationPopout ? {
-                              ...chatPopout,
-                              toggle: () => {
-                                if (activateManagedNativeDiscussionOwner(workspaceAbsPath, workspaceIdentity, activeTaskId)) return;
-                                openConversationWindow({
-                                workspacePath: workspaceAbsPath,
-                                ...(workspaceIdentity ? { workspaceIdentity } : {}),
-                                ...(workspaceRemoteSessionId ? { remoteSessionId: workspaceRemoteSessionId } : {}),
-                                }, activeTaskId, `${getPathLeaf(workspaceAbsPath)} — ${activeTaskTitle || "Чат"}`, Boolean(workspaceReadOnlyReason));
-                              },
-                            } : chatPopout}
+                            region={
+                              activeTaskId && platform.openConversationPopout
+                                ? {
+                                    ...chatPopout,
+                                    toggle: () => {
+                                      if (
+                                        activateManagedNativeDiscussionOwner(
+                                          workspaceAbsPath,
+                                          workspaceIdentity,
+                                          activeTaskId,
+                                        )
+                                      )
+                                        return;
+                                      openConversationWindow(
+                                        {
+                                          workspacePath: workspaceAbsPath,
+                                          ...(workspaceIdentity ? { workspaceIdentity } : {}),
+                                          ...(workspaceRemoteSessionId
+                                            ? { remoteSessionId: workspaceRemoteSessionId }
+                                            : {}),
+                                        },
+                                        activeTaskId,
+                                        `${getPathLeaf(workspaceAbsPath)} — ${activeTaskTitle || "Чат"}`,
+                                        Boolean(workspaceReadOnlyReason),
+                                      );
+                                    },
+                                  }
+                                : chatPopout
+                            }
                             popLabel="Вынести чат в окно"
                             restoreLabel="Вернуть чат"
                           />

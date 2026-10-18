@@ -44,6 +44,7 @@ export function acquireDiscussionWriter(
         },
       )
       .catch(() => {
+        if (owners.get(workspaceKey) === token) owners.delete(workspaceKey);
         if (!disposed) changed("error");
       });
   return () => {
@@ -75,12 +76,19 @@ export function retainDiscussionWriter(
   current.listeners.add(changed);
   changed(current.phase);
   const acquire = () => {
+    clearTimeout(current.retry);
+    current.retry = undefined;
     current.release?.();
     current.release = acquireDiscussionWriter(workspaceKey, locks, (phase) => {
       if (leases.get(workspaceKey) !== current) return;
       current.phase = phase;
       for (const listener of current.listeners) listener(phase);
-      if (phase === "busy") current.retry = setTimeout(acquire, 1000);
+      // Electron 开窗可能使尚未调度的 Web Locks callback 失效；新 callback 可正常获锁。
+      // 仍必须重新获得 exclusive lock，不能把临时错误永久变成只读或跳过仲裁。
+      if (phase === "busy" || phase === "error")
+        current.retry = setTimeout(() => {
+          if (leases.get(workspaceKey) === current && current.listeners.size) acquire();
+        }, 1000);
     });
   };
   if (!current.release) acquire();

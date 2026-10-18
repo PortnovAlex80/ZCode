@@ -1,5 +1,6 @@
 import type { BrowserWindow, WindowOpenHandlerResponse } from "electron";
 import { join } from "node:path";
+import { NativeWindowAttachments } from "./nativeWindowAttachment.js";
 import {
   attachConversationGeometry,
   isConversationFrameName,
@@ -11,6 +12,17 @@ const children = new Set<number>();
 const captures = new Set<() => void>();
 const attachments = new Set<Promise<void>>();
 const owners = new Set<BrowserWindow>();
+const attachmentOwners = new Map<number, NativeWindowAttachments>();
+
+/** Only trusted owner shells can address their own controlled blank children. */
+export function setNativeWindowAttachment(senderId: number, payload: unknown): { attached: boolean } {
+  if (!payload || typeof payload !== "object") return { attached: false };
+  const { documentFrame, conversationFrame, side } = payload as Record<string, unknown>;
+  if (!isConversationFrameName(documentFrame)
+    || conversationFrame !== null && !isConversationFrameName(conversationFrame)
+    || side !== undefined && side !== "left" && side !== "right") return { attached: false };
+  return { attached: attachmentOwners.get(senderId)?.set(documentFrame, conversationFrame as string | null, side as "left" | "right" | undefined) ?? false };
+}
 let geometryRuntime: Promise<ConversationGeometryRuntime> | undefined;
 
 export interface ConversationGeometryRuntime {
@@ -101,6 +113,11 @@ export function installNativeConversationPopouts(
   geometry?: ConversationGeometryRuntime,
 ): void {
   owners.add(owner);
+  // closed 回调中 BrowserWindow/webContents 已销毁，必须提前保存 owner 身份。
+  const ownerWebContentsId = owner.webContents.id;
+  let nativeDisplays = geometry?.getDisplays;
+  const groups = new NativeWindowAttachments(() => nativeDisplays?.() ?? []);
+  attachmentOwners.set(ownerWebContentsId, groups);
   const owned = new Set<BrowserWindow>();
   let hiddenForChildren = false;
   owner.webContents.setWindowOpenHandler(conversationPopoutOpenPolicy);
@@ -109,6 +126,7 @@ export function installNativeConversationPopouts(
     children.add(child.id);
     owned.add(child);
     child.setMenu(null);
+    if (typeof child.getBounds === "function") groups.register(details.frameName, child, false);
     child.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     // 修复根因：可迁移 UI 仅允许同源空白文档，禁止子窗口导航变成任意网站。
     child.webContents.on("will-navigate", (event) => event.preventDefault());
@@ -116,6 +134,7 @@ export function installNativeConversationPopouts(
     if (typeof child.getNormalBounds === "function") {
       const attachment = (async () => {
         const runtime = geometry ?? (await getGeometryRuntime());
+        nativeDisplays = runtime.getDisplays;
         await runtime.store.ready;
         if (child.isDestroyed()) return;
         const capture = attachConversationGeometry(
@@ -125,6 +144,7 @@ export function installNativeConversationPopouts(
           runtime.getDisplays,
         );
         captures.add(capture);
+        groups.ready(details.frameName);
         child.on("closed", () => captures.delete(capture));
       })().catch(() => undefined);
       attachments.add(attachment);
@@ -153,6 +173,7 @@ export function installNativeConversationPopouts(
     }
   });
   owner.on("closed", () => {
+    attachmentOwners.delete(ownerWebContentsId);
     owners.delete(owner);
     for (const child of owned) if (!child.isDestroyed()) child.destroy();
     owned.clear();

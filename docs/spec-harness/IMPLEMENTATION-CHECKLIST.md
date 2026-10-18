@@ -33,6 +33,48 @@ recheck those items before restoring their accepted status.
 
 ## Exclusive write assignments
 
+### Independent document windows — 2026-10-18
+
+User chose standalone document windows with optional attachment to a detached
+conversation. Contract: [Independent document windows](INDEPENDENT-DOCUMENT-WINDOWS.md),
+[ADR 005](../architecture/decisions/005-independent-document-windows.md).
+Root owns shell routing, locale keys, contracts and integration. Document worker
+owns stable whole-document surface/retained descriptors/side-pane integration;
+native worker owns validated attachment bridge and geometry controller; GUI
+worker owns the new isolated independent-document scenario. Shared checkout,
+exclusive paths, no worker commits or extra branches/worktrees.
+
+Implementation/source acceptance verified 2026-10-18:
+
+- Independent Open doc picker/editor keeps its original workspace/session while
+  the main shell switches projects. Existing windows are revealed without duplicate
+  composers. Attach/Detach links movement in either direction; close/Return leaves
+  the partner available and returns the latest file/draft to its owner tab.
+- Main-process destroyed-owner cleanup, stale native handles and React event
+  delegation after native X are covered by regressions. The stable host moves
+  before child document teardown; confirmed close and owner reload remain distinct.
+  Transient Web Locks callback failures retry exclusive admission without allowing
+  writes before ownership. Nested portals inherit their presentation document.
+- Focused batch: 9 files / 65 tests passed. Canonical `pnpm typecheck` passed;
+  `pnpm lint` passed with 63 existing warnings and zero errors; changed architecture
+  check passed with zero violations within configured coverage. An additional
+  direct desktop `tsc -b` invocation is not an accepted gate: it reported existing
+  project/ambient-type diagnostics, including missing Window.zcode context.
+- `scripts/test-independent-document-windows-gui.mjs` passed three chats across
+  two projects, background file switch a.md to b.md, preserved unsaved document
+  draft, duplicate suppression, linked movement, detach, reload, cold restart,
+  independent native X, usable inline Return and explicit native reopen.
+- `scripts/test-discussion-recovery-gui.mjs --persistent-windows` passed mounted
+  and closed-owner recovery plus inactive-project renderer reload/full restart;
+  original child, unsent draft and bounds (180,140,600,700) survived. Cold startup
+  now waits for an app/login route before deciding fixture onboarding is absent.
+- Context-ring HoverCard now uses the presentation portal host. Two real Radix
+  DOM tests cover secondary-document and normal-body ownership. The isolated GUI
+  fixture has no rendered usage ring; physical mixed-DPI popup placement remains
+  unverified. No paid prompts, user-profile changes or document writes in GUI tests.
+
+Production package and shortcut delivery pending after the source commit.
+
 ### Persistent conversation windows — 2026-10-18
 
 User authorized concurrent conversations from the same/different projects, saved

@@ -1778,7 +1778,8 @@ const enUS: Record<string, string> = {
   "update.toast.downloading": "Downloading new version v{version}",
   "update.toast.alreadyDownloading": "Downloading new version ({progress}%)",
   "update.toast.ready": "v{version} downloaded, restart to install",
-  "update.toast.updatesDisabled": "Automatic updates are disabled for this fork. Install a newer fork build manually.",
+  "update.toast.updatesDisabled":
+    "Automatic updates are disabled for this fork. Install a newer fork build manually.",
   "update.toast.devSkipped": "Updates are disabled in dev builds",
   "conversation.window.detached": "This conversation is open in a separate window.",
   "conversation.window.show": "Show conversation window",
@@ -1788,6 +1789,15 @@ const enUS: Record<string, string> = {
   "conversation.window.retryConnection": "Retry connection",
   "conversation.window.retryOpening": "Retry opening window",
   "conversation.window.return": "Return to main window",
+  "document.window.open": "Show document window",
+  "document.window.attach": "Attach to conversation",
+  "document.window.detach": "Detach from conversation",
+  "document.window.attachmentUnavailable":
+    "Open this document’s conversation in a separate window to attach it.",
+  "document.window.opening": "Opening document window…",
+  "document.window.detached": "This document is open in a separate window.",
+  "document.window.openError":
+    "Could not open the document window. Your document remains available here.",
   "update.toast.error": "Update check failed: {error}",
   "forceUpdate.title": "Update ZCode to continue",
   "forceUpdate.description":

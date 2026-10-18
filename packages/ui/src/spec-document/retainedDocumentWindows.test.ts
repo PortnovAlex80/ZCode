@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, expect, it } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import {
   activateRetainedDocument,
   readRetainedDocumentWindows,
@@ -7,6 +7,13 @@ import {
   RETAINED_DOCUMENT_ACTIVATE_EVENT,
   writeRetainedDocumentWindows,
   type RetainedDocumentWindow,
+  documentSurfacePlacementKey,
+  initializeDocumentSurfaceIntent,
+  registerRetainedDocumentFocus,
+  focusRetainedDocument,
+  revealRetainedDocumentsForParent,
+  requestIndependentDocument,
+  INDEPENDENT_DOCUMENT_OPEN_EVENT,
 } from "./retainedDocumentWindows.js";
 import {
   defaultDocumentPresentation,
@@ -23,7 +30,11 @@ import {
   readTaskSidePaneMemoryState,
   saveTaskSidePaneMemoryState,
 } from "../lib/taskSidePaneMemory.js";
-function owner(project: string, session: string, tabId = "doc-a"): RetainedDocumentWindow {
+function owner(
+  project: string,
+  session: string,
+  tabId = "doc-a",
+): RetainedDocumentWindow {
   return {
     workspacePath: project,
     parentSessionId: session,
@@ -87,7 +98,8 @@ it("rejects malformed and remote document window records", () => {
 });
 it("Return addresses the source project, parent conversation and exact tab", () => {
   const observed: unknown[] = [];
-  const listener = (event: Event) => observed.push((event as CustomEvent).detail);
+  const listener = (event: Event) =>
+    observed.push((event as CustomEvent).detail);
   window.addEventListener(RETAINED_DOCUMENT_ACTIVATE_EVENT, listener);
   try {
     activateRetainedDocument(owner("D:/a", "parent-a"));
@@ -95,8 +107,83 @@ it("Return addresses the source project, parent conversation and exact tab", () 
     window.removeEventListener(RETAINED_DOCUMENT_ACTIVATE_EVENT, listener);
   }
   expect(observed).toEqual([
-    { workspacePath: "D:/a", sessionId: "parent-a", tabId: "doc-a", workspaceIdentity: undefined },
+    {
+      workspacePath: "D:/a",
+      sessionId: "parent-a",
+      tabId: "doc-a",
+      workspaceIdentity: undefined,
+      tab: owner("D:/a", "parent-a").tab,
+    },
   ]);
+});
+it("seeds first document open while respecting explicit close across remount", () => {
+  const entry = owner("D:/a", "a");
+  const key = documentSurfacePlacementKey(entry);
+  expect(key).not.toBe(retainedDocumentPlacementKey(entry));
+  initializeDocumentSurfaceIntent(key);
+  expect(localStorage.getItem(`zcode-popout-open:v1:${key}`)).toBe("true");
+  localStorage.setItem(`zcode-popout-open:v1:${key}`, "false");
+  initializeDocumentSurfaceIntent(key);
+  expect(localStorage.getItem(`zcode-popout-open:v1:${key}`)).toBe("false");
+});
+it("reveals only already open document surfaces for the exact parent", () => {
+  const first = vi.fn(),
+    second = vi.fn(),
+    otherProject = vi.fn();
+  const cleanup = [
+    registerRetainedDocumentFocus(owner("D:/a", "parent", "a"), first, true),
+    registerRetainedDocumentFocus(owner("D:/a", "parent", "b"), second, false),
+    registerRetainedDocumentFocus(
+      owner("D:/b", "parent", "c"),
+      otherProject,
+      true,
+    ),
+  ];
+  try {
+    expect(
+      revealRetainedDocumentsForParent({ workspacePath: "D:\\a\\" }, "parent"),
+    ).toBe(true);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
+    expect(otherProject).not.toHaveBeenCalled();
+    expect(focusRetainedDocument("b")).toBe(true);
+    expect(second).toHaveBeenCalledTimes(1);
+  } finally {
+    cleanup.forEach((dispose) => dispose());
+  }
+  expect(focusRetainedDocument("a")).toBe(false);
+});
+it("round trips optional attachment intent and rejects malformed side", () => {
+  const entry = {
+    ...owner("D:/a", "parent"),
+    attachmentSide: "right" as const,
+  };
+  writeRetainedDocumentWindows([entry]);
+  expect(readRetainedDocumentWindows()).toEqual([entry]);
+  localStorage.setItem(
+    "spec-harness:open-document-windows:v1",
+    JSON.stringify({
+      version: 1,
+      windows: [{ ...entry, attachmentSide: "diagonal" }],
+    }),
+  );
+  expect(readRetainedDocumentWindows()).toEqual([]);
+});
+it("independent open carries original scope and parent without selecting the main shell", () => {
+  const request = {
+    workspacePath: "D:/a",
+    parentSessionId: "parent",
+    source: owner("D:/a", "parent").tab.source,
+  };
+  const observed = vi.fn();
+  const listener = (event: Event) => observed((event as CustomEvent).detail);
+  window.addEventListener(INDEPENDENT_DOCUMENT_OPEN_EVENT, listener);
+  try {
+    requestIndependentDocument(request);
+  } finally {
+    window.removeEventListener(INDEPENDENT_DOCUMENT_OPEN_EVENT, listener);
+  }
+  expect(observed).toHaveBeenCalledWith(request);
 });
 it("isolates document view state while retaining legacy project/file drafts", () => {
   const projectKey = documentPresentationKey("D:/a");
@@ -107,7 +194,9 @@ it("isolates document view state while retaining legacy project/file drafts", ()
   });
   const keyA = projectKey + ":pane:a",
     keyB = projectKey + ":pane:b";
-  expect(readDocumentPresentation(keyA, undefined, projectKey).scrollTop).toBe(42);
+  expect(readDocumentPresentation(keyA, undefined, projectKey).scrollTop).toBe(
+    42,
+  );
   writeDocumentPresentation(keyA, {
     ...defaultDocumentPresentation(),
     path: "docs/a.md",
@@ -118,7 +207,10 @@ it("isolates document view state while retaining legacy project/file drafts", ()
     path: "docs/b.md",
     scrollTop: 456,
   });
-  writeDocumentDraft(projectKey, "docs/a.md", { content: "unsaved", baseSha256: "original" });
+  writeDocumentDraft(projectKey, "docs/a.md", {
+    content: "unsaved",
+    baseSha256: "original",
+  });
   expect(readDocumentPresentation(keyA).scrollTop).toBe(123);
   expect(readDocumentPresentation(keyB).scrollTop).toBe(456);
   expect(readDocumentDraft(projectKey, "docs/a.md")).toEqual({
@@ -134,7 +226,9 @@ it("cold start restores per-conversation side-pane selection and collapse prefer
     isSidePaneCollapsed: true,
     sidePaneCollapsedByOwner: { "parent-a": true, "parent-b": false },
   });
-  saveTaskSidePaneMemoryState("D:/a", { sidePaneState: { tabs: [a, b], activeTabId: b.id } });
+  saveTaskSidePaneMemoryState("D:/a", {
+    sidePaneState: { tabs: [a, b], activeTabId: b.id },
+  });
   clearTaskSidePaneMemoryStateForTest();
   const restored = readTaskSidePaneMemoryState("D:/a");
   expect(getSidePaneActiveTabPreference(restored, "parent-a")).toBe(a.id);

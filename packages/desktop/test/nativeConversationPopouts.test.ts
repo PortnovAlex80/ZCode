@@ -8,6 +8,7 @@ import {
   installNativeConversationPopouts,
   isNativeConversationPopout,
   markNativeConversationOwnersClosing,
+  setNativeWindowAttachment,
 } from "../src/main/nativeConversationPopouts.js";
 import { NativeConversationGeometryStore } from "../src/main/nativeConversationGeometry.js";
 
@@ -28,6 +29,34 @@ function fakeWindow(id: number) {
 }
 
 describe("native conversation placement", () => {
+  it("cleans up an owner after its native webContents accessor is destroyed", () => {
+    const owner = fakeWindow(780);
+    Object.assign(owner.webContents, { id: 780 });
+    installNativeConversationPopouts(owner as never, () => true);
+    Object.defineProperty(owner, "webContents", {
+      get() { throw new TypeError("Object has been destroyed"); },
+    });
+    expect(() => owner.emit("closed")).not.toThrow();
+  });
+  it("rejects attachment from other owners and invalid native targets", () => {
+    const owner = fakeWindow(770);
+    Object.assign(owner.webContents, { id: 770 });
+    installNativeConversationPopouts(owner as never, () => false);
+    const child = Object.assign(fakeWindow(771), {
+      getBounds: () => ({ x: 100, y: 100, width: 400, height: 600 }),
+      setBounds: vi.fn(), isMaximized: () => false, isMinimized: () => false, isFullScreen: () => false,
+    });
+    owner.webContents.emit("did-create-window", child, { frameName: "zcode-conversation-doc" });
+    const request = { documentFrame: "zcode-conversation-doc", conversationFrame: "zcode-conversation-chat" };
+    expect(setNativeWindowAttachment(770, request)).toEqual({ attached: true });
+    expect(setNativeWindowAttachment(999, request)).toEqual({ attached: false });
+    expect(setNativeWindowAttachment(770, { ...request, documentFrame: "zcode-conversation-other" })).toEqual({ attached: false });
+    expect(setNativeWindowAttachment(770, { ...request, conversationFrame: "arbitrary-id" })).toEqual({ attached: false });
+    expect(setNativeWindowAttachment(770, { ...request, side: "top" })).toEqual({ attached: false });
+    expect(setNativeWindowAttachment(770, null)).toEqual({ attached: false });
+    owner.emit("closed");
+    expect(setNativeWindowAttachment(770, request)).toEqual({ attached: false });
+  });
   it("acknowledges owner shutdown before flushing durable reopen storage", async () => {
     const owner = fakeWindow(900);
     let acknowledge!: (value: boolean) => void;

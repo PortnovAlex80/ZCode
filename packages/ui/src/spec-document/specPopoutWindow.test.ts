@@ -12,8 +12,10 @@
  *   availability 必须按不可用处理（#39633）；requestWindow 同步 throw 不卡死 opening；
  *   resolve 出 0×0 假窗口时内容留在原面板并给出可见错误。
  */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createElement, useState } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createElement, useContext, useState } from "react";
+import { PortalHostContext } from "@/components/ui/portal-host.js";
+import { PresentationHostDocumentContext } from "@/v4/usePresentationVisibility.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IPlatformService } from "@zcode/shared";
 import { PlatformProvider } from "@/hooks/usePlatform.js";
@@ -183,20 +185,156 @@ function RegionHost({
 }
 
 describe("U-06/U-07 spec popout controller (mocked documentPictureInPicture)", () => {
+  it("returns the live host before child unload and keeps its open button functional", async () => {
+    const frames: HTMLIFrameElement[] = [];
+    let region: SpecPopoutRegion | undefined;
+    const platform = {
+      openConversationPopout: async () => {
+        const frame = document.createElement("iframe");
+        document.body.appendChild(frame);
+        frames.push(frame);
+        const child = frame.contentWindow!;
+        child.close = () => {
+          frame.remove();
+        };
+        return child;
+      },
+    } as unknown as IPlatformService;
+    render(
+      createElement(PlatformProvider, {
+        platform,
+        children: createElement(RegionHost, {
+          regionId: "native-before-unload",
+          workspaceKey: "/a",
+          title: "document",
+          label: "editor",
+          popLabel: "Open native",
+          onRegion: (value) => {
+            region = value;
+          },
+        }),
+      }),
+    );
+    fireEvent.click(screen.getByLabelText("Open native"));
+    await waitFor(() => expect(region!.popped).toBe(true));
+    const host = region!.hostNode!;
+    const firstChild = frames[0]!.contentWindow!;
+    let closed = false;
+    Object.defineProperty(firstChild, "closed", { get: () => closed });
+    await act(async () => {
+      frames[0]!.contentWindow!.dispatchEvent(new Event("beforeunload"));
+    });
+    expect(host.ownerDocument).toBe(document);
+    expect(region!.popped).toBe(true);
+    closed = true;
+    firstChild.dispatchEvent(new Event("pagehide"));
+    await waitFor(() => expect(region!.popped).toBe(false));
+    frames[0]!.remove();
+    fireEvent.click(screen.getByLabelText("Open native"));
+    await waitFor(() => expect(frames).toHaveLength(2));
+    expect(region!.hostNode).toBe(host);
+    expect(host.ownerDocument).toBe(frames[1]!.contentDocument);
+  });
+  it("an inline discussion inherits its surrounding native document for menus and visibility", () => {
+    const inherited = document.implementation.createHTMLDocument("outer document window");
+    let observedDocument: Document | null = null;
+    let observedPortal: HTMLElement | undefined;
+    function Probe() {
+      observedDocument = useContext(PresentationHostDocumentContext);
+      observedPortal = useContext(PortalHostContext);
+      return null;
+    }
+    function InlineDiscussion() {
+      const region = useSpecPopoutRegion({
+        regionId: "nested",
+        workspaceKey: "/a",
+        title: "discussion",
+      });
+      return createElement(
+        "div",
+        { ref: region.anchorRef },
+        createElement(SpecPopoutRegionPortal, {
+          region,
+          title: "discussion",
+          children: createElement(Probe),
+        }),
+      );
+    }
+    render(
+      createElement(PresentationHostDocumentContext.Provider, {
+        value: inherited,
+        children: createElement(PortalHostContext.Provider, {
+          value: inherited.body,
+          children: createElement(InlineDiscussion),
+        }),
+      }),
+    );
+    expect(observedDocument).toBe(inherited);
+    expect(observedPortal).toBe(inherited.body);
+  });
+  it("explicit reveal replaces a closed native handle before delayed pagehide arrives", async () => {
+    const fake = installFakePiP();
+    let region: SpecPopoutRegion | undefined;
+    const platform = {
+      openConversationPopout: async () => (window as any).documentPictureInPicture.requestWindow(),
+    } as unknown as IPlatformService;
+    render(
+      createElement(PlatformProvider, {
+        platform,
+        children: createElement(RegionHost, {
+          regionId: "native-reopen",
+          workspaceKey: "/a",
+          title: "native",
+          label: "retained editor",
+          popLabel: "Open native",
+          persistenceKey: "native-reopen",
+          onRegion: (value) => {
+            region = value;
+          },
+        }),
+      }),
+    );
+    fireEvent.click(screen.getByLabelText("Open native"));
+    await waitFor(() => expect(region?.popped).toBe(true));
+    const host = region!.hostNode!;
+    Object.defineProperty(fake.windows[0]!, "closed", { value: true });
+    await act(async () => {
+      region!.focus();
+    });
+    await waitFor(() => expect(fake.windows).toHaveLength(2));
+    expect(region!.hostNode).toBe(host);
+    expect(host.ownerDocument).toBe(fake.windows[1]!.document);
+    expect(readPopoutOpenIntent("native-reopen")).toBe(true);
+  });
   it("preserves native reopen intent when child pagehide precedes owner unload", async () => {
     const fake = installFakePiP();
     const onReturn = vi.fn();
     let region: SpecPopoutRegion | undefined;
-    const platform = { openConversationPopout: async () => (window as any).documentPictureInPicture.requestWindow() } as unknown as IPlatformService;
-    render(createElement(PlatformProvider, { platform, children: createElement(RegionHost, {
-      regionId: "native-reload", workspaceKey: "/a", title: "native", label: "native content",
-      popLabel: "Open native", persistenceKey: "native-reload", onReturn, onRegion: value => { region = value; },
-    }) }));
+    const platform = {
+      openConversationPopout: async () => (window as any).documentPictureInPicture.requestWindow(),
+    } as unknown as IPlatformService;
+    render(
+      createElement(PlatformProvider, {
+        platform,
+        children: createElement(RegionHost, {
+          regionId: "native-reload",
+          workspaceKey: "/a",
+          title: "native",
+          label: "native content",
+          popLabel: "Open native",
+          persistenceKey: "native-reload",
+          onReturn,
+          onRegion: (value) => {
+            region = value;
+          },
+        }),
+      }),
+    );
     fireEvent.click(screen.getByLabelText("Open native"));
     await waitFor(() => expect(region?.popped).toBe(true));
     fake.windows[0]!.close();
     window.dispatchEvent(new Event("beforeunload"));
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(onReturn).not.toHaveBeenCalled();
     expect(readPopoutOpenIntent("native-reload")).toBe(true);
   });
@@ -204,17 +342,32 @@ describe("U-06/U-07 spec popout controller (mocked documentPictureInPicture)", (
     const fake = installFakePiP();
     const onReturn = vi.fn();
     let region: SpecPopoutRegion | undefined;
-    const platform = { openConversationPopout: async () => (window as any).documentPictureInPicture.requestWindow() } as unknown as IPlatformService;
-    render(createElement(PlatformProvider, { platform, children: createElement(RegionHost, {
-      regionId: "native-close", workspaceKey: "/a", title: "native", label: "native content",
-      popLabel: "Open native", persistenceKey: "native-close", onReturn, onRegion: value => { region = value; },
-    }) }));
+    const platform = {
+      openConversationPopout: async () => (window as any).documentPictureInPicture.requestWindow(),
+    } as unknown as IPlatformService;
+    render(
+      createElement(PlatformProvider, {
+        platform,
+        children: createElement(RegionHost, {
+          regionId: "native-close",
+          workspaceKey: "/a",
+          title: "native",
+          label: "native content",
+          popLabel: "Open native",
+          persistenceKey: "native-close",
+          onReturn,
+          onRegion: (value) => {
+            region = value;
+          },
+        }),
+      }),
+    );
     fireEvent.click(screen.getByLabelText("Open native"));
     await waitFor(() => expect(region?.popped).toBe(true));
     let closed = false;
     Object.defineProperty(fake.windows[0]!, "closed", { get: () => closed });
     fake.windows[0]!.close();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(onReturn).not.toHaveBeenCalled();
     closed = true;
     await waitFor(() => expect(onReturn).toHaveBeenCalledOnce());

@@ -653,6 +653,12 @@ export type CuaOsSupport =
  * 业务服务（文件、终端、凭据等）走 IServiceAccessor 的 RPC 通道。
  */
 export interface IPlatformService {
+  /** Attach two independent native surfaces; IDs match openConversationPopout identities. */
+  setConversationWindowAttachment?(options: {
+    documentId: string;
+    conversationId: string | null;
+    side?: "left" | "right";
+  }): Promise<{ attached: boolean }>;
   /** Native same-origin presentation window. Existing renderer/Host retain all state. */
   openConversationPopout?(options: {
     id: string;
