@@ -1,6 +1,7 @@
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 import {
   INITIAL_PANE_LAYOUT,
   V4_PRIMARY_PANE_ID,
@@ -147,13 +148,18 @@ function renderWorkspace(
   const root = createRoot(installMinimalDom());
   mountedRoots.push(root);
   act(() => {
+    // 上游 3.16.2 的 WorkbenchLeafPane（SpecManagedSessionGuard）调用 useZCodeIntl。
     root.render(
-      createElement(V4WorkspaceChatArea, {
-        sessionId,
-        workspacePath: "/workspace",
-        onPaneActiveSessionChange,
-        ...overrides,
-      }),
+      createElement(
+        ZCodeIntlProvider,
+        { initialLocale: "en-US" },
+        createElement(V4WorkspaceChatArea, {
+          sessionId,
+          workspacePath: "/workspace",
+          onPaneActiveSessionChange,
+          ...overrides,
+        }),
+      ),
     );
   });
   return root;
@@ -167,12 +173,16 @@ function rerenderWorkspace(
 ): void {
   act(() => {
     root.render(
-      createElement(V4WorkspaceChatArea, {
-        sessionId,
-        workspacePath: "/workspace",
-        onPaneActiveSessionChange,
-        ...overrides,
-      }),
+      createElement(
+        ZCodeIntlProvider,
+        { initialLocale: "en-US" },
+        createElement(V4WorkspaceChatArea, {
+          sessionId,
+          workspacePath: "/workspace",
+          onPaneActiveSessionChange,
+          ...overrides,
+        }),
+      ),
     );
   });
 }
@@ -217,9 +227,7 @@ function capturedPaneIds(): unknown[] {
 }
 
 function expectTwoRenderedPanes(): void {
-  expect(capturedPaneIds()).toEqual(
-    expect.arrayContaining([V4_PRIMARY_PANE_ID, "pane-1"]),
-  );
+  expect(capturedPaneIds()).toEqual(expect.arrayContaining([V4_PRIMARY_PANE_ID, "pane-1"]));
 }
 
 function sessionPaneProps(paneId: string): Record<string, unknown> {
@@ -239,10 +247,7 @@ describe("V4WorkspaceChatArea split draft session creation", () => {
     usePaneLayoutStore
       .getState()
       .splitPane(V4_PRIMARY_PANE_ID, "row", { workspacePath: "/workspace" });
-    expect(leafPaneIds(usePaneLayoutStore.getState().root)).toEqual([
-      V4_PRIMARY_PANE_ID,
-      "pane-1",
-    ]);
+    expect(leafPaneIds(usePaneLayoutStore.getState().root)).toEqual([V4_PRIMARY_PANE_ID, "pane-1"]);
 
     const root = renderWorkspace("main-session", onPaneActiveSessionChange);
     expectTwoRenderedPanes();
@@ -388,8 +393,8 @@ describe("V4WorkspaceChatArea split draft session creation", () => {
 
     const primary = sessionPaneProps(V4_PRIMARY_PANE_ID);
     expect(primary.sessionId).toBe("main-session");
-    expect(primary.onSplitRight).toBeUndefined();
-    expect(primary.onSplitDown).toBeUndefined();
+    expect("onSplitRight" in primary).toBe(false);
+    expect("onSplitDown" in primary).toBe(false);
     expect(capturedPaneIds()).toEqual([V4_PRIMARY_PANE_ID]);
   });
 

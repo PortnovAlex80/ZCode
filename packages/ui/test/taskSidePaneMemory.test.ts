@@ -83,6 +83,7 @@ describe("taskSidePaneMemory", () => {
       isSidePaneCollapsed: false,
       sidePaneCollapsedByOwner: {},
       sidePaneActiveTabByOwner: { __draft__: "git" },
+      sidePaneFullViewByOwner: {},
       activeGitSourceId: "last-turn",
       browserUrls: {
         "browser:a": "https://example.com/a",

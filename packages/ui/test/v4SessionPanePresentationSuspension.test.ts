@@ -265,6 +265,14 @@ const servicesMock = vi.hoisted(() => ({
   },
   // usePublishNativeExecutionSource 的发布裁决要求 specDocumentService 存在。
   specDocumentService: {},
+  // 上游 3.16.2 的 recent-submission 流程会解析会话项目归属；补齐 projectService。
+  projectService: {
+    resolveSessionDirectories: vi.fn(async (task: { taskId?: string }) => ({
+      ...task,
+      projectId: null,
+      additionalDirectories: [],
+    })),
+  },
 }));
 
 vi.mock("@/components/ui/toast.js", () => ({ toast: vi.fn() }));
@@ -306,6 +314,8 @@ vi.mock("@/hooks/useSettingService.js", () => ({
 vi.mock("@/hooks/useServices.js", () => ({
   useOptionalServices: () => null,
   useServices: () => servicesMock,
+  // 上游 3.16.2 新增的 composer namespace hook；本测试不覆盖该路径。
+  useComposerClientNamespace: () => undefined,
 }));
 vi.mock("@/hooks/useModelSelectionView.js", () => ({
   useModelSelectionServiceView: () => ({
@@ -783,8 +793,9 @@ describe("SessionPane presentation suspension (Wave A)", () => {
     expect(hiddenScanCapture.shareRenderUnitsBuilds).toBe(shareBuildsAfterVisible);
 
     // --- 分享激活：可见时建立分享选择，随后隐藏继续流式。 ---
+    // 上游 3.16.2 移除了 setScope；激活分享选择改为 openShare（draft.open = true）。
     act(() => {
-      useConversationShareSelectionStore.getState().setScope("session-1", "partial");
+      useConversationShareSelectionStore.getState().openShare("session-1");
     });
     renderPane(root, { sessionId: "session-1" });
     const shareBuildsAfterActivation = hiddenScanCapture.shareRenderUnitsBuilds;
@@ -805,12 +816,10 @@ describe("SessionPane presentation suspension (Wave A)", () => {
     expect(hiddenScanCapture.shareRenderUnitsBuilds).toBe(shareBuildsAfterActivation + 1);
     expect(syncSpy.mock.calls.length).toBe(syncCallsAfterActivation);
 
-    // 恢复展示：share 派生按最新窗口重建一次，同步恢复；选择状态未丢（scope 仍为 partial）。
+    // 恢复展示：share 派生按最新窗口重建一次，同步恢复；选择状态未丢（草稿仍处于激活）。
     renderPane(root, { sessionId: "session-1" });
     expect(hiddenScanCapture.shareRenderUnitsBuilds).toBeGreaterThan(shareBuildsAfterActivation);
-    expect(useConversationShareSelectionStore.getState().drafts["session-1"]?.scope).toBe(
-      "partial",
-    );
+    expect(useConversationShareSelectionStore.getState().drafts["session-1"]?.open).toBe(true);
     syncSpy.mockRestore();
   });
 });

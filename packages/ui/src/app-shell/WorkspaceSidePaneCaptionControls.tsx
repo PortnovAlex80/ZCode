@@ -1,5 +1,6 @@
 import { ArrowLeftRight } from "lucide-react";
 import { DesktopWindowControls } from "@/DesktopWindowControls.js";
+import { SidePaneFullViewToggleButton } from "@/side-pane-full-view/index.js";
 import { WorkspaceSidePaneToggleButton } from "@/WorkspaceSidePaneToggleButton.js";
 import { Button } from "@/components/ui/button.js";
 import type { WorkspaceBodyRoleTogglePresentation } from "@/spec-document/workspacePanelRoles.js";
@@ -21,11 +22,14 @@ export function WorkspaceSidePaneCaptionControls({
   documentCenter,
   onToggleShellLayoutSwap,
   showWindowControls,
+  fullViewToggle,
 }: {
   roleToggle?: WorkspaceBodyRoleTogglePresentation | null;
   documentCenter: boolean;
   onToggleShellLayoutSwap?: () => void;
   showWindowControls?: boolean;
+  /** Upstream 3.16.2 side-pane full view toggle; beside the role toggle. */
+  fullViewToggle?: { active: boolean; onToggle: () => void; shortcutLabel?: string };
 }) {
   if (!roleToggle && !onToggleShellLayoutSwap) return null;
   return (
@@ -50,6 +54,13 @@ export function WorkspaceSidePaneCaptionControls({
         >
           <ArrowLeftRight className="size-4" />
         </Button>
+      ) : null}
+      {fullViewToggle ? (
+        <SidePaneFullViewToggleButton
+          active={fullViewToggle.active}
+          onToggle={fullViewToggle.onToggle}
+          shortcutLabel={fullViewToggle.shortcutLabel}
+        />
       ) : null}
       {showWindowControls ? <DesktopWindowControls /> : null}
     </div>

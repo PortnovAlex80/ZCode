@@ -11,6 +11,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 import type { SpecThread } from "@/spec-document/specThread.js";
 import { SubagentSessionSidePane } from "@/app-shell/SubagentSessionSidePane.js";
 import { SelectionSideChatPane } from "@/app-shell/SelectionSideChatPane.js";
@@ -306,14 +307,19 @@ describe("presentation visibility host wiring (Wave A)", () => {
     mountedRoots.push(root);
     const renderArea = (foregroundEnabled: boolean) =>
       act(() => {
+        // 上游 3.16.2 的 WorkbenchLeafPane 调用 useZCodeIntl；workbench 链路需要 Provider。
         root.render(
-          createElement(V4WorkspaceChatArea, {
-            workspacePath: "/workspace",
-            sessionId: "session-1",
-            foregroundEnabled,
-            interactionDialogsVisible: foregroundEnabled,
-            keepSpecExecutionSource: !foregroundEnabled,
-          }),
+          createElement(
+            ZCodeIntlProvider,
+            { initialLocale: "zh-CN" },
+            createElement(V4WorkspaceChatArea, {
+              workspacePath: "/workspace",
+              sessionId: "session-1",
+              foregroundEnabled,
+              interactionDialogsVisible: foregroundEnabled,
+              keepSpecExecutionSource: !foregroundEnabled,
+            }),
+          ),
         );
       });
 

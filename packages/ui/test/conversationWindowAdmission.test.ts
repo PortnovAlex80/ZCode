@@ -20,7 +20,8 @@ describe("cold conversation window admission", () => {
     root = createRoot(container);
     await act(async () => root!.render(admission()));
     expect(container.querySelector("[data-admitted-composer]")).toBeNull();
-    expect(listSessions).toHaveBeenCalledWith({ workspacePath: "D:/project-b", sessionIds: ["saved-b1"], includeArchived: true, limit: 1 });
+    // 上游 3.16.2 从 ZCodeAgentListSessionsParams 移除 includeArchived；按 id 过滤的持久列表调用不再携带该参数。
+    expect(listSessions).toHaveBeenCalledWith({ workspacePath: "D:/project-b", sessionIds: ["saved-b1"], limit: 1 });
     await act(async () => ready([{ sessionId: "saved-b1" }]));
     expect(container.querySelector("[data-admitted-composer]")).not.toBeNull();
   });

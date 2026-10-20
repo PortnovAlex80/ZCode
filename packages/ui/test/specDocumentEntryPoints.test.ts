@@ -31,8 +31,9 @@ import {
   parseShortcutBinding,
   serializeShortcutBinding,
   SHORTCUT_COMMANDS,
-  TID_SIDE_PANE_TOGGLE,
 } from "@zcode/shared";
+// 上游 3.16.2 起 test-ids 从 shared 主入口移到 /test-ids 子路径。
+import { TID_SIDE_PANE_TOGGLE } from "@zcode/shared/test-ids";
 import {
   canCollapseSpecGeneralChat,
   resolveSpecGeneralChatCollapsed,
@@ -1178,9 +1179,17 @@ vi.mock("@/feedback/feedbackStore.js", () => ({
 
 vi.mock("@/hooks/useWorkspaceServices.js", () => ({
   useBaseWorkspaceServices: () => ({}),
+  // 上游 3.16.2 的 usePaneSessionPersistence 需要该 hook；静态渲染走本地解析。
+  useWorkspaceServicesResolution: () => ({
+    services: { zcodeTaskService: { getTaskMeta: async () => null } },
+    connectionKind: "local",
+  }),
 }));
 
 vi.mock("@/store/TabStoreProvider.js", () => ({
+  // 上游 3.16.2 起 WorkspaceShellLayout 从 Provider 入口订阅 tab store；测试态给空 tabs。
+  useTabStore: (selector: (state: unknown) => unknown) =>
+    selector({ tabs: [], activeTabId: null }),
   useTabStoreApi: () => ({
     getState: () => ({
       activateTabByPath: vi.fn(() => true),

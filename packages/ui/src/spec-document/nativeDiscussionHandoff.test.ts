@@ -63,7 +63,6 @@ test("actual first-input guards preserve document context for /plan without rewr
     queue: { items: [] },
   };
   const scope: Record<string, unknown> = {
-    effectiveText: "Explain",
     sessionId: "child",
     current: empty,
     snapshotRef: { current: empty },
@@ -75,18 +74,22 @@ test("actual first-input guards preserve document context for /plan without rewr
     prepareFirstText: (input: string) => `quote + paths + ${input}`,
   };
   for (const input of ["Explain", "/plan Explain"]) {
+    const firstBody = documentFirstInputBody(input, []);
+    // 上游 3.16.2 删除 planShortcut：/plan 不再被解包为任务正文，也不属于可见斜杠
+    // 命令；文档上下文把原文（含 token）原样冻结为首条正文。
+    assert.equal(firstBody, input);
     const prepared = evaluate("preparedFirstText", {
       ...scope,
       text: input,
-      firstBody: documentFirstInputBody(input, []),
+      firstBody,
     });
     assert.equal(prepared.original, input);
-    assert.equal(prepared.prepared, "quote + paths + Explain");
+    assert.equal(prepared.effective, input);
+    assert.equal(prepared.prepared, `quote + paths + ${input}`);
     assert.equal(
       evaluate("applyFirstText", {
         ...scope,
         text: input,
-        effectiveText: "Explain",
         preparedFirstText: prepared,
         slashCommand: null,
       }),
@@ -95,8 +98,7 @@ test("actual first-input guards preserve document context for /plan without rewr
     assert.equal(
       evaluate("applyFirstText", {
         ...scope,
-        text: input,
-        effectiveText: "different body",
+        text: "different body",
         preparedFirstText: prepared,
         slashCommand: null,
       }),

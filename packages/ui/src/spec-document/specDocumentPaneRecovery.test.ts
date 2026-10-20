@@ -328,6 +328,10 @@ describe("document pane recovery, handoff writes and delete refusal", () => {
       ).toBe(true);
     }
     expect(retireCalls.length).toBe(1);
-    expect(retireCalls[0]!.getText(source)).toContain("retireDocumentPaneWrites(presentationKey");
+    // 当前契约：退役按工作区级 draftStorageKey + 面板写入令牌登记（presentationKey
+    // 已按面板实例细分，不再作为退役键）；卸载清理见 SpecDocumentPane 的 useEffect。
+    expect(retireCalls[0]!.getText(source)).toContain(
+      "retireDocumentPaneWrites(draftStorageKey, paneWriteToken",
+    );
   });
 });

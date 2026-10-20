@@ -15,8 +15,8 @@ import {
   GROUPED_TASK_COLLAPSED_GROUPS_STORAGE_KEY,
   persistGroupedTaskCollapsedGroupIds,
   readGroupedTaskCollapsedGroupIds,
-} from "../lib/groupedTaskExpansionPreference.js";
-import { pruneCollapsedGroupedTaskGroupIds } from "../workspace-grouped-tasks/view.js";
+} from "../project-sidebar/grouped-expansion.js";
+import { pruneCollapsedGroupedTaskGroupIds } from "../project-sidebar/grouped/view.js";
 
 describe("D-05 project collapse persistence across session-list refreshes", () => {
   beforeEach(() => {
@@ -63,41 +63,28 @@ describe("D-05 project collapse persistence across session-list refreshes", () =
     expect([...readGroupedTaskCollapsedGroupIds()]).toEqual([]);
   });
 
-  it("WorkspaceSidebar wires persist+prune and the transient-empty guard for refreshes (source check)", async () => {
-    // 本独占路径不含 WorkspaceSidebar；按既有模式（specGeneralChatCollapse.test.ts
-    // 读 WorkspaceShellLayout）以 AST 断言真实接线，避免只测纯函数副本。
-    const text = await readFile(resolve("packages/ui/src/WorkspaceSidebar.tsx"), "utf8");
+  it("project sidebar wires persist and restore for group collapse across refreshes (source check)", async () => {
+    // 上游 3.16.2 用 ProjectSidebar（TaskGroupedView）替换了旧 WorkspaceSidebar。
+    // 新模型下刷新不会整体替换 collapsed 集合（只有逐组 toggle 与全展开），
+    // 瞬时空快照守卫与 prune 不再有对应处理器；接线断言改为：
+    // 初始集合从 localStorage 恢复 + 每次变化回写。
+    const text = await readFile(
+      resolve("packages/ui/src/project-sidebar/TaskGroupedView.tsx"),
+      "utf8",
+    );
     const source = ts.createSourceFile(
-      "WorkspaceSidebar.tsx",
+      "TaskGroupedView.tsx",
       text,
       ts.ScriptTarget.Latest,
       true,
       ts.ScriptKind.TSX,
     );
-    const declarations = new Map<string, ts.VariableDeclaration>();
-    function visit(node: ts.Node) {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name))
-        declarations.set(node.name.text, node);
-      ts.forEachChild(node, visit);
-    }
-    visit(source);
-    const collapseHandler = declarations.get("handleCollapsedGroupedTaskGroupIdsChange");
-    expect(collapseHandler, "collapse handler must exist").toBeTruthy();
+    // 初始收起集合从 localStorage 恢复（重启/刷新后仍生效）。useState 解构名在
+    // BindingElement 上，直接断言初始化器文本。
+    expect(text).toContain("useState(readGroupedTaskCollapsedGroupIds)");
     // 用户收起/展开的每一步都同步到 localStorage。
-    expect(collapseHandler!.getText(source)).toContain(
-      "persistGroupedTaskCollapsedGroupIds(nextGroupIds)",
+    expect(text).toMatch(
+      /persistGroupedTaskCollapsedGroupIds\(collapsed\);[\s\S]{0,120}?\}, \[collapsed\]\)/,
     );
-
-    const refreshHandler = declarations.get("handleGroupedTaskGroupIdsChange");
-    expect(refreshHandler, "group-ids refresh handler must exist").toBeTruthy();
-    const refreshText = refreshHandler!.getText(source);
-    // 瞬时空快照守卫：未 hydrate 前的空列表不得当作“所有组已删除”。
-    expect(refreshText).toContain("nextGroupIds.length === 0");
-    expect(refreshText).toContain("!groupedTaskGroupIdsHydrated");
-    // 刷新时清陈旧记录并回写偏好。
-    expect(refreshText).toContain("pruneCollapsedGroupedTaskGroupIds(");
-    expect(refreshText).toContain("persistGroupedTaskCollapsedGroupIds(nextCollapsedGroupIds)");
-    // 初始收起集合从 localStorage 恢复（重启/刷新后仍生效）。
-    expect(text).toContain("readGroupedTaskCollapsedGroupIds()");
   });
 });

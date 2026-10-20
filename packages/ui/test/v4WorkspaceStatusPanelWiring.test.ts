@@ -5,6 +5,7 @@ import type {
   GitRepositorySummary,
   ZCodeTaskChangeSummary,
 } from "@zcode/shared";
+import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 import { V4ChatPane } from "@/v4/V4ChatPane.js";
 import { V4_PRIMARY_PANE_ID } from "@/v4/paneLayoutStore.js";
 import type { WorkbenchShellBinding } from "@/v4/WorkbenchPane.js";
@@ -82,20 +83,23 @@ describe("v4 workspace status panel wiring", () => {
     } as unknown as WorkbenchShellBinding;
 
     renderToStaticMarkup(
-      createElement(WorkbenchLeafPane, {
-        paneId: V4_PRIMARY_PANE_ID,
-        rect: { left: "0%", top: "0%", width: "100%", height: "100%" },
-        focused: true,
-        showFocusIndicator: false,
-        canSplit: true,
-        shellWorkspaceKey: "local:/repo",
-        binding: null,
-        shell,
-        onFocusRequest: vi.fn(),
-        onSplit: vi.fn(),
-        onClosePane: vi.fn(),
-        onBindSession: vi.fn(),
-      }),
+      // 上游 3.16.2 的 WorkbenchLeafPane 调用 useZCodeIntl；pane split（canSplit/onSplit）已被上游移除。
+      createElement(
+        ZCodeIntlProvider,
+        { initialLocale: "en-US" },
+        createElement(WorkbenchLeafPane, {
+          paneId: V4_PRIMARY_PANE_ID,
+          rect: { left: "0%", top: "0%", width: "100%", height: "100%" },
+          focused: true,
+          showFocusIndicator: false,
+          shellWorkspaceKey: "local:/repo",
+          binding: null,
+          shell,
+          onFocusRequest: vi.fn(),
+          onClosePane: vi.fn(),
+          onBindSession: vi.fn(),
+        }),
+      ),
     );
 
     expect(sessionPaneCapture.props).toHaveLength(1);
@@ -159,27 +163,29 @@ describe("v4 workspace status panel wiring", () => {
     } as unknown as WorkbenchShellBinding;
 
     renderToStaticMarkup(
-      createElement(WorkbenchLeafPane, {
-        paneId: "pane-1",
-        rect: { left: "50%", top: "0%", width: "50%", height: "100%" },
-        focused: true,
-        showFocusIndicator: true,
-        canSplit: true,
-        shellWorkspaceKey: "local:/repo",
-        binding: {
-          readOnly: true,
-          sessionId: "sess-child",
-          workspaceScope: {
-            workspaceIdentity: "local:/repo",
-            workspacePath: "/repo",
+      createElement(
+        ZCodeIntlProvider,
+        { initialLocale: "en-US" },
+        createElement(WorkbenchLeafPane, {
+          paneId: "pane-1",
+          rect: { left: "50%", top: "0%", width: "50%", height: "100%" },
+          focused: true,
+          showFocusIndicator: true,
+          shellWorkspaceKey: "local:/repo",
+          binding: {
+            readOnly: true,
+            sessionId: "sess-child",
+            workspaceScope: {
+              workspaceIdentity: "local:/repo",
+              workspacePath: "/repo",
+            },
           },
-        },
-        shell,
-        onFocusRequest: vi.fn(),
-        onSplit: vi.fn(),
-        onClosePane: vi.fn(),
-        onBindSession: vi.fn(),
-      }),
+          shell,
+          onFocusRequest: vi.fn(),
+          onClosePane: vi.fn(),
+          onBindSession: vi.fn(),
+        }),
+      ),
     );
 
     expect(sessionPaneCapture.props).toHaveLength(1);

@@ -68,7 +68,8 @@ describe("built-in ChatGPT (openai-oauth) provider — GPT-00 路径 A 本地增
 
     // 路径 A 的核心承诺：发布文件本身保持原样（revision 不抬高、无 Seed 声明）。
     const document = await readBundledDocument();
-    expect(document.revision).toBe(31);
+    // 上游 3.16.2 的 bundled 基线 revision 是 33。
+    expect(document.revision).toBe(33);
     expect(JSON.stringify(document)).not.toContain("account:chatgpt");
   });
 
@@ -142,7 +143,8 @@ describe("built-in ChatGPT (openai-oauth) provider — GPT-00 路径 A 本地增
 
     // 未知 slug 仍由全局 catch-all 兜底成完整可执行配置（GPT-00 wildcard 语义）。
     const unknown = provider!.models.find((model) => model.modelId === "gpt-7-unknown-nova")!;
-    expect(unknown.config.properties.contextWindow).toBe(200_000);
+    // 上游 3.16.2 全局 catch-all 规则的窗口提升到 1M。
+    expect(unknown.config.properties.contextWindow).toBe(1_000_000);
     expect(unknown.config.validateComplete()).toEqual([]);
 
     // Renderer 可见序列化只携带 {type, entitled}，不出现任何令牌形状字段。
@@ -163,7 +165,7 @@ describe("built-in ChatGPT (openai-oauth) provider — GPT-00 路径 A 本地增
     });
     try {
       const initial = await source.read();
-      expect(initial.revision).toMatch(/^zcode-builtin:31:/);
+      expect(initial.revision).toMatch(/^zcode-builtin:33:/);
 
       const document = (await readBundledDocument()) as { revision: number; config: unknown };
       const release40 = decodeZCodeBuiltinRelease({

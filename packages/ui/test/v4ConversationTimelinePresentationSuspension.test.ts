@@ -119,6 +119,8 @@ vi.mock("@/v4/conversationTurnRenderUnitsCache.js", async (importOriginal) => {
 vi.mock("@/v4/conversationTimelineLiveTail.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/v4/conversationTimelineLiveTail.js")>();
   return {
+    // 上游 3.16.2 新增 resolveConversationLatestTurnSummary 等导出；透传实际实现。
+    ...actual,
     splitConversationTimelineLiveTail: (
       ...args: Parameters<typeof actual.splitConversationTimelineLiveTail>
     ) => {

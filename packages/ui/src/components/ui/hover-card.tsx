@@ -12,17 +12,28 @@ function HoverCardTrigger({ ...props }: React.ComponentProps<typeof HoverCardPri
   return <HoverCardPrimitive.Trigger data-slot="hover-card-trigger" {...props} />;
 }
 
+// 自定义锚点时 Portal 与内容必须共享 Root 的 scope，才能读取同一浮层的开关与定位上下文。
+type HoverCardScopeProps = {
+  __scopeHoverCard?: Parameters<ReturnType<typeof HoverCardPrimitive.createHoverCardScope>>[0];
+};
+
 function HoverCardContent({
   className,
   align = "center",
   sideOffset = 4,
+  __scopeHoverCard,
   ...props
-}: React.ComponentProps<typeof HoverCardPrimitive.Content>) {
+}: React.ComponentProps<typeof HoverCardPrimitive.Content> & HoverCardScopeProps) {
   return (
     // 弹出会话中的锚点属于另一个 document；Portal 必须跟随其 host，
     // 否则局部坐标会在主窗口中定位，导致上下文用量面板出现在错误窗口。
-    <HoverCardPrimitive.Portal data-slot="hover-card-portal" container={usePortalHost()}>
+    <HoverCardPrimitive.Portal
+      data-slot="hover-card-portal"
+      container={usePortalHost()}
+      {...{ __scopeHoverCard }}
+    >
       <HoverCardPrimitive.Content
+        {...{ __scopeHoverCard }}
         data-slot="hover-card-content"
         align={align}
         sideOffset={sideOffset}

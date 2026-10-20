@@ -68,7 +68,6 @@ export function AdmittedConversation({
       .listSessions({
         ...entry.scope,
         sessionIds: [entry.sessionId],
-        includeArchived: true,
         limit: 1,
       })
       .then((sessions) => {
@@ -131,7 +130,6 @@ export function AdmittedConversation({
       telemetryVisible
       presentationVisible
       showFocusIndicator={false}
-      canSplit={false}
       shellWorkspaceKey={paneWorkspaceKey(entry.scope)}
       binding={binding}
       shell={shell}

@@ -1,4 +1,5 @@
 import type { GitChangeSourceId } from "@zcode/shared";
+import type { SidePaneFullViewState } from "@/side-pane-full-view/contract.js";
 import {
   normalizeWorkspaceSidePaneState,
   type WorkspaceSidePaneState,
@@ -10,6 +11,8 @@ export interface TaskSidePaneMemoryState {
   /** 对话级展开/收起偏好；tabs 本身仍按 workspace 复用。 */
   sidePaneCollapsedByOwner: Record<string, boolean>;
   sidePaneActiveTabByOwner: Record<string, string>;
+  /** 对话级完整视图状态（docs/ui/side-pane-full-view.md）；缺省表示普通视图。 */
+  sidePaneFullViewByOwner: Record<string, SidePaneFullViewState>;
   /** 工具调用的自动打开已消费记录；不随消息行卸载清空。 */
   pluginUiAutoOpenKeys: ReadonlySet<string>;
   activeGitSourceId: GitChangeSourceId;
@@ -23,6 +26,7 @@ const DEFAULT_TASK_SIDE_PANE_MEMORY_STATE: TaskSidePaneMemoryState = {
   isSidePaneCollapsed: true,
   sidePaneCollapsedByOwner: {},
   sidePaneActiveTabByOwner: {},
+  sidePaneFullViewByOwner: {},
   pluginUiAutoOpenKeys: new Set(),
   activeGitSourceId: "unstaged",
   browserUrls: {},
@@ -133,6 +137,7 @@ export function readTaskSidePaneMemoryState(key: string | null): TaskSidePaneMem
       ...state.sidePaneCollapsedByOwner,
     },
     sidePaneActiveTabByOwner: { ...state.sidePaneActiveTabByOwner },
+    sidePaneFullViewByOwner: { ...state.sidePaneFullViewByOwner },
   };
   return touchTaskSidePaneMemoryEntry(key, normalizedState);
 }
@@ -161,6 +166,9 @@ export function saveTaskSidePaneMemoryState(
       ...taskSidePaneMemory.get(key)?.sidePaneActiveTabByOwner,
       ...patch.sidePaneActiveTabByOwner,
     },
+    // 完整视图记录由专用写入口整体替换，普通 patch 只保留已有记录，避免旧快照覆盖新状态。
+    sidePaneFullViewByOwner:
+      patch.sidePaneFullViewByOwner ?? taskSidePaneMemory.get(key)?.sidePaneFullViewByOwner ?? {},
   };
   nextState.sidePaneState = normalizeWorkspaceSidePaneState(nextState.sidePaneState);
   const selected = nextState.sidePaneState?.tabs.find(
@@ -220,6 +228,35 @@ export function saveTaskSidePaneCollapsedPreference(
       [ownerKey]: isSidePaneCollapsed,
     },
   });
+}
+
+/** 渲染期读取：不触碰 LRU 顺序，保证 render 无副作用。 */
+export function peekTaskSidePaneFullView(
+  key: string | null,
+  ownerTaskId: string | null | undefined,
+): SidePaneFullViewState | null {
+  if (!key) return null;
+  return (
+    taskSidePaneMemory.get(key)?.sidePaneFullViewByOwner[
+      ownerTaskId ?? DRAFT_SIDE_PANE_OWNER_KEY
+    ] ?? null
+  );
+}
+
+export function saveTaskSidePaneFullView(
+  key: string | null,
+  ownerTaskId: string | null | undefined,
+  value: SidePaneFullViewState | null,
+): void {
+  if (!key) return;
+  const ownerKey = ownerTaskId ?? DRAFT_SIDE_PANE_OWNER_KEY;
+  const next = { ...taskSidePaneMemory.get(key)?.sidePaneFullViewByOwner };
+  if (value) {
+    next[ownerKey] = value;
+  } else {
+    delete next[ownerKey];
+  }
+  saveTaskSidePaneMemoryState(key, { sidePaneFullViewByOwner: next });
 }
 
 export function clearTaskSidePaneMemoryStateForTest(): void {

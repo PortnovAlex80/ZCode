@@ -423,8 +423,36 @@ test("actual side panel keeps a restore route in the caption and relaxes bounds 
       ts.isJsxSelfClosingElement(node) &&
       node.tagName.getText(source) === "SpecDocumentPane",
   )[0] as ts.JsxSelfClosingElement;
-  assert.match(prop(documentPane, "onActivate", source) ?? "", /activateRetainedDocument\(documentContext\)/);
-  assert.match(prop(documentPane, "onActivate", source) ?? "", /onActivateTab\(tab.id\)/);
+  // U-04 迁移 + 文档窗口化：SpecDocumentPane 的 onActivate 走 DocumentWindowSurface 的
+  // render-prop（activateDocument：popout 时聚焦窗口，否则走宿主 onActivate 恢复路由）。
+  // 恢复路由仍存在，只是换了接线：宿主 onActivate 经 returnDocument 把保留文档写回
+  // 任务记忆并广播 activateRetainedDocument 激活事件（不再直接调用 onActivateTab）。
+  assert.equal(
+    prop(documentPane, "onActivate", source),
+    "onActivate={activateDocument}",
+  );
+  const documentSurface = descendants(
+    source,
+    (node) =>
+      ts.isJsxOpeningElement(node) &&
+      node.tagName.getText(source) === "DocumentWindowSurface",
+  )[0] as ts.JsxOpeningElement;
+  assert.match(
+    prop(documentSurface, "onActivate", source) ?? "",
+    /returnDocument\(documentContext!\)/,
+  );
+  const returnDocumentDecl = descendants(
+    source,
+    (node) =>
+      ts.isVariableDeclaration(node) &&
+      node.name.getText(source) === "returnDocument",
+  )[0];
+  assert.ok(returnDocumentDecl, "restore route must call returnDocument");
+  assert.match(returnDocumentDecl.getText(source), /upsertDocumentWindowTab\(/);
+  assert.match(
+    returnDocumentDecl.getText(source),
+    /activateRetainedDocument\(entry\)/,
+  );
   assert.equal(prop(documentPane, "generalChatCollapsed", source), undefined);
   assert.equal(prop(documentPane, "onToggleGeneralChat", source), undefined);
   const panel = descendants(
