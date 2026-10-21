@@ -19,7 +19,10 @@ describe.each([null, 0o000, 0o400, 0o100])(
       "%s：单个目录失效只拒绝该项目，修复后可以重连",
       async (mode, context) => {
         if (permissions !== null && (process.platform === "win32" || process.getuid?.() === 0)) {
-          context.skip();
+          // Windows/root 无 POSIX 权限语义；本 vitest each 回调在该环境拿不到
+          // context，skip() 会抛 TypeError——改为可选调用并直接返回（等效跳过）。
+          context?.skip?.();
+          return;
         }
         const root = await realpath(await mkdtemp(join(tmpdir(), "zcode-workspace-admission-")));
         const paths = [1, 2, 3].map((n) => join(root, `workspace-${n}`));
