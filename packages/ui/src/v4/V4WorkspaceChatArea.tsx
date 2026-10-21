@@ -544,6 +544,9 @@ export function V4WorkspaceChatArea({
           paneId={leaf.paneId}
           rect={soloPaneId ? FULL_WORKBENCH_RECT : leaf.rect}
           hidden={soloPaneId !== null && leaf.paneId !== soloPaneId}
+          // 浮窗 solo 只展示焦点叶子；其余叶子 hidden=true 时展示派生也必须一并冻结
+          // （fork 展示挂起机制以 presentationVisible 为唯一开关），否则隐藏会话继续
+          // 重算 timeline / plugin 扫描等 O(rows) 展示工作。
           // Settings 只把 workspace 设为 inert，Pane 之前仍保留 focused=true，
           // 会在隐藏状态提前消费 Plugin 试用的一次性预填。可见性并入 focus 后，
           // 请求只会由返回 workspace 后真正可交互的 Composer 消费。
@@ -557,7 +560,10 @@ export function V4WorkspaceChatArea({
              （Settings 覆盖 / 文档居中折叠主聊天都已由 shell 折算进 foregroundEnabled），
              壳层对 PiP 弹出态显式传 true 覆盖。它与 focus 正交——非 focused 的可见
              叶子仍需完整展示。 */
-          presentationVisible={presentationVisible ?? foregroundEnabled}
+          presentationVisible={
+            (presentationVisible ?? foregroundEnabled) &&
+            !(soloPaneId !== null && leaf.paneId !== soloPaneId)
+          }
           showFocusIndicator={showFocusIndicator}
           shellWorkspaceKey={shellWorkspaceKey}
           binding={leaf.paneId === V4_PRIMARY_PANE_ID ? null : (panes[leaf.paneId] ?? null)}

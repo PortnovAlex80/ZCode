@@ -24,6 +24,19 @@ const paneCapture = vi.hoisted(() => ({
   byPaneId: new Map<string, Record<string, unknown>>(),
 }));
 
+const panePresentationState = vi.hoisted(() => ({
+  presentation: "docked" as "docked" | "floating",
+}));
+
+vi.mock("@/side-pane-full-view/conversationPanePresentation.js", () => ({
+  // 浮窗 solo 场景由测试切换 presentation；真实上下文由壳层宿主提供。
+  useConversationPanePresentation: () => ({
+    presentation: panePresentationState.presentation,
+    reportFloatingStatus: () => {},
+    reportComposerDockHeight: () => {},
+  }),
+}));
+
 vi.mock("@/v4/SessionPane.js", () => ({
   SessionPane: (props: Record<string, unknown>) => {
     paneCapture.byPaneId.set(String(props.paneId), props);
@@ -344,5 +357,40 @@ describe("presentation visibility host wiring (Wave A)", () => {
     renderArea(false);
     expect(captured(V4_PRIMARY_PANE_ID)?.presentationVisible).toBe(false);
     expect(captured(secondaryPaneId)?.presentationVisible).toBe(false);
+  });
+
+  it("浮窗 solo：仅焦点叶子展示，hidden 叶子的展示派生一并冻结", () => {
+    // 回归：hidden=true 但 presentationVisible=true 的组合曾让隐藏会话继续
+    // 重算 timeline / plugin 扫描等 O(rows) 展示工作（fork 展示挂起机制只认
+    // presentationVisible 这一个开关）。
+    act(() => {
+      usePaneLayoutStore.getState().splitPane(V4_PRIMARY_PANE_ID, "row", {
+        workspacePath: "/workspace",
+      });
+    });
+    panePresentationState.presentation = "floating";
+    const root = createRoot(installMinimalDom());
+    mountedRoots.push(root);
+    act(() => {
+      root.render(
+        createElement(
+          ZCodeIntlProvider,
+          { initialLocale: "zh-CN" },
+          createElement(V4WorkspaceChatArea, {
+            workspacePath: "/workspace",
+            sessionId: "session-1",
+            foregroundEnabled: true,
+            interactionDialogsVisible: true,
+            keepSpecExecutionSource: false,
+          }),
+        ),
+      );
+    });
+    const secondaryPaneId = Object.keys(usePaneLayoutStore.getState().panes)[0];
+    // splitPane 交付焦点给新叶子：solo 只展示 secondary；hidden 不下传 SessionPane，
+    // 回归面就是 presentationVisible——焦点叶子保持展示，被 solo 隐藏的 primary 冻结。
+    expect(captured(secondaryPaneId)?.presentationVisible).toBe(true);
+    expect(captured(V4_PRIMARY_PANE_ID)?.presentationVisible).toBe(false);
+    panePresentationState.presentation = "docked";
   });
 });

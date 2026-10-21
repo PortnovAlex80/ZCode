@@ -2853,8 +2853,11 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
               panelRef={generalChatColumnRef}
               collapsible={generalChatCollapsed}
               collapsedSize="0px"
-              aria-hidden={generalChatCollapsed}
-              inert={generalChatCollapsed}
+              // 完整视图的对话宿主（SidePaneFullViewConversationHost）以 fixed 定位展示，
+              // 但 DOM 仍在本列子树内：折叠记忆只属于普通排列，full view 期间不得让
+              // 已展示的对话继承 inert/aria-hidden，否则输入与可访问性全部失效。
+              aria-hidden={generalChatCollapsed && !isFullView}
+              inert={generalChatCollapsed && !isFullView}
               data-spec-general-chat-collapsed={generalChatCollapsed ? "true" : "false"}
               data-spec-shell-layout-side={isDocumentCenterLayout ? "right" : "center"}
               // U-01：交换排列下聊天在右侧、文档占大头；min/default 随排列切换本身

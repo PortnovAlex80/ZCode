@@ -254,6 +254,11 @@ export function createSettingServiceWithMigrations(): {
       await mkdir(getSettingsDir(), { recursive: true });
       // Main 的窗口尺寸与 Host 的远程目录会并发保存同一文件。只锁 rename 会让后写者
       // 用锁外读取的旧快照覆盖对方字段；事务必须在锁内重新读取、合并、提交。
+      // 注意（跨版本限制）：锁文件是 setting.json.lock。旧版 fork 在
+      // ZCODE_SPEC_HARNESS_WINDOWS=1 下用的是 setting.json.transaction.lock，且主锁
+      // 只覆盖写入；新旧进程共享同一 profile 并发运行时，旧进程可能用锁外快照覆盖
+      // 新进程的写入。同版本并发（本设计的目标场景）不受影响；混版本共用 profile
+      // 不受支持，升级期间需避免新旧 Host 同时写设置。
       return withAtomicFileLock(getSettingsFile(), () =>
         withSettingsWriteQueueTimeout(
           (enterCommitPhase) => runUpdate(shouldCommit, enterCommitPhase),

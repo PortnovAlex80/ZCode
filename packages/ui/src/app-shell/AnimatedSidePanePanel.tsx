@@ -50,7 +50,6 @@ import {
 } from "@/lib/taskSidePaneMemory.js";
 import { joinFilePath } from "@/lib/path.js";
 import type { ResolvedSpecDocumentWorkspace } from "@/spec-document/specDocumentWorkspace.js";
-import { PreviewPane } from "@/PreviewPane.js";
 import { FileManagerPane } from "@/WorkspaceFileTree.js";
 import type { FileManagerTarget } from "@/lib/workspaceSidePane.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
@@ -58,11 +57,9 @@ import { composerScopeKey, resolveComposerScope } from "@/v4/composer/composerDr
 import { SidePaneTerminalPane } from "@/SidePaneTerminalPane.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 import { WorkspaceSidePaneCaptionControls } from "@/app-shell/WorkspaceSidePaneCaptionControls.js";
-import { WorkspaceSidePaneToggleButton } from "@/WorkspaceSidePaneToggleButton.js";
 import {
   SIDE_PANE_FULL_VIEW_CONVERSATION_TAB_VALUE,
   SidePaneFullViewConversationTab,
-  SidePaneFullViewToggleButton,
   type SidePaneFullViewSurface,
 } from "@/side-pane-full-view/index.js";
 import { DesktopWindowControls } from "@/DesktopWindowControls.js";
@@ -1391,6 +1388,9 @@ export function AnimatedSidePanePanel({
                 icon={item.icon}
                 label={item.label}
                 description={item.description}
+                // fork：无文档 grant 时 Open doc 必须可见地禁用；处理器内部会按
+                // 许可拒绝，不传 disabled 会让按钮看似可用却无任何反馈。
+                disabled={item.disabled}
                 onOpen={item.onOpen}
               />
             ))}

@@ -275,7 +275,16 @@ test("actual shell keeps conversation controllers mounted, collapses only their 
     "collapsible={generalChatCollapsed}",
   );
   assert.equal(prop(column, "collapsedSize", source), 'collapsedSize="0px"');
-  assert.equal(prop(column, "inert", source), "inert={generalChatCollapsed}");
+  // 折叠记忆不得泄漏进完整视图：full view 的对话宿主（fixed 定位）仍在本列 DOM 子树内，
+  // inert/aria-hidden 必须同时要求 !isFullView，否则展示中的对话失去输入与可访问性。
+  assert.equal(
+    prop(column, "inert", source),
+    "inert={generalChatCollapsed && !isFullView}",
+  );
+  assert.equal(
+    prop(column, "aria-hidden", source),
+    "aria-hidden={generalChatCollapsed && !isFullView}",
+  );
   const parent = column.parent;
   assert.ok(ts.isJsxElement(parent));
   assert.equal(
@@ -644,4 +653,26 @@ test("actual Workbench admission guard prevents a second managed discussion cont
   render("managed-child", "remote-endpoint");
   assert.equal(mounts, 4);
   assert.deepEqual(lookups.at(-1), ["local-project", "workspace-a", null]);
+});
+
+test("launcher documents entry keeps its grant-gated disabled state through SidePaneLauncherRow", async () => {
+  // 回归：Open doc 项在没有 spec-document grant 时必须可见地禁用。合并到上游
+  // SidePaneLauncherRow 网格时 disabled 曾丢失——处理器仍按许可拒绝，按钮却看似可点。
+  const source = await parse("../app-shell/AnimatedSidePanePanel.tsx");
+  const row = descendants(
+    source,
+    (node) =>
+      ts.isJsxSelfClosingElement(node) &&
+      node.tagName.getText(source) === "SidePaneLauncherRow",
+  )[0] as ts.JsxSelfClosingElement;
+  assert.ok(row, "SidePaneLauncherRow render must exist");
+  assert.equal(
+    prop(row, "disabled", source),
+    "disabled={item.disabled}",
+  );
+  const panelText = await readFile(
+    new URL("../app-shell/AnimatedSidePanePanel.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(panelText, /disabled: !hasSpecDocumentGrant/);
 });
