@@ -324,17 +324,23 @@ test("actual shell keeps conversation controllers mounted, collapses only their 
       ts.isJsxSelfClosingElement(node) &&
       node.tagName.getText(source) === "V4WorkspaceChatArea",
   )[0] as ts.JsxSelfClosingElement;
+  // 完整视图回归（复核 #3）：full view 在本壳层内展示同一 SessionPane，三个展示标志
+  // 与隐藏执行源都必须按 isFullView 恢复，只保留折叠记忆给普通排列。
   assert.equal(
     prop(chat, "foregroundEnabled", source),
-    "foregroundEnabled={isWorkspaceVisible && !generalChatCollapsed}",
+    "foregroundEnabled={isWorkspaceVisible && (!generalChatCollapsed || isFullView)}",
+  );
+  assert.equal(
+    prop(chat, "presentationVisible", source),
+    "presentationVisible={(isWorkspaceVisible && (!generalChatCollapsed || isFullView)) || chatPopout.popped}",
   );
   assert.equal(
     prop(chat, "interactionDialogsVisible", source),
-    "interactionDialogsVisible={!generalChatCollapsed}",
+    "interactionDialogsVisible={!generalChatCollapsed || isFullView}",
   );
   assert.equal(
     prop(chat, "keepSpecExecutionSource", source),
-    "keepSpecExecutionSource={isWorkspaceVisible && generalChatCollapsed}",
+    "keepSpecExecutionSource={isWorkspaceVisible && generalChatCollapsed && !isFullView}",
   );
   const group = descendants(
     source,

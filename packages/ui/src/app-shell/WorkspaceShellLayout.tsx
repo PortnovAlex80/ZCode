@@ -3212,19 +3212,27 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                                       isWorkspaceVisible && !isSidePaneOpen && !isSidePaneVisible
                                     }
                                     readOnly={Boolean(workspaceReadOnlyReason)}
-                                    foregroundEnabled={isWorkspaceVisible && !generalChatCollapsed}
+                                    /* 完整视图用同一 SessionPane 实例在本壳层内展示对话（fixed 宿主）：
+                                     记住的折叠态只属于普通排列。full view 期间对话真实展示，
+                                     前景/展示派生/交互对话框都必须按展示恢复；退出 full view 后
+                                     各标志自然回到折叠语义。popout 例外保持不变（独立 OS 窗口，
+                                     不随本窗覆盖层隐藏）。 */
+                                    foregroundEnabled={
+                                      isWorkspaceVisible && (!generalChatCollapsed || isFullView)
+                                    }
                                     /* Presentation visibility（Wave A × U-07 集成）：
                                      停靠时跟随壳层展示态（Settings 覆盖/文档居中折叠）；
                                      弹出为 PiP 窗口后子树实际展示在那扇 OS 窗口里，
                                      展示挂起不得跟随主窗壳层隐藏冻结会话——文档级
                                      可见性由 SpecPopoutRegionPortal 声明的 PiP 文档裁决。 */
                                     presentationVisible={
-                                      (isWorkspaceVisible && !generalChatCollapsed) ||
+                                      (isWorkspaceVisible &&
+                                        (!generalChatCollapsed || isFullView)) ||
                                       chatPopout.popped
                                     }
-                                    interactionDialogsVisible={!generalChatCollapsed}
+                                    interactionDialogsVisible={!generalChatCollapsed || isFullView}
                                     keepSpecExecutionSource={
-                                      isWorkspaceVisible && generalChatCollapsed
+                                      isWorkspaceVisible && generalChatCollapsed && !isFullView
                                     }
                                     workspacePath={
                                       chatPopout.popped
