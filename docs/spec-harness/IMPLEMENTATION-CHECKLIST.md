@@ -1125,3 +1125,18 @@ Remaining limits / runtime gate: live GUI acceptance on the installed build
        stays with the user (real Host/RPC autosave, delete, conflict surface);
        runtime gate for this session unchanged/closed
 ```
+
+2026-10-30 U-18 delivery build (recorded separately from the source commit, per
+delivery rules; source was committed at 65e63a39 BEFORE packaging):
+
+```text
+Command          : Build-Installer.cmd (full: prepare -> production build -> NSIS)
+Artifact         : packages/desktop/dist/ZCode-3.16.2-win-x64.exe
+Size / SHA-256   : 179637502 bytes /
+                   d22260382e6ebdb97c74eab07fbaf353017b01cd5186ffdd5e5b6fef498375a9
+Fork revision    : 65e63a39 (embedded buildCommitId=65e63a39, built
+                   2026-10-30T20:30:22Z); win-unpacked refreshed by the same run
+Notes            : build-only run — NOT launched, NOT installed, NOT published;
+                   replaces the earlier 2026-10-21 ZCode-3.16.2-win-x64.exe which
+                   predates U-18. Live U-18 GUI acceptance still with the user.
+```
