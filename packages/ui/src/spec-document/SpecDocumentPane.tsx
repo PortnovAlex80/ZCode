@@ -109,6 +109,11 @@ export interface SpecDocumentPaneProps {
    */
   autoOpenLastDocument?: boolean;
   /**
+   * U-18：编辑缓冲自动落盘的防抖间隔（毫秒），缺省 500。测试用大值钉住手动
+   * Save 的既有语义、用小值驱动自动保存断言；产品路径不传。
+   */
+  autosaveDelayMs?: number;
+  /**
    * U-12 多开：本 tab 内打开/切换文档（workspace 相对路径）后通知宿主；宿主据此
    * 把 tab 标题更新为文件名并回填稳定 sourceKey（同文件的链接按它复用本 tab）。
    */
@@ -126,6 +131,7 @@ function Documents({
   visible = true,
   onActivate,
   autoOpenLastDocument = true,
+  autosaveDelayMs = 500,
   onDocumentOpen,
   instanceKey,
   popoutPersistenceKey,
@@ -400,6 +406,16 @@ function Documents({
     ...threads.map((thread) => thread.parentSessionId),
   ]);
   const writers = writeGuard.blocked || threads.some((thread) => Boolean(thread.pending));
+  // U-18：编辑中的缓冲按防抖间隔自动落盘（手动编辑属用户控制；CAS 仍以
+  // baseSha256 拒绝外部并发修改，可见冲突后停止自动重试）。错误态（含 CAS
+  // 冲突）与活跃讨论写入（writers）期间暂停；依赖 document 对象（每次保存
+  // 完成 identity 变化）让「保存期间的新键入」在完成后重新排队防抖。
+  useEffect(() => {
+    if (!document || !writable || !dirty || !editing || writers || error) return;
+    const timer = setTimeout(() => void save({ auto: true }), autosaveDelayMs);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- save 是每渲染重建的本地函数；其实际依赖（documents/dirty/writers/draft/document/editing/error）已全部在列表中。
+  }, [document, draft, editing, writable, dirty, writers, error, autosaveDelayMs]);
   useEffect(() => {
     if (!documents || !document?.path) return;
     return watchSpecDocument({
@@ -640,26 +656,44 @@ function Documents({
       setIoPending(false);
     }
   }
-  async function save() {
-    if (!documents || !document || !writable || writers || !dirty || ioPending) return;
-    setIoPending(true);
+  // U-18（用户裁决 2026-10-30 «ручная правка должна сразу попадать на диск»）：
+  // save 兼作手动与自动保存。自动保存不复用 ioPending——那会禁用编辑 textarea、
+  // 让每次防抖落盘打断输入；改用独立 in-flight 引用，手动/自动互斥串行。
+  const saveInFlightRef = useRef(false);
+  async function save(options?: { auto?: boolean }) {
+    const auto = options?.auto === true;
+    if (!documents || !document || !writable || writers || !dirty) return;
+    if (ioPendingRef.current || saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
+    if (!auto) setIoPending(true);
     setError("");
     setStatus("Saving…");
+    const sent = draftRef.current;
     try {
       const next = await documents.save({
         path: document.path,
-        content: draft,
+        content: sent,
         expectedSha256: baseSha256Ref.current,
       });
-      install(next);
-      setSelection(null);
+      if (draftRef.current === sent) {
+        install(next);
+        setSelection(null);
+      } else {
+        // 保存期间用户继续输入：磁盘推进到已发送内容，但绝不回退更新的缓冲——
+        // 它仍 dirty，下一次防抖基于新 hash 再存（CAS 基准随之前移）。
+        documentRef.current = next;
+        setDocument(next);
+        baseSha256Ref.current = next.sha256;
+        setBaseSha256(next.sha256);
+      }
       setStatus("Saved on disk");
       setError("");
     } catch (cause) {
-      setStatus("Save failed · draft retained");
+      setStatus(auto ? "Autosave failed · draft retained" : "Save failed · draft retained");
       setError(String(cause));
     } finally {
-      setIoPending(false);
+      saveInFlightRef.current = false;
+      if (!auto) setIoPending(false);
     }
   }
   async function reload() {
@@ -1381,7 +1415,7 @@ function Documents({
       <div className="space-y-1 border-t border-border px-3 py-2 text-ui-xs text-foreground-subtle">
         <p>{dirty ? "Unsaved draft" : status}</p>
         {!writable && document ? (
-          <p>Saving and deleting are not available in this experimental build yet.</p>
+          <p>Saving and deleting are unavailable for this host; documents are read-only.</p>
         ) : null}
         {!parentSessionId && document ? (
           <p role={executionSource?.phase === "error" ? "alert" : "status"}>

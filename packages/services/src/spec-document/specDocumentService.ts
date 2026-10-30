@@ -6,9 +6,27 @@ import type { ISpecDocumentService, SpecDocumentSnapshot } from "./specDocument.
 const MAX_BYTES = 2 * 1024 * 1024;
 const DOCUMENT_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".rst"]);
 
+/**
+ * U-18：主机接线规则——写权跟随 desktop-local 服务权限（node.ts 组合根使用）。
+ * 手动编辑属用户控制，直接落盘；其余 authority 形态保持只读（root() 对非本地
+ * 主机本就拒绝全部文档 IO）。集中成单一函数避免组合根再次漏传写权标志。
+ */
+export function specDocumentServiceHostOptions(mode: string | undefined): {
+  desktopLocal: boolean;
+  allowUnleasedWrites: boolean;
+} {
+  const desktopLocal = mode === "desktop-local";
+  return { desktopLocal, allowUnleasedWrites: desktopLocal };
+}
+
 export function createSpecDocumentService(options: {
   desktopLocal: boolean;
-  /** Disposable development fixtures only, until a runtime-wide writer lease exists. */
+  /**
+   * U-18（用户裁决 2026-10-30）：手动文档写权（文档 tab 的编辑保存/删除）。
+   * desktop-local 主机授予；写入仍受 expectedSha256 CAS、写队列与路径边界约束，
+   * 并发外部/agent 修改以可见冲突拒绝。非 desktop-local 主机整体没有文档 IO，
+   * 不经本标志放行。
+   */
   allowUnleasedWrites?: boolean;
 }): ISpecDocumentService {
   let writeQueue: Promise<unknown> = Promise.resolve();
@@ -105,7 +123,7 @@ export function createSpecDocumentService(options: {
     },
     async save(params) {
       if (options.allowUnleasedWrites !== true)
-        throw new Error("Documents is read-only until a shared writer lease is implemented.");
+        throw new Error("Documents are read-only for this host.");
       // Serializes this service's writes. External tools are not part of this queue.
       const operation = writeQueue
         .catch(() => undefined)
@@ -145,7 +163,7 @@ export function createSpecDocumentService(options: {
       // resolveDocument 处失败并可见报错），删除前复核文件身份（dev/ino），
       // 防止校验与删除之间目标被替换成其它文件。
       if (options.allowUnleasedWrites !== true)
-        throw new Error("Documents is read-only until a shared writer lease is implemented.");
+        throw new Error("Documents are read-only for this host.");
       const operation = writeQueue
         .catch(() => undefined)
         .then(async () => {

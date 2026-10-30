@@ -748,6 +748,8 @@ No implementation/GUI acceptance is asserted. Runtime gate remains CLOSED.
 
 - [ ] **U-17** The PiP-unavailable affordance renders compactly: on desktop the «вынести в окно» control must be a small disabled icon with a short badge/tooltip, NOT a long visible text button explaining Electron/PiP limitations (user screenshot 2026-10-15: long Electron explanation shown as a button bottom-right). Hide the explanation behind hover/aria; keep the honest reason accessible but visually compact.
 
+- [ ] **U-18** (implemented 2026-10-30, live pending user) Manual document edits persist to disk (user ruling 2026-10-30: «ручная правка под контролем пользователя — диск-сохранение должно работать, и вообще файл нужно обновлять сразу»). Desktop-local service authority now grants document writes (`allowUnleasedWrites` follows `serviceAuthorityMode` via `specDocumentServiceHostOptions`), and the document tab autosaves the editing buffer to disk after a short debounce while editing; the manual Save button keeps its exact semantics. Rationale recorded against the port-time gate: a manual edit is user-controlled, and the per-file CAS precondition (`expectedSha256`) already refuses concurrent external/agent writes with a visible conflict, so a «runtime-wide writer lease» is not a prerequisite for disk writes. Autosave rules: pauses while any error (including CAS conflict) is shown and while discussions are writing (`writers`); never disables the editor textarea (it does not take `ioPending`); mutual exclusion with manual saves via an in-flight guard; keystrokes typed during an in-flight save are never reverted (disk advances to the sent content, the newer buffer stays dirty and saves on the next debounce with the new hash); restored unsaved drafts flush to disk on reopen under the same CAS guard; picker delete (U-14) goes live through the same desktop-local grant. Remote/web hosts keep the existing behavior: non-local authority never receives document IO at all.
+
 ## N — Parked outside this release
 
 - [ ] **N-01** Compact agent capability/reference map for Word/Excel/AutoCAD (object → operation → limits → minimal example; versioned startup index plus lazy resources). Intentionally outside this checklist's release scope as a separate user request. Evidence: IMPLEMENTATION-PLAN.md:277-282.
@@ -1089,4 +1091,37 @@ Independent review: 2/2 passed (Popip after a 5-finding fix round: portal-host
 Remaining limits / runtime gate: live GUI confirmation of sections 1-7 of the
        acceptance checklist stays with the user; wrap geometry and PiP behavior
        need the installed EXE
+```
+
+2026-10-30 U-18 root implementation (single-agent root session, no delegation):
+
+```text
+ID(s): U-18
+Revision / affected files: packages/services/src/node.ts,
+       packages/services/src/spec-document/specDocumentService.ts(+test),
+       packages/ui/src/spec-document/SpecDocumentPane.tsx,
+       specDocumentPanePersistence.test.ts (harness: autosaveDelayMs pin),
+       new specDocumentAutosave.test.ts, this checklist
+Check command or manual scenario: vitest packages/ui/src/spec-document +
+       packages/services/src/spec-document (28 files), tsc -b (repo typecheck),
+       oxlint (changed files), architecture:check --changed, oxfmt on changed
+       files only (repo-wide fmt:check fails on the pristine tree — pre-existing,
+       9866 files — not introduced or widened by this change)
+Result: 191/191 tests PASSED (4 new autosave: CAS payload + disk result,
+       in-flight keystrokes kept and re-saved on the new hash, conflict halts
+       without retry storm, read-only host never autosaves; 1 new wiring test
+       pinning specDocumentServiceHostOptions for all authority modes);
+       typecheck exit 0; lint 0 errors, 3 warnings all pre-existing in untouched
+       node.ts lines; architecture 0 violations (baseline 0, new 0)
+Root cause recorded (user live report 2026-10-30 «правка md во вкладке не
+       сохраняется»): save/remove were gated on allowUnleasedWrites, which the
+       node.ts composition root never passed — every build of the fork shipped
+       the document tab read-only; UI disabled Save while the editable textarea
+       kept drafts in localStorage only. Fixed at the wiring level (writes follow
+       desktop-local authority) plus autosave; CAS/write-queue/path guards kept.
+Independent review: not yet — single root session; fresh reviewer recommended
+       before closing U-18
+Remaining limits / runtime gate: live GUI acceptance on the installed build
+       stays with the user (real Host/RPC autosave, delete, conflict surface);
+       runtime gate for this session unchanged/closed
 ```

@@ -9,13 +9,7 @@
 //   （非本独占路径）；保存 CAS 前置条件、草稿/展示状态持久化、watcher 冲突分支
 //   全部走真实实现。GUI 几何半边（真实窗口中的浮动/停靠/拖拽/两显示器几何）保持
 //   live-gated，不由本文件伪造。
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -38,9 +32,7 @@ import {
 
 const pane = vi.hoisted(() => ({
   layer: null as unknown as ReturnType<typeof createPaneLayer>,
-  sendCommand: null as unknown as (
-    envelope: CommandEnvelope,
-  ) => Promise<CommandAck>,
+  sendCommand: null as unknown as (envelope: CommandEnvelope) => Promise<CommandAck>,
   previewProps: null as Record<string, unknown> | null,
   sessionPanes: [] as Record<string, unknown>[],
 }));
@@ -158,8 +150,7 @@ function createDocumentsService(options: { writable: boolean }) {
   const disk = new Map<string, { content: string; sha256: string }>([
     [DOC_PATH, { content: BASE_CONTENT, sha256: BASE_SHA }],
   ]);
-  const saveCalls: { path: string; content: string; expectedSha256: string }[] =
-    [];
+  const saveCalls: { path: string; content: string; expectedSha256: string }[] = [];
   let revision = 0;
   return {
     disk,
@@ -179,11 +170,7 @@ function createDocumentsService(options: { writable: boolean }) {
         if (!entry) throw new Error(`ENOENT: no such file, open '${path}'`);
         return { path, content: entry.content, sha256: entry.sha256 };
       },
-      save: async (params: {
-        path: string;
-        content: string;
-        expectedSha256: string;
-      }) => {
+      save: async (params: { path: string; content: string; expectedSha256: string }) => {
         saveCalls.push({ ...params });
         const current = disk.get(params.path);
         if (!current || current.sha256 !== params.expectedSha256)
@@ -213,20 +200,16 @@ function createWatcher() {
     stub: {
       watch: async () => ({ id: "watch-d5" }),
       unwatch: async () => {},
-      onDynamicChange:
-        (_id: string) => (next: (event: { changedPath?: string }) => void) => {
-          listener = next;
-          return { dispose() {} };
-        },
+      onDynamicChange: (_id: string) => (next: (event: { changedPath?: string }) => void) => {
+        listener = next;
+        return { dispose() {} };
+      },
     },
   };
 }
 
 function seedThread(identity: string, thread: SpecThread) {
-  const store = getSpecThreadStore(
-    specThreadStorageKey(WORKSPACE_PATH, identity),
-    identity,
-  );
+  const store = getSpecThreadStore(specThreadStorageKey(WORKSPACE_PATH, identity), identity);
   store.update(() => [thread]);
   return store;
 }
@@ -253,6 +236,8 @@ interface RenderOptions {
   workspacePath?: string;
   /** 重开场景：消费已存在的持久化状态，不预写新展示状态。 */
   keepPersistedPresentation?: boolean;
+  /** U-18：钉住手动 Save 语义时传大值（自动保存不介入本文件的 CAS 手动路径）。 */
+  autosaveDelayMs?: number;
 }
 
 /**
@@ -281,6 +266,7 @@ function renderDocumentPane(
     workspaceIdentity: options.identity,
     parentSessionId: options.parentSessionId ?? null,
     onClose: () => {},
+    autosaveDelayMs: options.autosaveDelayMs,
   };
   const view = render(
     createElement(ServiceProvider, {
@@ -303,6 +289,7 @@ function renderDocumentPane(
         workspaceIdentity: merged.identity,
         parentSessionId: merged.parentSessionId ?? null,
         onClose: () => {},
+        autosaveDelayMs: merged.autosaveDelayMs,
       };
       view.rerender(
         createElement(ServiceProvider, {
@@ -318,9 +305,7 @@ function renderDocumentPane(
 }
 
 async function openedEditor(expected = BASE_CONTENT) {
-  const editor = (await screen.findByLabelText(
-    "Document source editor",
-  )) as HTMLTextAreaElement;
+  const editor = (await screen.findByLabelText("Document source editor")) as HTMLTextAreaElement;
   await waitFor(() => expect(editor.value).toBe(expected));
   return editor;
 }
@@ -334,9 +319,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
     pane.sessionPanes.length = 0;
     pane.layer = createPaneLayer();
     sent = [];
-    pane.sendCommand = async (
-      envelope: CommandEnvelope,
-    ): Promise<CommandAck> => {
+    pane.sendCommand = async (envelope: CommandEnvelope): Promise<CommandAck> => {
       sent.push(envelope);
       if (envelope.type === "createSession")
         return {
@@ -398,9 +381,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
 
     // 原生控制器（SessionPane）经真实 handoff 链挂载。
     const mounted = await waitFor(() => {
-      const node = document.querySelector(
-        "[data-native-discussion-owner='child-live']",
-      );
+      const node = document.querySelector("[data-native-discussion-owner='child-live']");
       expect(node).toBeTruthy();
       return node as Element;
     });
@@ -411,16 +392,12 @@ describe("D-05 document pane persistence and conflict recovery", () => {
 
     // 隐藏：只隐藏 aside，不卸载控制器、不发 stop/deleteSession。
     fireEvent.click(screen.getByLabelText("Hide discussions"));
-    await waitFor(() =>
-      expect(readDocumentPresentation(key).discussionsVisible).toBe(false),
+    await waitFor(() => expect(readDocumentPresentation(key).discussionsVisible).toBe(false));
+    expect(document.querySelector("aside[data-discussion-mode='docked']")?.className).toContain(
+      "hidden",
     );
-    expect(
-      document.querySelector("aside[data-discussion-mode='docked']")?.className,
-    ).toContain("hidden");
     // 控制器仍是同一 DOM 节点：隐藏不是卸载/停止/删除。
-    expect(
-      document.querySelector("[data-native-discussion-owner='child-live']"),
-    ).toBe(mounted);
+    expect(document.querySelector("[data-native-discussion-owner='child-live']")).toBe(mounted);
     expect(sent).toEqual([]);
     expect(store.get()[0]!.sessionId).toBe("child-live");
     // 隐藏线程的遥测/对话框收起，但控制器仍挂载在同一会话上。
@@ -434,12 +411,8 @@ describe("D-05 document pane persistence and conflict recovery", () => {
 
     // 再显示：同一线程、同一原生会话，无任何新增原生命令。
     fireEvent.click(screen.getByLabelText("Discussions"));
-    await waitFor(() =>
-      expect(readDocumentPresentation(key).discussionsVisible).toBe(true),
-    );
-    expect(
-      document.querySelector("[data-native-discussion-owner='child-live']"),
-    ).toBe(mounted);
+    await waitFor(() => expect(readDocumentPresentation(key).discussionsVisible).toBe(true));
+    expect(document.querySelector("[data-native-discussion-owner='child-live']")).toBe(mounted);
     await waitFor(() =>
       expect(pane.sessionPanes.at(-1)).toMatchObject({
         sessionId: "child-live",
@@ -456,9 +429,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
     const { documents } = renderDocumentPane({ identity, editing: false });
 
     // 初始查看模式：没有编辑器，展示状态记录 editing=false。
-    await waitFor(() =>
-      expect(screen.queryByLabelText("Document source editor")).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByLabelText("Document source editor")).toBeNull());
     expect(readDocumentPresentation(key).editing).toBe(false);
 
     // 切到编辑：textarea 出现并持久化 editing=true。
@@ -479,9 +450,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
 
     // 切回查看再切回编辑：不落盘、草稿不丢。
     fireEvent.click(screen.getByLabelText("View"));
-    await waitFor(() =>
-      expect(screen.queryByLabelText("Document source editor")).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByLabelText("Document source editor")).toBeNull());
     expect(readDocumentPresentation(key).editing).toBe(false);
     fireEvent.click(screen.getByLabelText("Edit"));
     // openedEditor 断言编辑器值 = 未保存草稿（跨模式切换不丢）。
@@ -498,6 +467,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
       identity,
       editing: true,
       writable: true,
+      autosaveDelayMs: 60000,
     });
 
     const editor = await openedEditor();
@@ -505,9 +475,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
       target: { value: `${BASE_CONTENT}saved edit` },
     });
     await waitFor(() =>
-      expect(
-        (screen.getByLabelText("Save") as HTMLButtonElement).disabled,
-      ).toBe(false),
+      expect((screen.getByLabelText("Save") as HTMLButtonElement).disabled).toBe(false),
     );
     fireEvent.click(screen.getByLabelText("Save"));
 
@@ -522,18 +490,14 @@ describe("D-05 document pane persistence and conflict recovery", () => {
     await waitFor(() => expect(screen.getByText("Saved on disk")).toBeTruthy());
     // 干净状态：草稿条目被移除，磁盘已是新内容。
     expect(readDocumentDraft(key, DOC_PATH)).toBeNull();
-    expect(first.documents.disk.get(DOC_PATH)!.content).toBe(
-      `${BASE_CONTENT}saved edit`,
-    );
+    expect(first.documents.disk.get(DOC_PATH)!.content).toBe(`${BASE_CONTENT}saved edit`);
 
     // 滚动位置与浮动布局进入展示状态。
     await new Promise((resolve) => setTimeout(resolve, 30));
     editor.scrollTop = 214;
     fireEvent.scroll(editor);
     fireEvent.click(screen.getByLabelText("Float discussion"));
-    await waitFor(() =>
-      expect(readDocumentPresentation(key).discussionMode).toBe("floating"),
-    );
+    await waitFor(() => expect(readDocumentPresentation(key).discussionMode).toBe("floating"));
     expect(readDocumentPresentation(key).scrollTop).toBe(214);
 
     // CAS 失败：外部先行改动后保存被拒，草稿与原始 hash 保留，错误可见。
@@ -542,9 +506,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
       target: { value: `${BASE_CONTENT}saved edit again` },
     });
     await waitFor(() =>
-      expect(
-        (screen.getByLabelText("Save") as HTMLButtonElement).disabled,
-      ).toBe(false),
+      expect((screen.getByLabelText("Save") as HTMLButtonElement).disabled).toBe(false),
     );
     fireEvent.click(screen.getByLabelText("Save"));
     await waitFor(() => expect(first.documents.saveCalls.length).toBe(2));
@@ -567,20 +529,17 @@ describe("D-05 document pane persistence and conflict recovery", () => {
         editing: true,
         writable: true,
         keepPersistedPresentation: true,
+        autosaveDelayMs: 60000,
       },
       first.documents,
     );
     const editorAfterReopen = (await screen.findByLabelText(
       "Document source editor",
     )) as HTMLTextAreaElement;
-    await waitFor(() =>
-      expect(editorAfterReopen.value).toBe(`${BASE_CONTENT}saved edit again`),
-    );
+    await waitFor(() => expect(editorAfterReopen.value).toBe(`${BASE_CONTENT}saved edit again`));
     await waitFor(() => expect(editorAfterReopen.scrollTop).toBe(214));
     await waitFor(() =>
-      expect(
-        document.querySelector("aside[data-discussion-mode='floating']"),
-      ).toBeTruthy(),
+      expect(document.querySelector("aside[data-discussion-mode='floating']")).toBeTruthy(),
     );
     const restored = readDocumentPresentation(reopened.key);
     expect(restored.path).toBe(DOC_PATH);
@@ -616,9 +575,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
       expect(
         screen
           .getAllByRole("alert")
-          .some((node) =>
-            node.textContent?.includes("Document changed externally"),
-          ),
+          .some((node) => node.textContent?.includes("Document changed externally")),
       ).toBe(true),
     );
     // 状态标记：脏草稿在身时页脚显示 "Unsaved draft"，冲突细节在 alert 中给出
@@ -627,9 +584,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
     expect(
       screen
         .getAllByRole("alert")
-        .some((node) =>
-          node.textContent?.includes("Reload discards your draft"),
-        ),
+        .some((node) => node.textContent?.includes("Reload discards your draft")),
     ).toBe(true);
     // 草稿与原始 hash 原样保留。
     expect(readDocumentDraft(key, DOC_PATH)).toEqual({
@@ -642,9 +597,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
     fireEvent.click(screen.getByLabelText("Reload"));
     await waitFor(() => expect(editor.value).toBe(EXTERNAL_CONTENT));
     await waitFor(() => expect(readDocumentDraft(key, DOC_PATH)).toBeNull());
-    await waitFor(() =>
-      expect(screen.getByText("Reloaded from disk")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("Reloaded from disk")).toBeTruthy());
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
@@ -658,9 +611,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
     documents.mutateDisk(EXTERNAL_CONTENT);
     watcher.fireExternalChange();
     await waitFor(() => expect(editor.value).toBe(EXTERNAL_CONTENT));
-    await waitFor(() =>
-      expect(screen.getByText("Updated from disk")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("Updated from disk")).toBeTruthy());
   });
 
   it("document actions no longer own chat visibility; discussion controllers stay mounted (U-04)", async () => {
@@ -691,18 +642,14 @@ describe("D-05 document pane persistence and conflict recovery", () => {
     });
 
     await waitFor(() =>
-      expect(
-        document.querySelector("[data-native-discussion-owner='child-expand']"),
-      ).toBeTruthy(),
+      expect(document.querySelector("[data-native-discussion-owner='child-expand']")).toBeTruthy(),
     );
     // U-04 迁移：⤢ «Развернуть документ»/«Вернуть чат» 已并入 tabs caption 的角色开关，
     // 文档头不再渲染任何聊天显隐控制（也不残留 stray aria-label）。
     expect(screen.queryByLabelText("Развернуть документ")).toBeNull();
     expect(screen.queryByLabelText("Вернуть чат")).toBeNull();
     // 讨论控制器保持挂载：文档动作区不因移除 ⤢ 而改变挂载语义。
-    expect(
-      document.querySelector("[data-native-discussion-owner='child-expand']"),
-    ).toBeTruthy();
+    expect(document.querySelector("[data-native-discussion-owner='child-expand']")).toBeTruthy();
     // 讨论显隐、编辑/查看、Reload、Save 仍可用。
     for (const label of ["Discussions", "Edit", "Reload", "Save"]) {
       expect(screen.getByLabelText(label)).toBeTruthy();
@@ -740,9 +687,7 @@ describe("D-05 document pane persistence and conflict recovery", () => {
     const renamedEditor = (await screen.findByLabelText(
       "Document source editor",
     )) as HTMLTextAreaElement;
-    await waitFor(() =>
-      expect(renamedEditor.value).toBe(`${BASE_CONTENT}identity draft`),
-    );
+    await waitFor(() => expect(renamedEditor.value).toBe(`${BASE_CONTENT}identity draft`));
     const renamedKey = documentPresentationKey("D:\\renamed-root", identity);
     expect(readDocumentPresentation(renamedKey).path).toBe(DOC_PATH);
     expect(readDocumentDraft(renamedKey, DOC_PATH)).toEqual({
@@ -758,19 +703,14 @@ describe("D-05 document pane persistence and conflict recovery", () => {
     )) as HTMLTextAreaElement;
     await waitFor(() => expect(otherEditor.value).toBe(BASE_CONTENT));
     expect(
-      readDocumentPresentation(
-        documentPresentationKey(WORKSPACE_PATH, "d5-identity-other"),
-      ),
+      readDocumentPresentation(documentPresentationKey(WORKSPACE_PATH, "d5-identity-other")),
     ).toEqual({
       ...defaultDocumentPresentation(),
       path: DOC_PATH,
       editing: true,
     });
     expect(
-      readDocumentDraft(
-        documentPresentationKey(WORKSPACE_PATH, "d5-identity-other"),
-        DOC_PATH,
-      ),
+      readDocumentDraft(documentPresentationKey(WORKSPACE_PATH, "d5-identity-other"), DOC_PATH),
     ).toBeNull();
   });
 });

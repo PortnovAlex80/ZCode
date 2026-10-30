@@ -429,7 +429,10 @@ import { IFeedbackService } from "./feedback/feedback.js";
 import { IPromptAttachmentTransferService } from "./prompt-attachment-transfer/promptAttachmentTransfer.js";
 import { createFileService } from "./file/fileService.js";
 import { ISpecDocumentService } from "./spec-document/specDocument.js";
-import { createSpecDocumentService } from "./spec-document/specDocumentService.js";
+import {
+  createSpecDocumentService,
+  specDocumentServiceHostOptions,
+} from "./spec-document/specDocumentService.js";
 import { IProjectMetadataService } from "./spec-document/projectMetadata.js";
 import { createProjectMetadataService } from "./spec-document/projectMetadataService.js";
 import { createMediaPreviewService } from "./media-preview/mediaPreview.js";
@@ -2756,9 +2759,8 @@ export function createLocalServices(options: {
     .register(IFileService, fileService)
     .register(
       ISpecDocumentService,
-      createSpecDocumentService({
-        desktopLocal: options?.serviceAuthorityMode === "desktop-local",
-      }),
+      // U-18：写权跟随 desktop-local 服务权限（手动文档编辑直接落盘，CAS 护冲突）。
+      createSpecDocumentService(specDocumentServiceHostOptions(options?.serviceAuthorityMode)),
     )
     .register(IMediaPreviewService, mediaPreviewService)
     .register(

@@ -4,7 +4,10 @@ import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
-import { createSpecDocumentService } from "./specDocumentService.js";
+import {
+  createSpecDocumentService,
+  specDocumentServiceHostOptions,
+} from "./specDocumentService.js";
 import { createFileWatcherService } from "../fileWatcher/fileWatcherService.js";
 
 test("one Host reads and lists two selected projects independently without a launch-time grant", async () => {
@@ -230,6 +233,28 @@ test("U-14: remove deletes the document; read-only service refuses visibly and l
   }
 });
 
+// U-18（活体反馈 2026-10-30 «编辑不落盘»）：组合根接线规则——desktop-local 授予
+// 手动文档写权，其余 authority 保持只读。根因正是「服务支持写、node.ts 漏传
+// 标志」，把接线收敛为该函数并钉住映射，防止回归。
+test("U-18: host wiring grants document writes only to desktop-local authority", () => {
+  assert.deepEqual(specDocumentServiceHostOptions("desktop-local"), {
+    desktopLocal: true,
+    allowUnleasedWrites: true,
+  });
+  assert.deepEqual(specDocumentServiceHostOptions("desktop-attached-remote"), {
+    desktopLocal: false,
+    allowUnleasedWrites: false,
+  });
+  assert.deepEqual(specDocumentServiceHostOptions("standalone-server"), {
+    desktopLocal: false,
+    allowUnleasedWrites: false,
+  });
+  assert.deepEqual(specDocumentServiceHostOptions(undefined), {
+    desktopLocal: false,
+    allowUnleasedWrites: false,
+  });
+});
+
 // D-02/D-03 服务侧佐证：讨论载荷引用的文档 identity/path 与片段字节来源。
 // 快照必须逐字节保留磁盘内容（CRLF、制表符、NBSP、西里尔、emoji），sha256 对原始
 // 字节计算（锚点 sha256 的比对基准）；相对路径 identity 归一为正斜杠（Document link）。
@@ -239,10 +264,7 @@ test("discussion snapshot source preserves exact bytes and normalizes the docume
   const directory = await mkdtemp(join(tmpdir(), "spec-document-exact-bytes-"));
   try {
     await mkdir(join(directory, "docs", "nested"), { recursive: true });
-    const raw = Buffer.from(
-      "# Заголовок\r\n\tfragment\t«кириллица» cañón 🎯\u00A0end\r\n",
-      "utf8",
-    );
+    const raw = Buffer.from("# Заголовок\r\n\tfragment\t«кириллица» cañón 🎯\u00A0end\r\n", "utf8");
     await writeFile(join(directory, "docs", "nested", "exact.md"), raw);
     const service = createSpecDocumentService({ desktopLocal: true });
     const snapshot = await service.read({
