@@ -1257,3 +1257,20 @@ Tests            : specDocumentAutosave.test.ts — manual Save enabled+writes w
 Live evidence    : user-confirmed footer text + renderer log lines above; live GUI
                    re-acceptance of the fixed build stays with the user (next build).
 ```
+
+2026-10-31 rebuild: dead-session save fix delivery build (source committed at fff00bf1
+before packaging — fix + regression tests + defect record above):
+
+```text
+Command          : Build-Installer.cmd (full)
+Artifact         : packages/desktop/dist/ZCode-3.17.1-win-x64.exe (replaces the 03:21Z
+                   77099cf3 artifact of the same name)
+Size / SHA-256   : 215,736,999 bytes /
+                   a7c1943b6f9bf8f5c0c681ae0d9f56bad5400500c437464cb5bdfb29db73f858
+Fork revision    : fff00bf1; packaged version 3.17.1, buildCommitId=fff00bf1,
+                   built 2026-10-31T09:24:09Z (12:24–12:38 local, exit 0)
+Checks           : spec-document suite 27 files / 169 tests (incl. 2 new guard
+                   regressions); typecheck 0; lint 0 errors; architecture 0
+Notes            : build-only; installed-EXE live re-acceptance (open the affected
+                   document, edit, watch autosave) stays with the user
+```

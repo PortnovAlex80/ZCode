@@ -34,12 +34,20 @@
 - Bundled npm staging on Windows: upstream's extract step passed a
   system-drive cwd, and the GNU tar in PATH parsed `D:/...` as a remote host.
   Extract now uses the tarball directory as cwd (same-drive relative path).
+- Document Save/autosave blocked forever by a dead bound session: a document
+  bound to a session deleted with old tasks kept the UI write guard blocked
+  (store status "error" counted as a writer), disabling the Save button and
+  U-18 autosave while no conversation was running. Per the 2026-10-31 user
+  ruling, only a connecting store or a live session with real writer activity
+  pauses saving; service-side CAS still rejects actual conflicts at write
+  time.
 
 ### Build
 
-- `packages/desktop/dist/ZCode-3.17.1-win-x64.exe`, 215,734,177 bytes, SHA-256
-  `15ec79eb8c47a619a0f138dc279e20f63b1d0c2dd5c5ee28b6d54cf47f97bdd9`,
-  source revision `77099cf3` (v3.17.1 merge + U-18 autosave + U-19 find).
+- `packages/desktop/dist/ZCode-3.17.1-win-x64.exe`, 215,736,999 bytes, SHA-256
+  `a7c1943b6f9bf8f5c0c681ae0d9f56bad5400500c437464cb5bdfb29db73f858`,
+  source revision `fff00bf1` (v3.17.1 merge + U-18/U-19 + dead-session save
+  fix; replaces the 03:21Z `77099cf3` artifact of the same name).
 
 ## 3.16.2 fork — 2026-10-21 → 2026-10-30
 
