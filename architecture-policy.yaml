@@ -1399,6 +1399,7 @@ exceptions:
       - packages/ui/src/spec-document/ConversationWindowHost.tsx
       - packages/ui/src/spec-document/DocumentWindowSurface.tsx
       - packages/ui/src/spec-document/conversationWindows.ts
+      - packages/ui/src/spec-document/documentFind.ts
       - packages/ui/src/spec-document/documentWindowTabs.ts
       - packages/ui/src/spec-document/popoutOpenIntent.ts
       - packages/ui/src/spec-document/retainedDocumentWindows.ts

@@ -1194,3 +1194,8 @@ Notes            : build-only run — NOT launched/installed/published; replaces
                    (previous artifacts ZCode-3.16.2/3.15.1-win-x64.exe remain in dist/);
                    live fork-feature acceptance on 3.17.1 stays with the user
 ```
+
+2026-10-31 U-19 registered (user feedback: «работа с документами могла быть улучшена — особенно окно поиска»):
+
+- [ ] **U-19** (implementing 2026-10-31) Find-in-document for the document tab: Ctrl/Cmd+F opens an in-pane find bar in both view and edit modes. View mode searches the rendered preview text via CSS Custom Highlight API using the existing `--color-find-highlight(-active)` design tokens (all matches + active match, same pattern as the conversation find); edit mode searches the textarea buffer with native selection as the highlight. Shared behavior: case-insensitive substring match, live match count `n / m`, Enter/F3 next, Shift+Enter prev, Esc closes and clears highlights, highlights rebuilt on document/draft/query change and cleared on close/unmount/path switch; interactive elements (buttons/inputs) are excluded from view-mode matches. The find bar stays inside the pane (no global focus steal) and works for the txt prose view via the same DOM collector.
+- [ ] **U-20** (design note, open) Picker content search: today the document picker filters file names only (`documentSearch.ts`). A content search needs a service-side `search({ workspacePath, query })` over the listed documents (server-side scan, capped results with path+line+snippet); wire results into the picker dropdown as a second mode. Requires a shared/services contract change — not implemented with U-19.

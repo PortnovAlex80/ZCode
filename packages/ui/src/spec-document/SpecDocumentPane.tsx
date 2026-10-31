@@ -10,6 +10,8 @@ import {
   type SyntheticEvent,
 } from "react";
 import {
+  ChevronDown,
+  ChevronUp,
   Eye,
   GripHorizontal,
   Maximize2,
@@ -18,6 +20,7 @@ import {
   Pencil,
   RotateCcw,
   Save,
+  X,
 } from "lucide-react";
 import type { SpecDocumentSnapshot } from "@zcode/services";
 import { uuidv7 } from "@zcode/shared";
@@ -28,6 +31,12 @@ import { useServices } from "@/hooks/useServices.js";
 import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { V4PaneConversationProvider } from "@/v4/V4ConversationContext.js";
 import { SpecDiscussionPane } from "./SpecDiscussionPane.js";
+import {
+  applyDocumentFindHighlights,
+  clearDocumentFindHighlights,
+  findTextareaMatchOffsets,
+  scrollDocumentFindRangeIntoView,
+} from "./documentFind.js";
 import {
   changeSpecQuestionDraft,
   getSpecThreadStore,
@@ -297,6 +306,13 @@ function Documents({
   const [ioPending, setIoPending] = useState(false);
   const [editing, setEditing] = useState(restoredPresentation.editing);
   const [writable, setWritable] = useState(false);
+  // U-19：文内查找。findOpen 只由 Ctrl/Cmd+F 与关闭按钮翻转；查询与活动命中独立保存，
+  // 重开查找条时恢复上次的查询词（匹配数随文档/草稿重算，不跨文档保留高亮）。
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findActiveIndex, setFindActiveIndex] = useState(0);
+  const [findMatchCount, setFindMatchCount] = useState(0);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
   const documentRef = useRef(document);
   const draftRef = useRef(draft);
   const ioPendingRef = useRef(ioPending);
@@ -416,6 +432,80 @@ function Documents({
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- save 是每渲染重建的本地函数；其实际依赖（documents/dirty/writers/draft/document/editing/error）已全部在列表中。
   }, [document, draft, editing, writable, dirty, writers, error, autosaveDelayMs]);
+  // U-19：编辑模式的命中偏移（textarea 缓冲，原生 selection 即高亮；焦点策略见 jumpFind）。
+  const findOffsets = useMemo(
+    () => (editing ? findTextareaMatchOffsets(draft, findQuery) : []),
+    [draft, editing, findQuery],
+  );
+  // U-19：查找条打开即聚焦输入；Esc/关闭后高亮清理在下方主 effect 的空查询分支。
+  useEffect(() => {
+    if (findOpen) findInputRef.current?.focus({ preventScroll: true });
+  }, [findOpen]);
+  // U-19：查看模式对渲染正文上色并滚动到活动命中；编辑模式只维护计数（选区在
+  // jumpFind/open 时命令式应用，不在本 effect 抢占查找输入的焦点）。文档切换、
+  // 草稿变化（自动保存落盘后正文重渲）都会重算命中。
+  useEffect(() => {
+    if (!findOpen || !findQuery.trim()) {
+      setFindMatchCount(0);
+      clearDocumentFindHighlights();
+      return;
+    }
+    if (editing) {
+      setFindMatchCount(findOffsets.length);
+      clearDocumentFindHighlights();
+      return;
+    }
+    const root = contentRef.current;
+    if (!root) return;
+    const { ranges, activeRange } = applyDocumentFindHighlights({
+      root,
+      query: findQuery,
+      activeIndex: findActiveIndex,
+    });
+    setFindMatchCount(ranges.length);
+    if (activeRange) scrollDocumentFindRangeIntoView(activeRange);
+    return () => clearDocumentFindHighlights();
+  }, [findOpen, findQuery, findActiveIndex, findOffsets, editing, document?.path]);
+  // U-19：卸载/关 tab 时不能把 CSS Highlight 留给下一个文档实例。
+  useEffect(() => () => clearDocumentFindHighlights(), []);
+  function jumpFind(delta: 1 | -1) {
+    if (findMatchCount <= 0) return;
+    setFindActiveIndex((current) => {
+      const next = current + delta;
+      if (next < 0) return findMatchCount - 1;
+      if (next >= findMatchCount) return 0;
+      return next;
+    });
+    if (editing) {
+      const editor = editorRef.current;
+      const offsets = findOffsets;
+      const index = Math.min(
+        Math.max(0, (findActiveIndex + delta + findMatchCount) % findMatchCount),
+        offsets.length - 1,
+      );
+      const start = offsets[index];
+      if (editor && start !== undefined) {
+        const length = findQuery.trim().length;
+        editor.focus();
+        editor.setSelectionRange(start, start + length);
+        // Chromium 在 focus 时把 caret 滚进视口；随后立刻把焦点还给查找输入，
+        // 连续 Enter/Shift+Enter 导航不会打断输入。
+        findInputRef.current?.focus({ preventScroll: true });
+      }
+    }
+  }
+  function closeFind() {
+    setFindOpen(false);
+    clearDocumentFindHighlights();
+  }
+  function onContentKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    // U-19：文档内容区独占 Ctrl/Cmd+F（讨论面板/壳层不受影响）；阻止浏览器
+    // 原生「查找页面」抢占，查找条只面向当前文档。
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      setFindOpen(true);
+    }
+  }
   useEffect(() => {
     if (!documents || !document?.path) return;
     return watchSpecDocument({
@@ -942,6 +1032,7 @@ function Documents({
         <div
           ref={contentRef}
           onScrollCapture={captureScroll}
+          onKeyDown={onContentKeyDown}
           className="relative flex min-w-0 flex-1 flex-col"
           style={
             discussionMode === "docked" && discussionsVisible && dockedLayout.stacked
@@ -949,6 +1040,74 @@ function Documents({
               : undefined
           }
         >
+          {findOpen ? (
+            <div
+              data-doc-find-ignore="true"
+              data-testid="doc-find-bar"
+              className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded-md border border-border bg-popover p-1 shadow-md"
+            >
+              <input
+                ref={findInputRef}
+                value={findQuery}
+                onChange={(event) => {
+                  setFindQuery(event.target.value);
+                  setFindActiveIndex(0);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    jumpFind(event.shiftKey ? -1 : 1);
+                  } else if (event.key === "F3") {
+                    event.preventDefault();
+                    jumpFind(event.shiftKey ? -1 : 1);
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeFind();
+                  }
+                }}
+                aria-label="Find in document"
+                placeholder="Find…"
+                spellCheck={false}
+                className="w-44 rounded-sm border border-input-border bg-background px-2 py-1 text-ui-sm outline-none"
+              />
+              <span
+                data-testid="doc-find-count"
+                className="min-w-[3.5rem] text-center text-ui-xs tabular-nums text-foreground-subtle"
+              >
+                {findQuery.trim()
+                  ? `${Math.min(findActiveIndex + 1, Math.max(findMatchCount, 1))} / ${findMatchCount}`
+                  : ""}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Previous match"
+                title="Shift+Enter"
+                onClick={() => jumpFind(-1)}
+              >
+                <ChevronUp aria-hidden="true" className="size-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Next match"
+                title="Enter"
+                onClick={() => jumpFind(1)}
+              >
+                <ChevronDown aria-hidden="true" className="size-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Close find"
+                title="Esc"
+                onClick={closeFind}
+              >
+                <X aria-hidden="true" className="size-3.5" />
+              </Button>
+            </div>
+          ) : null}
           {editing ? (
             <div className="flex items-center justify-end gap-2 border-b border-border px-3 py-1">
               <Button
