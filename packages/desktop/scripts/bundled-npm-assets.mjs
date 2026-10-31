@@ -8,7 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { access, cp, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, relative, sep } from "node:path";
+import {dirname, basename, join, relative, sep } from "node:path";
 import { downloadPrebuiltArchive } from "../../../scripts/prebuilt-binary-download.mjs";
 import { extractPrebuiltArchive } from "../../../scripts/prebuilt-binary-extract.mjs";
 
@@ -44,7 +44,13 @@ export async function stageBundledNpm({
   const tarballPath = await ensureVerifiedTarball({ cacheDir, download, integrity, version });
   const workDir = await mkdtemp(join(tmpdir(), "zcode-bundled-npm-"));
   try {
-    extract({ archiveExt: "tgz", archivePath: tarballPath, cwd: workDir, extractDir: workDir });
+    // 修复：cwd 必须与 tarball 同盘（见 prebuilt-binary-extract.mjs 的 GNU tar 盘符说明）。
+    extract({
+      archiveExt: "tgz",
+      archivePath: tarballPath,
+      cwd: dirname(tarballPath),
+      extractDir: workDir,
+    });
     const packageRoot = join(workDir, NPM_TARBALL_PACKAGE_DIR);
     await assertNpmEntries(packageRoot);
     const targetRoot = join(glmDir, ...BUNDLED_NPM_STAGED_SEGMENTS);
