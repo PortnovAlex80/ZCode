@@ -1175,3 +1175,22 @@ Remaining        : live GUI acceptance of fork features on the 3.17.1 build stay
                    the user; 151-suite coverage debt and 2 quarantined env tests are
                    follow-up; installer build recorded separately below
 ```
+
+2026-10-31 v3.17.1 delivery build (recorded separately; source committed before packaging):
+
+```text
+Command          : Build-Installer.cmd (full) after fix(desktop) e630b797
+Artifact         : packages/desktop/dist/ZCode-3.17.1-win-x64.exe
+Size / SHA-256   : 215738076 bytes /
+                   2e7f7c72eb077a573996c6e9b783550de61725cb921539eacd951a3dfb5c5584
+Fork revision    : e630b797 (= merge a8783ef9 + GNU-tar cwd fix); packaged version
+                   3.17.1, buildCommitId=e630b797, built 2026-10-31T02:22:43Z;
+                   win-unpacked refreshed by the same run
+Build repair     : upstream stageBundledNpm extracted with a system-drive cwd while the
+                   tarball is on the repo drive; the GNU tar in this machine's PATH
+                   parsed "D:/..." as a remote host. Fixed by passing the tarball
+                   directory as extract cwd (same-drive relative archive argument)
+Notes            : build-only run — NOT launched/installed/published; replaces nothing
+                   (previous artifacts ZCode-3.16.2/3.15.1-win-x64.exe remain in dist/);
+                   live fork-feature acceptance on 3.17.1 stays with the user
+```
