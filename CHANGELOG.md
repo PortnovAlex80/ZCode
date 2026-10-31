@@ -1,5 +1,73 @@
 # Changelog
 
+<!-- Форк ZCode-Harness: изменения форка фиксируются здесь по упакованным версиям
+     (новейшие сверху). Секция Build = артефакт установки с SHA-256 и исходной
+     ревизией (buildCommitId). Upstream-merge — одной сводкой; полная история в git. -->
+
+## 3.17.1 fork — 2026-10-31
+
+### Added
+
+- Find-in-document for the document tab (U-19): Ctrl/Cmd+F opens an in-pane
+  find bar in both view and edit modes. View mode highlights every match in
+  the rendered prose via the CSS Custom Highlight API with the standard find
+  tokens; edit mode searches the textarea buffer with the native selection.
+  Live `n / m` counter, Enter/F3 next, Shift+Enter prev, Esc closes and clears.
+- U-20 registered (open): content search across all documents inside the
+  picker — needs a service-side `search` contract, recorded in the checklist.
+
+### Changed
+
+- Merged upstream v3.17.1 (zai-org/ZCode a60ba6a): partition-based timeline
+  performance model, Sites plugin panel, request-security edition, Electron 44,
+  engineering test model. The fork's presentation freeze and mounted-turn clock
+  are preserved on top of the upstream partition model; all fork features
+  verified intact after the merge (autosave, popout/independent windows,
+  GPT/SIWC auth, fork updater policy).
+- Restored 1,938 app-unit test files retired by upstream: 1,787 pass on the
+  merged tree; 151 suites pinning pre-3.17.1 module surfaces are reverted and
+  listed in `docs/testing/V3-17-1-TEST-DEBT.md`; 2 upstream engineering tests
+  are quarantined as Windows-env failures (see `vitest.config.ts`).
+
+### Fixed
+
+- Bundled npm staging on Windows: upstream's extract step passed a
+  system-drive cwd, and the GNU tar in PATH parsed `D:/...` as a remote host.
+  Extract now uses the tarball directory as cwd (same-drive relative path).
+
+### Build
+
+- `packages/desktop/dist/ZCode-3.17.1-win-x64.exe` (see the checklist delivery
+  entry for the artifact SHA and buildCommitId of this version).
+
+## 3.16.2 fork — 2026-10-21 → 2026-10-30
+
+### Added
+
+- ChatGPT/GPT subscription integration: SIWC OAuth login, provider runtime
+  and account services, coding-plan (highspeed) surfaces in the model picker
+  and composer, share notices and saved-time accounting.
+- Multi-tab Open doc (U-12): «+» opens a new document tab each time, per-tab
+  drafts and titles; clean workspace-relative picker paths (U-13); searchable
+  combobox picker and first-class txt documents with soft wrap (U-08/U-09).
+- Documents in independent OS windows and restored concurrent conversation
+  layouts; document discussions survive reopen with their native sessions.
+- U-18: manual document edits autosave to disk (desktop-local grant + 500 ms
+  debounce, CAS conflict guard); the Save button and picker delete go live.
+
+### Fixed
+
+- Fork update policy distinguished from development builds (packaged
+  auto-update stays compiled off).
+- Full-view integration gaps, chat presentation flags during the collapsed
+  full view, and a Windows guard for POSIX-permission skip paths.
+
+### Build
+
+- `packages/desktop/dist/ZCode-3.16.2-win-x64.exe`, SHA-256
+  `d22260382e6ebdb97c74eab07fbaf353017b01cd5186ffdd5e5b6fef498375a9`,
+  source revision `65e63a39` (includes U-18; superseded by 3.17.1).
+
 ## 3.15.1 fork — 2026-10-17
 
 ### Added
@@ -73,3 +141,21 @@
 - Multi-monitor/DPI, crash recovery, full streaming/permission scenarios and complete
   performance measurements remain explicit acceptance items in the
   [Russian checklist](docs/spec-harness/ACCEPTANCE-CHECKLIST.md).
+
+## 3.15.1 fork — 2026-10-13 → 15 (baseline)
+
+### Added
+
+- Spec Harness port into the fork: the document tab (Open doc) with view /
+  edit / per-document drafts and CAS save, native document discussions bound
+  to artifact context, project metadata / passports, Word title-sheet
+  generation, and the production packaging pipeline (Build-Installer.cmd,
+  fork icon, packaged auto-update compiled off, one supported release).
+- Document search in the picker: project-prefixed and absolute paths,
+  multi-term matches, filename priority, one-click open, result counts.
+
+### Build
+
+- `packages/desktop/dist/ZCode-3.15.1-win-x64.exe`, SHA-256
+  `1ee68dc16242c52f5f48414dc5b999a7aff6fd0f70216937ddc2b467372ff09`,
+  source revision `a8a0c5ac` (superseded by later versions).
