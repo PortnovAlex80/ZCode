@@ -62,6 +62,15 @@ function createPaneLayer() {
       rebuild(state);
       sessions.set(sessionId, state);
     },
+    // 2026-10-31 回归：绑定会话的 store 状态可切换（connecting → error），
+    // 模拟已删除会话的 "Session not found" 订阅失败并通知订阅者。
+    setStatus(sessionId: string, status: string) {
+      const state = sessions.get(sessionId);
+      if (!state) throw new Error(`unknown session ${sessionId}`);
+      state.status = status;
+      rebuild(state);
+      state.listeners.forEach((listener) => listener());
+    },
     acquire(sessionId: string) {
       if (!sessions.has(sessionId)) {
         const fresh: FakeState = {
@@ -187,7 +196,7 @@ function createWatcher() {
 }
 
 function renderDocumentPane(
-  options: { identity: string; writable?: boolean; delay?: number },
+  options: { identity: string; writable?: boolean; delay?: number; parentSessionId?: string },
   documents = createDocumentsService({ writable: options.writable ?? true }),
 ) {
   const key = documentPresentationKey(WORKSPACE_PATH, options.identity);
@@ -208,7 +217,7 @@ function renderDocumentPane(
       children: createElement(SpecDocumentPane, {
         workspacePath: WORKSPACE_PATH,
         workspaceIdentity: options.identity,
-        parentSessionId: null,
+        parentSessionId: options.parentSessionId ?? null,
         onClose: () => {},
         autosaveDelayMs: options.delay ?? AUTOSAVE_DELAY,
       }),
@@ -337,5 +346,53 @@ describe("U-18 document tab autosaves manual edits to disk", () => {
         "Saving and deleting are unavailable for this host; documents are read-only.",
       ),
     ).toBeTruthy();
+  });
+
+  // 2026-10-31 回归（用户实况）：文档绑定到已删除的会话（升级 3.17.1 后 store
+  // connect 反复 "Session not found"，状态停在 error）。裁决：「если в файл никто
+  // не пишет — не надо блокировать」——死会话不是 writer，手动 Save 可用且落盘。
+  it("manual Save stays available when the bound session is dead (store error)", async () => {
+    pane.layer.seed("sess-dead-u18", null);
+    pane.layer.setStatus("sess-dead-u18", "error");
+    const { documents } = renderDocumentPane({
+      identity: "u18-dead-session",
+      parentSessionId: "sess-dead-u18",
+      delay: 60_000,
+    });
+    const editor = await openedEditor();
+
+    fireEvent.change(editor, { target: { value: `${BASE_CONTENT}manual fix` } });
+    const save = screen.getByLabelText("Save") as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    expect(screen.queryByText("Save waits for active conversations to finish.")).toBeNull();
+
+    fireEvent.click(save);
+    await waitFor(() => expect(documents.disk.get(DOC_PATH)!.content).toBe(
+      `${BASE_CONTENT}manual fix`,
+    ));
+    await waitFor(() => expect(screen.getByText("Saved on disk")).toBeTruthy());
+  });
+
+  it("autosave is paused while the bound session is connecting and recovers when it settles as dead", async () => {
+    pane.layer.seed("sess-gone-u18", null);
+    pane.layer.setStatus("sess-gone-u18", "connecting");
+    const { documents } = renderDocumentPane({
+      identity: "u18-connecting-then-dead",
+      parentSessionId: "sess-gone-u18",
+    });
+    const editor = await openedEditor();
+
+    fireEvent.change(editor, { target: { value: `${BASE_CONTENT}while away` } });
+    await new Promise((resolve) => setTimeout(resolve, AUTOSAVE_DELAY * 6));
+    // connecting：快照未到，可能即将出现 writer——保存仍等待。
+    expect(documents.saveCalls).toEqual([]);
+    expect(screen.getByText("Save waits for active conversations to finish.")).toBeTruthy();
+
+    // 订阅最终失败（Session not found）→ 死会话不是 writer → 防抖恢复落盘。
+    pane.layer.setStatus("sess-gone-u18", "error");
+    await waitFor(() =>
+      expect(documents.disk.get(DOC_PATH)!.content).toBe(`${BASE_CONTENT}while away`),
+    );
+    await waitFor(() => expect(screen.getByText("Saved on disk")).toBeTruthy());
   });
 });

@@ -1233,3 +1233,27 @@ Re-verification  : typecheck 0 errors; lint 0 errors (101 pre-existing warnings)
 Notes            : build-only; CHANGELOG.md now carries per-version fork history
                    (3.15.1 baseline → 3.16.2 → 3.17.1) with per-version Build blocks
 ```
+
+2026-10-31 fix: dead bound session permanently disabled document Save/autosave (user
+report «я файл поправил — я должен его сохранить», installed 3.17.1):
+
+```text
+Defect           : useSpecWriteGuard treated any store status ≠ "live" as a writer.
+                   A document bound to a session deleted with old tasks (post-3.17.1
+                   upgrade) never unblocked: renderer log shows repeated
+                   v4.conversation.store.connect.failed "Session not found:
+                   sess_f7857b7b…" (11:43:57, 11:57:17 local), Save disabled,
+                   autosave paused, footer claimed "Save waits for active
+                   conversations" with no conversation running.
+User ruling      : «если в файл никто не пишет — не надо блокировать»; conflicts are
+                   resolved at write time, not by waiting on dead sessions.
+Fix              : packages/ui/src/spec-document/useSpecDiscussion.ts — error/closed
+                   store status no longer blocks (only connecting and live sessions
+                   with real writer activity do). Service-side CAS (expectedSha256)
+                   remains the actual conflict gate.
+Tests            : specDocumentAutosave.test.ts — manual Save enabled+writes with a
+                   dead bound session; autosave paused while connecting and recovered
+                   once the store settles as error.
+Live evidence    : user-confirmed footer text + renderer log lines above; live GUI
+                   re-acceptance of the fixed build stays with the user (next build).
+```

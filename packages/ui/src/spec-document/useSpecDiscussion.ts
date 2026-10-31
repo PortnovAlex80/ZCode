@@ -60,7 +60,19 @@ export function specDiscussionRemoveRefusal(input: {
   return null;
 }
 
-/** Observes known sessions; this is a UI guard, not a runtime-wide writer lock. */
+/**
+ * Observes known sessions; this is a UI guard, not a runtime-wide writer lock.
+ *
+ * 2026-10-31 修复（用户裁决）：“如果 в файл никто не пишет — не блокировать”。
+ * 绑定的会话可能已随任务删除/归档（升级 3.17.1 后实测：store connect 反复
+ * "Session not found"，状态停在 error≠live），旧逻辑把它当永久的 writer，
+ * Save 按钮与 U-18 自动保存被无限期禁用（日志证据：renderer
+ * v4.conversation.store.connect.failed "Session not found"）。规则改为：
+ * 只有 connecting（快照未到、可能马上出现 writer）和 live 会话里的真实写入
+ * 活动（activeWorks/running/queue/optimistic）阻塞；error/closed 的会话不可能
+ * 被观察到写入，不再阻塞。真正的并发冲突仍由服务端 CAS（expectedSha256）
+ * 在落盘时刻拒绝——guard 只是 UX 前置提示，不是锁。
+ */
 export function useSpecWriteGuard(sessionIds: string[]): {
   blocked: boolean;
   phases: Record<string, string>;
@@ -80,6 +92,9 @@ export function useSpecWriteGuard(sessionIds: string[]): {
         const state = store.getState();
         phases[sessionId] =
           state.status === "live" ? state.snapshot?.control.phase || "unknown" : state.status;
+        // error/closed：订阅失败或已释放，该会话永远不会出现可观察的 writer
+        // （用户裁决 2026-10-31）；真实冲突由服务端 CAS 拒绝。
+        if (state.status === "error" || state.status === "closed") return false;
         return (
           state.status !== "live" ||
           !state.snapshot ||
