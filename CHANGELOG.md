@@ -37,8 +37,9 @@
 
 ### Build
 
-- `packages/desktop/dist/ZCode-3.17.1-win-x64.exe` (see the checklist delivery
-  entry for the artifact SHA and buildCommitId of this version).
+- `packages/desktop/dist/ZCode-3.17.1-win-x64.exe`, 215,734,177 bytes, SHA-256
+  `15ec79eb8c47a619a0f138dc279e20f63b1d0c2dd5c5ee28b6d54cf47f97bdd9`,
+  source revision `77099cf3` (v3.17.1 merge + U-18 autosave + U-19 find).
 
 ## 3.16.2 fork — 2026-10-21 → 2026-10-30
 

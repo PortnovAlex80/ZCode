@@ -1216,3 +1216,20 @@ Checks           : spec-document suite 167/167; new U-19 tests 6/6; typecheck 0;
 Notes            : build-only; live GUI acceptance of the find bar (real rendered
                    markdown highlights, scroll-to-match) stays with the user
 ```
+
+2026-10-31 3.17.1 final delivery build (user-requested re-verification + rebuild; source
+committed at 77099cf3 before packaging — U-19 + per-version fork CHANGELOG.md):
+
+```text
+Command          : Build-Installer.cmd (full)
+Artifact         : packages/desktop/dist/ZCode-3.17.1-win-x64.exe (replaces the 02:56Z
+                   92db44c5 artifact of the same name)
+Size / SHA-256   : 215734177 bytes /
+                   15ec79eb8c47a619a0f138dc279e20f63b1d0c2dd5c5ee28b6d54cf47f97bdd9
+Fork revision    : 77099cf3; packaged version 3.17.1, buildCommitId=77099cf3,
+                   built 2026-10-31T03:21:35Z
+Re-verification  : typecheck 0 errors; lint 0 errors (101 pre-existing warnings);
+                   architecture 0; spec-document suite 27 files / 167 tests all passed
+Notes            : build-only; CHANGELOG.md now carries per-version fork history
+                   (3.15.1 baseline → 3.16.2 → 3.17.1) with per-version Build blocks
+```
