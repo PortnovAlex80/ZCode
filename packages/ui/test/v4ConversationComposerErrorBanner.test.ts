@@ -102,6 +102,16 @@ vi.mock("@/v4/composer/V4ComposerToolbar.js", async () => {
 const AnyConversationComposer = ConversationComposer as unknown as ComponentType<
   Record<string, unknown>
 >;
+// v3.17.1：upstream 新增必填 captureComposerSubmissionDraftTransaction（SessionPane
+// 经 useDraftConfigControl 注入）。本测试直接渲染 Composer，注入等效事务桩。
+const ComposerWithTransactionStub = ((props: Record<string, unknown>) =>
+  createElement(AnyConversationComposer, {
+    ...props,
+    captureComposerSubmissionDraftTransaction:
+      (props.captureComposerSubmissionDraftTransaction as unknown) ??
+      (() => ({ claim: () => false, restore: () => ({ applied: false, current: false }) })),
+  })) as unknown as ComponentType<Record<string, unknown>>;
+
 
 function makeSnapshot(): ConversationSnapshot {
   return {
@@ -164,7 +174,7 @@ function renderComposerWithError(
     createElement(
       ZCodeIntlProvider,
       { initialLocale: "zh-CN" },
-      createElement(AnyConversationComposer, {
+      createElement(ComposerWithTransactionStub, {
         snapshot: null,
         sessionId: "session-1",
         workspacePath: "/workspace",
@@ -198,7 +208,7 @@ function renderComposerWithSnapshot(
       { initialLocale: "zh-CN" },
       createElement(RemoteConversationAvailability, {
         available: remoteAvailable,
-        children: createElement(AnyConversationComposer, {
+        children: createElement(ComposerWithTransactionStub, {
           snapshot,
           sessionId: "session-1",
           workspacePath: "/workspace",
@@ -220,7 +230,7 @@ function renderHighspeedComposer(overrides: Record<string, unknown> = {}): strin
     createElement(
       ZCodeIntlProvider,
       { initialLocale: "zh-CN" },
-      createElement(AnyConversationComposer, {
+      createElement(ComposerWithTransactionStub, {
         snapshot: makeSnapshot(),
         sessionId: "session-1",
         workspacePath: "/workspace",
@@ -249,7 +259,7 @@ function renderBlockedComposer(): string {
     createElement(
       ZCodeIntlProvider,
       { initialLocale: "zh-CN" },
-      createElement(AnyConversationComposer, {
+      createElement(ComposerWithTransactionStub, {
         snapshot: makeSnapshot(),
         sessionId: "session-1",
         workspacePath: "/workspace",
@@ -408,7 +418,7 @@ it("离线输入栏优先显示禁发送原因，不让不可用模型控件挤�
       createElement(
         RemoteConversationAvailability,
         { available: false },
-        createElement(AnyConversationComposer, {
+        createElement(ComposerWithTransactionStub, {
           workspacePath: "/workspace",
           sessionId: null,
           snapshot: null,

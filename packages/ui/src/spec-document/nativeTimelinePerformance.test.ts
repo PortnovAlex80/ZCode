@@ -341,30 +341,38 @@ test("duration ticks stay inside mounted turns while upstream plugin and expiry 
   assert.equal(tags.filter((tag) => tag === "ConversationClockedTurnGroup").length, 2);
 });
 
-test("CSS-hidden narrow navigator does not mount or build history previews and restores at its visibility boundary", () => {
-  let condition: ts.Expression | undefined;
-  function visit(node: ts.Node) {
-    if (
-      ts.isConditionalExpression(node) &&
-      node.whenFalse.getText(source).includes("<ConversationTurnNavigator") &&
-      node.whenTrue.kind === ts.SyntaxKind.NullKeyword
-    )
-      condition = node.condition;
-    ts.forEachChild(node, visit);
+test("narrow or sharing-owned rail keeps the navigator disabled and its content frozen", async () => {
+  // v3.17.1：upstream 用容器实测宽度状态（turnNavigatorContainerWide）代替 864px 常量门槛；
+  // 断言改抓 enabled 表达式与导航 memo 的禁用抑制，不再假设具体像素边界。
+  let enabledInit: ts.Expression | undefined;
+  function visitEnabled(node: ts.Node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "turnNavigatorEnabled")
+      enabledInit = node.initializer;
+    ts.forEachChild(node, visitEnabled);
   }
-  visit(source);
-  assert.ok(condition);
-  const conditionText = condition!.getText(source);
-  const hidden = (width: number, sharing: boolean) =>
-    runInNewContext(conditionText, {
-      hideTurnNavigator: sharing,
-      turnNavigatorContainerWidthPx: width,
+  visitEnabled(source);
+  assert.ok(enabledInit);
+  const enabledCode = ts.transpileModule(`(${enabledInit!.getText(source)});`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+  }).outputText;
+  const enabled = (hideTurnNavigator: boolean, wide: boolean, size: number) =>
+    runInNewContext(enabledCode, {
+      hideTurnNavigator,
+      turnNavigatorContainerWide: wide,
+      turnNavigatorQueryRowIds: { size },
     }) as boolean;
-  assert.equal(hidden(0, false), true, "zero-width hidden panes do no navigator work");
-  assert.equal(hidden(863, false), true);
-  assert.equal(hidden(864, false), false);
-  assert.equal(hidden(1200, false), false);
-  assert.equal(hidden(1200, true), true, "sharing continues to own the rail");
+  assert.equal(enabled(false, false, 5), false, "narrow panes keep the navigator disabled");
+  assert.equal(enabled(false, true, 1), false, "fewer than two queries stay disabled");
+  assert.equal(enabled(false, true, 2), true);
+  assert.equal(enabled(false, true, 12), true);
+  assert.equal(enabled(true, true, 12), false, "sharing continues to own the rail");
+  // 禁用期间导航 memo 不传播正文更新（恢复 enabled 时一次性读取最新 props）。
+  const navigatorText = await readFile(
+    new URL("../v4/ConversationTurnNavigator.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(navigatorText, /if \(previous\.enabled !== next\.enabled\) return false;/);
+  assert.match(navigatorText, /if \(next\.enabled === false\) return true;/);
 });
 
 const findHookText = await readFile(
@@ -372,48 +380,82 @@ const findHookText = await readFile(
   "utf8",
 );
 const findHookSource = ts.createSourceFile("find.ts", findHookText, ts.ScriptTarget.Latest, true);
-function createFindMemoHarness() {
+/** v3.17.1：upstream 的查找缓存按「历史段 + 尾段」两个 UnitFindCache 工作；harness 直接执行
+ *  两个 memo 初始化器与 appendUnitFindMatches 的源码，并共享可变 cache ref。 */
+function extractInitializer(sourceFile: ts.SourceFile, varName: string): string {
   let initializer: ts.Expression | undefined;
   function visit(node: ts.Node) {
-    if (
-      ts.isVariableDeclaration(node) &&
-      node.name.getText(findHookSource) === "conversationFindIndex"
-    )
+    if (ts.isVariableDeclaration(node) && node.name.getText(sourceFile) === varName)
       initializer = node.initializer;
     ts.forEachChild(node, visit);
   }
-  visit(findHookSource);
-  assert.ok(initializer);
-  const code = ts.transpileModule(`(${initializer!.getText(findHookSource)});`, {
+  visit(sourceFile);
+  assert.ok(initializer, varName);
+  return ts.transpileModule(`(${initializer!.getText(sourceFile)});`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
   }).outputText;
-  const cache = new Map();
-  const unitFindCacheRef = { current: cache };
-  const unitFindCacheQueryRef = { current: "" };
+}
+function extractFunctionCode(sourceFile: ts.SourceFile, name: string): string {
+  const declaration = sourceFile.statements.find(
+    (node) => ts.isFunctionDeclaration(node) && node.name?.text === name,
+  );
+  assert.ok(declaration, name);
+  return ts.transpileModule(declaration.getText(sourceFile), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+  }).outputText;
+}
+const appendUnitFindMatchesCode = extractFunctionCode(findHookSource, "appendUnitFindMatches");
+const historyFindIndexCode = extractInitializer(findHookSource, "historyFindIndex");
+const conversationFindIndexCode = extractInitializer(findHookSource, "conversationFindIndex");
+function createFindMemoHarness() {
+  const historyFindCacheRef = { current: new Map() };
+  const tailFindCacheRef = { current: new Map() };
+  const emptyFindIndex = { query: "", matches: [], matchCount: 0, loadedRowCount: 0 };
   let builds = 0;
   return {
-    cache,
+    emptyFindIndex,
+    get historyCache() {
+      return historyFindCacheRef.current;
+    },
+    get tailCache() {
+      return tailFindCacheRef.current;
+    },
     get builds() {
       return builds;
     },
-    evaluate(renderUnits: ConversationTurnRenderUnit[], conversationFindQuery: string) {
-      return runInNewContext(code, {
+    evaluate(
+      renderUnits: { history: ConversationTurnRenderUnit[]; tail: ConversationTurnRenderUnit[] },
+      conversationFindQuery: string,
+    ) {
+      const normalizedFindQuery = conversationFindQuery.trim().toLocaleLowerCase();
+      const sandboxBase = {
         renderUnits,
         conversationFindQuery,
+        normalizedFindQuery,
         codeCommentCardsEnabled: true,
-        unitFindCacheRef,
-        unitFindCacheQueryRef,
+        emptyFindIndex,
+        historyFindCacheRef,
+        tailFindCacheRef,
         useMemo: (calculate: () => unknown) => calculate(),
-        buildConversationFindIndex: (...args: Parameters<typeof buildConversationFindIndex>) => {
+        buildFindIndex: (...args: Parameters<typeof buildConversationFindIndex>) => {
           builds++;
           return buildConversationFindIndex(...args);
         },
-      }) as ReturnType<typeof buildConversationFindIndex>;
+      };
+      const run = (code: string, extra: Record<string, unknown>) =>
+        runInNewContext(`${appendUnitFindMatchesCode}\n${code}`, { ...sandboxBase, ...extra }) as unknown;
+      const historyFindIndex = run(historyFindIndexCode, {}) as {
+        matches: unknown[];
+        loadedRowCount: number;
+      };
+      return run(conversationFindIndexCode, { historyFindIndex }) as ReturnType<
+        typeof buildConversationFindIndex
+      >;
     },
   };
 }
 
-test("empty find queries count rows without reading any user or assistant text in the index or hook", () => {
+test("empty find queries return a stable empty index without reading any user or assistant text", () => {
   const unit = buildConversationTurnRenderUnits(
     turnRows("one", "completedSuccess", { activeMs: 100 }),
   )[0]!;
@@ -430,63 +472,73 @@ test("empty find queries count rows without reading any user or assistant text i
       assert.deepEqual(result, { query: "", matches: [], matchCount: 0, loadedRowCount: 2 });
     }
     const harness = createFindMemoHarness();
-    harness.cache.set("previous-search", { source: [{ sourceText: "retained old text" }] });
-    assert.deepEqual(plain(harness.evaluate([unit], query)), {
+    harness.historyCache.set("previous-search", {
+      unit: {},
+      source: [{ sourceText: "retained old text" }],
+      loadedRowCount: 1,
+      index: 0,
+    });
+    harness.tailCache.set("previous-search-tail", {
+      unit: {},
+      source: [{ sourceText: "retained old text" }],
+      loadedRowCount: 1,
+      index: 0,
+    });
+    assert.deepEqual(plain(harness.evaluate({ history: [unit], tail: [] }, query)), {
       query: "",
       matches: [],
       matchCount: 0,
-      loadedRowCount: 2,
+      loadedRowCount: 0,
     });
     assert.equal(harness.builds, 0, "hook never invokes text projection when no query exists");
-    assert.equal(harness.cache.size, 0, "closing search releases its cached source text");
+    assert.equal(harness.historyCache.size, 0, "closing search releases its cached history text");
+    assert.equal(harness.tailCache.size, 0, "closing search releases its cached tail text");
   }
 });
 
-test("find cache reuses unchanged source rows but invalidates a completed-row replacement and prunes removed units", () => {
+test("find cache reuses identical history units, rebuilds replacements and prunes removed units", () => {
   const rows = turnRows("one", "completedSuccess", { activeMs: 100 });
   const first = buildConversationTurnRenderUnits(rows)[0]!;
   const harness = createFindMemoHarness();
-  assert.equal(harness.evaluate([first], "answer").matchCount, 1);
+  assert.equal(harness.evaluate({ history: [first], tail: [] }, "answer").matchCount, 1);
   assert.equal(harness.builds, 1);
-  const regrouped = buildConversationTurnRenderUnits(rows)[0]!;
-  assert.notEqual(regrouped, first);
-  assert.equal(harness.evaluate([regrouped], "answer").matchCount, 1);
-  assert.equal(harness.builds, 1, "rebuilding turn arrays preserves reusable row identities");
+  harness.evaluate({ history: [first], tail: [] }, "answer");
+  assert.equal(harness.builds, 1, "identical history unit identity reuses the cached matches");
   const replacedRows = rows.map((row) =>
     row.kind === "assistantText" ? { ...row, text: "answer answer replaced" } : row,
   );
   const replaced = buildConversationTurnRenderUnits(replacedRows)[0]!;
-  const revised = harness.evaluate([replaced], "answer");
+  const revised = harness.evaluate({ history: [replaced], tail: [] }, "answer");
   assert.equal(harness.builds, 2);
   assert.equal(revised.matchCount, 2);
   assert.deepEqual(
     plain(revised),
     plain(buildConversationFindIndex([replaced], "answer", { projectAssistantCodeComments: true })),
   );
-  assert.equal(harness.cache.size, 1);
-  assert.equal(harness.evaluate([], "answer").loadedRowCount, 0);
-  assert.equal(harness.cache.size, 0, "removed transcript units cannot retain source rows/matches");
+  assert.equal(
+    harness.historyCache.size,
+    1,
+    "the replaced unit no longer retains its cache entry",
+  );
+  assert.equal(harness.evaluate({ history: [], tail: [] }, "answer").matchCount, 0);
+  assert.equal(
+    harness.historyCache.size,
+    0,
+    "removed transcript units cannot retain source rows/matches",
+  );
   const laterRows = turnRows("later", "completedSuccess", { activeMs: 100 });
   const later = buildConversationTurnRenderUnits(laterRows)[0]!;
-  harness.evaluate([replaced, later], "answer");
-  assert.equal(harness.cache.size, 2);
-  const rebased = harness.evaluate([later], "answer");
-  assert.equal(harness.cache.size, 1);
-  assert.equal(
-    rebased.matches[0]!.unitIndex,
-    0,
-    "retained cached matches rebase to their current virtual position",
-  );
-  assert.equal(harness.evaluate([later], "question").matchCount, 1);
-  assert.equal(harness.cache.size, 1, "changing the query releases previous matches");
+  harness.evaluate({ history: [later], tail: [] }, "answer");
+  harness.evaluate({ history: [later], tail: [] }, "question");
+  assert.equal(harness.historyCache.size, 1, "changing the query releases previous matches");
 });
 
 test("running turn find results always refresh and report appended text", () => {
   const rows = turnRows("running", "running");
   const first = buildConversationTurnRenderUnits(rows, { nowMs: 2000 })[0]!;
   const harness = createFindMemoHarness();
-  assert.equal(harness.evaluate([first], "answer").matchCount, 1);
-  harness.evaluate([first], "answer");
+  assert.equal(harness.evaluate({ history: [], tail: [first] }, "answer").matchCount, 1);
+  harness.evaluate({ history: [], tail: [first] }, "answer");
   assert.equal(harness.builds, 2, "running turn bypasses completed-history cache");
   const appended = buildConversationTurnRenderUnits(
     rows.map((row) =>
@@ -494,8 +546,8 @@ test("running turn find results always refresh and report appended text", () => 
     ),
     { nowMs: 2000 },
   )[0]!;
-  assert.equal(harness.evaluate([appended], "answer").matchCount, 2);
-  assert.equal(harness.cache.size, 0);
+  assert.equal(harness.evaluate({ history: [], tail: [appended] }, "answer").matchCount, 2);
+  assert.equal(harness.tailCache.size, 0, "running units never enter the tail cache");
 });
 
 const navigatorOptions = {
@@ -645,15 +697,18 @@ test("navigator cache eliminates unchanged historical text reads, prunes removed
   assert.ok(historicalReads >= 200, "another mounted rail owns a separate cache");
 });
 
-test("navigator component owns its builder in a ref instead of a global cache", async () => {
+test("navigator component owns its items selector per instance instead of a global cache", async () => {
   const text = await readFile(
     new URL("../v4/ConversationTurnNavigator.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(text, /const itemsBuilderRef = useRef</);
   assert.match(
     text,
-    /if \(itemsBuilderRef\.current === null\) \{\s*itemsBuilderRef\.current = createCachedConversationTurnNavigatorItemsBuilder\(\);/,
+    /const selectItems = useMemo\(\(\) => createConversationTurnNavigatorItemsSelector\(\), \[\]\);/,
   );
-  assert.match(text, /itemsBuilderRef\.current!\(renderUnits,/);
+  assert.doesNotMatch(
+    text,
+    /^const \w+ = createConversationTurnNavigatorItemsSelector\(\)/m,
+    "module-level selector would be shared across sessions",
+  );
 });

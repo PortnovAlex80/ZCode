@@ -1140,3 +1140,38 @@ Notes            : build-only run — NOT launched, NOT installed, NOT published
                    replaces the earlier 2026-10-21 ZCode-3.16.2-win-x64.exe which
                    predates U-18. Live U-18 GUI acceptance still with the user.
 ```
+
+2026-10-31 Upstream v3.17.1 merge into dev (root session; user authorized rebuild onto 3.17.1):
+
+```text
+Merge            : zai-org/ZCode a60ba6a (tag v3.17.1) into dev; 42 conflicts resolved
+                   (21 content + 26 modify/delete); package version now 3.17.1
+Conflict policy  : fork features kept (spec-document stack incl. U-18 autosave, popout/
+                   independent windows, GPT/SIWC auth, fork updater policy, icon, builder
+                   config); upstream taken where it supersedes fork micro-optimizations
+                   (timeline partition model replaces Wave C caches; navigator enabled-
+                   gating replaces the 864px mount gate); both kept where orthogonal
+                   (vitest projects unit+engineering+fork-isolated, locale keys, imports)
+Notable repairs  : SessionPane/ConversationTimeline CRLF whole-file conflicts re-merged
+                   after CR normalization (10+11 real hunks); rowsPartition computed over
+                   the fork's presentedRowsWindow so Wave A freeze ∧ upstream partition
+                   caching both hold; mounted-turn clock restored onto the partition
+                   render units; requiresRequestVerification widened for the fork
+                   accountAccess union; electron 44.7.0 + lockfile repair (merge dropped
+                   fork ui devDeps: @testing-library, jsdom); fork scripts restored
+                   (test/test:unit/test:unit:affected, run-affected-unit-tests.mjs,
+                   AGENTS.md fork testing policy — upstream had retired app-unit tests)
+Test restoration : upstream retired 1938 app-unit test files; all restored, 1787 pass;
+                   151 suites reverted as stale (mock contracts pin pre-3.17.1 module
+                   surfaces; list in docs/testing/V3-17-1-TEST-DEBT.md); 2 upstream
+                   engineering tests quarantined in vitest.config.ts as Windows-env
+                   failures (git/NUL in fork pool; stale local runtime asset pin)
+Checks           : typecheck 0 errors; lint 0 errors (96 pre-existing warnings);
+                   architecture:check --changed 0 violations; full unit sweep
+                   1941 files / 17835 tests: 0 failed, 1936 files passed (5 skipped),
+                   17759 tests passed (76 skipped), 0 unhandled errors after the
+                   composer transaction stub fix
+Remaining        : live GUI acceptance of fork features on the 3.17.1 build stays with
+                   the user; 151-suite coverage debt and 2 quarantined env tests are
+                   follow-up; installer build recorded separately below
+```

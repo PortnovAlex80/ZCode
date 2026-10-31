@@ -357,12 +357,16 @@ describe("D-02 three context lanes stay separate at the payload level", () => {
     expect(creation.sessionId).toBeNull();
     expect(Object.keys(creation.payload as Record<string, unknown>).sort()).toEqual([
       "config",
+      // upstream commandFactory 现在在信封构造时注入 sessionId（UUID v4）。
+      "sessionId",
       "workspaceId",
     ]);
     expect((creation.payload as Record<string, unknown>).workspaceId).toBe(WORKSPACE_IDENTITY);
     // 执行配置是白名单拷贝：父快照的额外字段不得进入载荷（无 transcript fork / context import）。
     expect(creation.payload).toEqual({
       workspaceId: WORKSPACE_IDENTITY,
+      // upstream commandFactory 从 v3.17.1 起在信封构造时注入 sessionId（UUID v4）。
+      sessionId: expect.any(String),
       config: {
         provider: "native-provider",
         model: "native-model",
@@ -518,6 +522,8 @@ describe("D-02 three context lanes stay separate at the payload level", () => {
     // 创建无输入：载荷没有 firstInput/text，模型零输入。
     expect(Object.keys(creation.payload as Record<string, unknown>).sort()).toEqual([
       "config",
+      // upstream commandFactory 现在在信封构造时注入 sessionId（UUID v4）。
+      "sessionId",
       "workspaceId",
     ]);
     // pending 命令的“检查原生准入”也是 role=status：按文本断言而非唯一性。

@@ -35,6 +35,8 @@ export * from "./apply.js";
 // Wave B：客户端安全的一帧批量应用（apply.js 逐条语义的等价快路径）。
 export * from "./applyFrame.js";
 export * from "./transport.js";
+export * from "./input-prediction/contract.js";
+export * from "./session-data/index.js";
 export * from "./wire.js";
 export * from "./wire-codec.js";
 export * from "./wire-reassembly.js";
@@ -63,4 +65,4 @@ export {
 export { bashOutputDisplaySchema } from "../bash-output-display.js";
 export { modelSelectionSchema, type ModelSelection } from "../model-selection.js";
 
-export * from "../localTtft.js";
+export * from "../local-ttft/contract.js";
