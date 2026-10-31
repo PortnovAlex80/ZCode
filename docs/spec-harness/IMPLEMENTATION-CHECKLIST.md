@@ -1199,3 +1199,20 @@ Notes            : build-only run — NOT launched/installed/published; replaces
 
 - [ ] **U-19** (implementing 2026-10-31) Find-in-document for the document tab: Ctrl/Cmd+F opens an in-pane find bar in both view and edit modes. View mode searches the rendered preview text via CSS Custom Highlight API using the existing `--color-find-highlight(-active)` design tokens (all matches + active match, same pattern as the conversation find); edit mode searches the textarea buffer with native selection as the highlight. Shared behavior: case-insensitive substring match, live match count `n / m`, Enter/F3 next, Shift+Enter prev, Esc closes and clears highlights, highlights rebuilt on document/draft/query change and cleared on close/unmount/path switch; interactive elements (buttons/inputs) are excluded from view-mode matches. The find bar stays inside the pane (no global focus steal) and works for the txt prose view via the same DOM collector.
 - [ ] **U-20** (design note, open) Picker content search: today the document picker filters file names only (`documentSearch.ts`). A content search needs a service-side `search({ workspacePath, query })` over the listed documents (server-side scan, capped results with path+line+snippet); wire results into the picker dropdown as a second mode. Requires a shared/services contract change — not implemented with U-19.
+
+2026-10-31 U-19 delivery build (recorded separately; source committed at 92db44c5 before packaging):
+
+```text
+Command          : Build-Installer.cmd (full; fast path refused — source moved)
+Artifact         : packages/desktop/dist/ZCode-3.17.1-win-x64.exe (replaces the 02:22Z
+                   e630b797 artifact of the same name)
+Size / SHA-256   : 215738609 bytes /
+                   c7c722c75d016f52e6f7e23b1a6eb97e93537878cbdeba509e493902cd145e5c
+Fork revision    : 92db44c5 (v3.17.1 merge + GNU-tar fix + U-19); packaged version
+                   3.17.1, buildCommitId=92db44c5, built 2026-10-31T02:56:41Z
+Checks           : spec-document suite 167/167; new U-19 tests 6/6; typecheck 0;
+                   lint 0/0 on changed files; architecture 0 (documentFind.ts admitted
+                   path-exact in the spec-document cluster)
+Notes            : build-only; live GUI acceptance of the find bar (real rendered
+                   markdown highlights, scroll-to-match) stays with the user
+```
