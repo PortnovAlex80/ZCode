@@ -1185,6 +1185,8 @@ export function sidePaneOwnerKey(taskId: string | null | undefined): string {
 export interface SidePaneVisibilityScope {
   workspaceKey: string | null;
   ownerTaskId: string | null;
+  pluginUiSessionId?: string | null;
+  pluginUiWorkspaceKey?: string | null;
 }
 
 function sidePaneTabMatchesWorkspace(
@@ -1231,6 +1233,13 @@ export function isSidePaneTabVisibleInScope(
   tab: WorkspaceSidePaneTab,
   scope: SidePaneVisibilityScope,
 ): boolean {
+  if (tab.type === "plugin-ui") {
+    return (
+      sidePaneTabMatchesWorkspace(tab, scope.pluginUiWorkspaceKey ?? scope.workspaceKey) &&
+      tab.parentSessionId ===
+        (scope.pluginUiSessionId === undefined ? scope.ownerTaskId : scope.pluginUiSessionId)
+    );
+  }
   if (!sidePaneTabMatchesWorkspace(tab, scope.workspaceKey)) return false;
   switch (tab.type) {
     case "git":
@@ -1246,7 +1255,6 @@ export function isSidePaneTabVisibleInScope(
       return tab.rootSessionId === scope.ownerTaskId;
     case "selection-side-chat":
     case "plan-detail":
-    case "plugin-ui":
     case "workflow-run":
     case "workflow-directory":
     case "workflow-actor-session":
@@ -1313,7 +1321,11 @@ export function resolveSidePaneScopeState(
         : state,
     // 草稿重新进入时默认收起；空 scope 的历史展开偏好不能生成新标签页。
     isSidePaneCollapsed:
-      scope.ownerTaskId === null || activeTabId === null ? true : (collapsedPreference ?? false),
+      activeTabId === null ||
+      (scope.ownerTaskId === null &&
+        !state?.tabs.some((tab) => tab.id === activeTabId && tab.type === "plugin-ui"))
+        ? true
+        : (collapsedPreference ?? false),
   };
 }
 
