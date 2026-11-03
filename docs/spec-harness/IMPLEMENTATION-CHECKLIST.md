@@ -1274,3 +1274,32 @@ Checks           : spec-document suite 27 files / 169 tests (incl. 2 new guard
 Notes            : build-only; installed-EXE live re-acceptance (open the affected
                    document, edit, watch autosave) stays with the user
 ```
+
+2026-11-03 merge: upstream v3.17.2 (source-sync a9fe401e, no release tag; user
+authorized «Нужен мерж… Взять лучшее»):
+
+```text
+Merge             : 2292680c "merge: upstream v3.17.2 into dev" (parents e4739523,
+                    a9fe401e); 203 files, +9635/−1472 from upstream
+Conflicts         : 2. desktop main index.ts — additive import block, both sides
+                    kept. SessionPane.tsx — whole-file conflict was a CRLF/LF
+                    artifact (fork blob CRLF, upstream LF); resolved by 3-way
+                    merge-file on LF-normalized sides + CRLF restage: upstream's
+                    real delta (+121/−13) applied — plugin-UI draft sessions,
+                    draftProjectReady remote gating; duplicate effectiveSessionId
+                    declaration dropped (fork defines it earlier); dialogs gate =
+                    fork panePresented ∧ upstream effectiveSessionId snapshot
+                    ownership.
+Fork-vs-upstream   : upstream new features (browser local preview, plugin UI in
+                    draft pane, remote draft project gate) adopted as-is — no
+                    fork analogs. Fork zones untouched by upstream (spec-document,
+                    popouts, auth, updater). Upstream retired the tray unread dot;
+                    taskbar overlay badge kept (user-visible feature, user asked
+                    about it 2026-10-31). Source pin nativeDiscussionHandoff.test
+                    updated to the combined dialogs gate.
+Checks            : typecheck 0; lint 0 errors (102 warnings, +1 upstream style
+                    no-useless-spread in taskListMembershipVersion.ts — upstream
+                    code kept verbatim); architecture 0; spec-document suite
+                    27 files / 169 tests green; shared contract tests 5/5.
+Not done          : push (awaiting user), installer rebuild, master promotion.
+```

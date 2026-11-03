@@ -4,6 +4,26 @@
      (новейшие сверху). Секция Build = артефакт установки с SHA-256 и исходной
      ревизией (buildCommitId). Upstream-merge — одной сводкой; полная история в git. -->
 
+## 3.17.2 fork — 2026-11-03
+
+### Changed
+
+- Merged upstream v3.17.2 (zai-org/ZCode a9fe401e, released on main without a
+  tag): privilege-scoped browser local HTML preview, plugin UI bound to
+  draft/prewarm sessions, remote drafts now require a chosen project before
+  agent prewarm, interaction dialogs verify snapshot ownership, packaged
+  platform-dependency pruning. The merge keeps fork features intact
+  (spec-document autosave/find, independent document windows, popouts, GPT/
+  SIWC auth, fork updater policy); the dialogs gate combines the fork's
+  panePresented visibility with upstream's effectiveSessionId ownership check.
+- Upstream retired the tray corner unread dot; the Windows taskbar unread
+  overlay badge (the visible red dot) is kept and working.
+
+### Build
+
+- Not built yet; source merged at the commit above. The last built installer
+  remains 3.17.1 (see below).
+
 ## 3.17.1 fork — 2026-10-31
 
 ### Added

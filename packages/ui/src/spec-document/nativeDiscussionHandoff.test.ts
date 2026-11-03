@@ -629,5 +629,11 @@ test("actual renderer keeps bootstrap hook mounted and native/custom composers a
   assert.equal(prop("onSessionCreated"), undefined, "our pane never navigates the general chat");
   const nativeSource = await readFile(new URL("../v4/SessionPane.tsx", import.meta.url), "utf8");
   assert.match(nativeSource, /interactionDialogsVisible = true/);
-  assert.match(nativeSource, /interactionDialogsVisible && sessionId && snapshot \?/);
+  // 3.17.2 合并（2026-11-03）：上游把 dialogs 绑定改为 effectiveSessionId 且校验
+  // snapshot 归属（快照必须属于当前生效会话）；fork 的 panePresented 可见性门槛
+  // 保留——两条件合取，旧正则未跟上实现。
+  assert.match(
+    nativeSource,
+    /interactionDialogsVisible && effectiveSessionId && snapshot\?\.sessionId === effectiveSessionId \?/,
+  );
 });
