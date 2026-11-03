@@ -1303,3 +1303,20 @@ Checks            : typecheck 0; lint 0 errors (102 warnings, +1 upstream style
                     27 files / 169 tests green; shared contract tests 5/5.
 Not done          : push (awaiting user), installer rebuild, master promotion.
 ```
+
+2026-11-03 delivery build: v3.17.2 installer (source committed and pushed at
+a9327d42 before packaging):
+
+```text
+Command          : Build-Installer.cmd (full; 22:01–22:24 local, exit 0)
+Artifact         : packages/desktop/dist/ZCode-3.17.2-win-x64.exe
+Size / SHA-256   : 215,725,036 bytes /
+                   5e2260e859a43f4edfac8c9e277c9f69bdb27d067996b1f319431540b1563e39
+                   (re-verified against the file on disk)
+Fork revision    : a9327d42; packaged version 3.17.2, buildCommitId=a9327d42,
+                   built 2026-11-03T19:09:45Z
+Notes            : build-only; not launched, not installed, not published.
+                   Installed-EXE live acceptance of the merged features
+                   (browser local preview, plugin UI in drafts, dialogs gate)
+                   stays with the user.
+```

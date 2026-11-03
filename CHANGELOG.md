@@ -21,8 +21,9 @@
 
 ### Build
 
-- Not built yet; source merged at the commit above. The last built installer
-  remains 3.17.1 (see below).
+- `packages/desktop/dist/ZCode-3.17.2-win-x64.exe`, 215,725,036 bytes, SHA-256
+  `5e2260e859a43f4edfac8c9e277c9f69bdb27d067996b1f319431540b1563e39`,
+  source revision `a9327d42` (v3.17.2 merge + dialogs-gate pin alignment).
 
 ## 3.17.1 fork — 2026-10-31
 
