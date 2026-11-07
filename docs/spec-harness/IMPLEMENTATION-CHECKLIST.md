@@ -1320,3 +1320,24 @@ Notes            : build-only; not launched, not installed, not published.
                    (browser local preview, plugin UI in drafts, dialogs gate)
                    stays with the user.
 ```
+
+2026-11-07 experimental branch build: U-20 path-half trial (source at d3457c0b on
+branch u20-document-search; NOT merged to dev; user asked to keep the previous
+installer):
+
+```text
+Command          : Build-Installer.cmd (full; 15:41–16:00 local, exit 0)
+Artifact         : packages/desktop/dist/ZCode-3.17.2-win-x64.exe (trial with
+                   host-side document picker search)
+Size / SHA-256   : 215,721,303 bytes /
+                   a9718c3e924b830e0f5dfc0b2e59c04073339c5e44173ed5dd43374f0aa7fa54
+                   (re-verified against the file on disk)
+Fork revision    : d3457c0b (branch u20-document-search); packaged version 3.17.2
+Previous kept    : ZCode-3.17.2-win-x64-a9327d42.exe (official 3.17.2 delivery,
+                   SHA 5e2260e8…f858, renamed to protect from overwrite)
+Checks           : branch suites services 9/9 + spec-document 203/203; typecheck 0;
+                   lint 0 errors
+Notes            : build-only; same NSIS version 3.17.2 installs over the official
+                   build — to roll back, reinstall the renamed a9327d42 artifact.
+                   CHANGELOG stays untouched until the branch merges to dev.
+```
