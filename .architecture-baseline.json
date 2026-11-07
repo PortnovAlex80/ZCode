@@ -1,4 +1,158 @@
 {
   "version": 1,
-  "violations": []
+  "violations": [
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/specDocumentWorkspace.test.ts",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/spec-document/specDocumentService.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "15867f885b7b460d",
+      "global": false
+    },
+    {
+      "rule": "disable-count",
+      "file": "packages/ui/src/spec-document/SpecDocumentPane.tsx",
+      "module": "ui-spec-document",
+      "detail": "2",
+      "message": "文件包含 2 条 lint disable",
+      "fingerprint": "1ecadf78c7bc9217",
+      "global": false
+    },
+    {
+      "rule": "disable-count",
+      "file": "packages/ui/src/spec-document/useSpecDiscussion.ts",
+      "module": "ui-spec-document",
+      "detail": "1",
+      "message": "文件包含 1 条 lint disable",
+      "fingerprint": "2dc5e1ebbc3f8926",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/ArtifactMetadataControls.tsx",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/index.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "346e7bb793bf9321",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/artifactMetadataDraft.ts",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/spec-document/projectMetadataBlocks.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "34d1589ae1980104",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/ArtifactMetadataEditor.tsx",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/index.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "35feec020c82fd94",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/artifactContextSend.ts",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/index.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "43b290f629754206",
+      "global": false
+    },
+    {
+      "rule": "disable-count",
+      "file": "packages/ui/src/spec-document/specPopoutRegion.tsx",
+      "module": "ui-spec-document",
+      "detail": "1",
+      "message": "文件包含 1 条 lint disable",
+      "fingerprint": "7ccbc6c0c5a93bc6",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/nativeFileEditing.tsx",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/index.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "973699145fc1f621",
+      "global": false
+    },
+    {
+      "rule": "max-file-lines",
+      "file": "packages/ui/src/spec-document/SpecDocumentPane.tsx",
+      "module": "ui-spec-document",
+      "detail": "1710",
+      "message": "文件 1710 行，超过上限 800 行",
+      "fingerprint": "9c7500ecacbcdc90",
+      "global": false
+    },
+    {
+      "rule": "disable-count",
+      "file": "packages/ui/src/spec-document/nativeFileEditing.tsx",
+      "module": "ui-spec-document",
+      "detail": "1",
+      "message": "文件包含 1 条 lint disable",
+      "fingerprint": "a5e7c0f0d8e29c93",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/specDocumentWatch.test.ts",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/index.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "aa287966d5fcf051",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/specDiscussionLanes.test.ts",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/index.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "b7d8430536adda4a",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/specDocumentWatch.ts",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/index.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "c761714aa941b434",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/artifactMetadataDraft.ts",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/index.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "ca7d819dd07c37c7",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/SpecDocumentPane.tsx",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/index.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "df8ff2a3ccde102c",
+      "global": false
+    },
+    {
+      "rule": "ui-implementation-import",
+      "file": "packages/ui/src/spec-document/artifactContextSend.test.ts",
+      "module": "ui-spec-document",
+      "detail": "packages/services/src/index.ts",
+      "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
+      "fingerprint": "f860ea850421b0f2",
+      "global": false
+    }
+  ]
 }

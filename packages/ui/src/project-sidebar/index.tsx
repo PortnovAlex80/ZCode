@@ -403,3 +403,9 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
 });
 
 export { ComposerSubmissionPendingContext } from "@/project-sidebar/ComposerSubmissionPendingContext.js";
+export {
+  GROUPED_TASK_COLLAPSED_GROUPS_STORAGE_KEY,
+  persistGroupedTaskCollapsedGroupIds,
+  readGroupedTaskCollapsedGroupIds,
+} from "@/project-sidebar/grouped-expansion.js";
+export { pruneCollapsedGroupedTaskGroupIds } from "@/project-sidebar/grouped/view.js";

@@ -15,8 +15,8 @@ import {
   GROUPED_TASK_COLLAPSED_GROUPS_STORAGE_KEY,
   persistGroupedTaskCollapsedGroupIds,
   readGroupedTaskCollapsedGroupIds,
-} from "../project-sidebar/grouped-expansion.js";
-import { pruneCollapsedGroupedTaskGroupIds } from "../project-sidebar/grouped/view.js";
+} from "../project-sidebar/index.js";
+import { pruneCollapsedGroupedTaskGroupIds } from "../project-sidebar/index.js";
 
 describe("D-05 project collapse persistence across session-list refreshes", () => {
   beforeEach(() => {
