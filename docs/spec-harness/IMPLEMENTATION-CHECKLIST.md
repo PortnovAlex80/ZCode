@@ -1341,3 +1341,23 @@ Notes            : build-only; same NSIS version 3.17.2 installs over the offici
                    build — to roll back, reinstall the renamed a9327d42 artifact.
                    CHANGELOG stays untouched until the branch merges to dev.
 ```
+
+2026-11-07 product ruling (user, branch u20-document-search): native-first file
+experience + fork editing; side-swap removed.
+
+```text
+Ruling           : «сохраняем текущий функционал как родной — но добавляем наши
+                   возможности по редактированию документа и всё. Обмен
+                   сторонами — выпиливаем».
+Keep (native)    : upstream 3.17.2 file experience as-is — file tree opens
+                   tabs, Preview/Source radio, Open menu (VS Code / Save as…);
+                   chat stays a separate movable widget (floating + OS popouts).
+Add (fork)       : in-place editing with our U-18 engine (edit mode, 500 ms
+                   autosave, Save button, CAS conflict guard) for text
+                   documents (.md/.markdown/.txt/.rst) opened from the native
+                   file tree. Code files stay native read-only (scope ruling:
+                   text documents only — 2026-11-07).
+Remove           : the U-04/U-05 side-swap arrangement («Чат в центре /
+                   Документ в центре», specShellLayoutSwap) — the movable chat
+                   widget makes it redundant.
+```
