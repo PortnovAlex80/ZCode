@@ -158,6 +158,9 @@ function Documents({
       documentService && {
         getWorkspace: () => documentService.getWorkspace({ workspacePath }),
         list: () => documentService.list({ workspacePath }),
+        // U-20（path half）：Host 侧 fuzzy 搜索透传（limit 由调用方语义决定）。
+        search: (params: { query: string; limit?: number }) =>
+          documentService.search({ ...params, workspacePath }),
         read: (params: { path: string }) => documentService.read({ ...params, workspacePath }),
         save: (params: { path: string; content: string; expectedSha256: string }) =>
           documentService.save({ ...params, workspacePath }),
@@ -197,6 +200,11 @@ function Documents({
   const [baseSha256, setBaseSha256] = useState("");
   const baseSha256Ref = useRef("");
   const [files, setFiles] = useState<string[]>([]);
+  // U-20（path half）：picker 数据源 = Host 侧搜索。pickerFilter 由 picker 输入
+  // 上抛；documentTotal = 枚举总数（UI 如实显示 «N shown · M total»），两者
+  // 只由下方防抖 effect 和删除后的刷新写入——单一写者，无第二份列表真相。
+  const [pickerFilter, setPickerFilter] = useState("");
+  const [documentTotal, setDocumentTotal] = useState<number | null>(null);
   const [document, setDocument] = useState<SpecDocumentSnapshot | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
@@ -432,6 +440,42 @@ function Documents({
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- save 是每渲染重建的本地函数；其实际依赖（documents/dirty/writers/draft/document/editing/error）已全部在列表中。
   }, [document, draft, editing, writable, dirty, writers, error, autosaveDelayMs]);
+  // U-20（path half，2026-11-07）：picker 输入防抖走 Host 侧 fuzzy 搜索。空查询
+  // = 默认排序前 PICKER_RESULT_LIMIT 条；迟到的过期结果按查询代际丢弃。初始
+  // 挂载（空查询）也由这里触发——面板没有第二条 list() 加载路径，大工作区
+  // （本仓 5998 个文档）不再被 200 条截断静默隐藏。
+  const PICKER_RESULT_LIMIT = 50;
+  const pickerSearchImmediateRef = useRef(true);
+  useEffect(() => {
+    if (!documents) return;
+    let stale = false;
+    // 首载（挂载/换 documents）不走防抖：picker 打开即可见列表；后续是
+    // 用户键入的查询，150ms 防抖合并快速输入。
+    const immediate = pickerSearchImmediateRef.current && !pickerFilter;
+    pickerSearchImmediateRef.current = false;
+    const run = () => {
+      void documents
+        .search({ query: pickerFilter, limit: PICKER_RESULT_LIMIT })
+        .then((next) => {
+          if (stale) return;
+          setFiles(next.paths);
+          setDocumentTotal(next.total);
+          if (!pickerFilter) setStatus(`${next.total} documents · local UTF-8 files`);
+        })
+        .catch(() => {
+          /* 搜索失败保留现有列表；打开/读取/保存路径各自可见报错 */
+        });
+    };
+    if (immediate) {
+      run();
+      return;
+    }
+    const timer = setTimeout(run, 150);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [documents, pickerFilter]);
   // U-19：编辑模式的命中偏移（textarea 缓冲，原生 selection 即高亮；焦点策略见 jumpFind）。
   const findOffsets = useMemo(
     () => (editing ? findTextareaMatchOffsets(draft, findQuery) : []),
@@ -591,11 +635,8 @@ function Documents({
         .getWorkspace()
         .then(async (grant) => {
           if (live) setWritable(grant.writable);
-          const next = await documents.list();
-          if (live) {
-            setFiles(next);
-            setStatus(`${next.length} documents · local UTF-8 files`);
-          }
+          // U-20（path half）：picker 文件集改由搜索 effect 单一持有（见下）；
+          // 这里不再调 list()——其 200 条截断对大工作区是静默丢失。
           if (requestedPath) {
             const normalizedRoot = grant.root.replaceAll("\\", "/").replace(/\/$/, "");
             const normalizedPath = requestedPath.replaceAll("\\", "/");
@@ -815,8 +856,10 @@ function Documents({
     try {
       await documents.remove({ path });
       writeDocumentDraft(draftStorageKey, path, null, undefined, paneWriteToken);
-      const next = await documents.list();
-      setFiles(next);
+      // U-20：删除后按当前 picker 查询刷新（与搜索 effect 同一数据源/上限）。
+      const next = await documents.search({ query: pickerFilter, limit: 50 });
+      setFiles(next.paths);
+      setDocumentTotal(next.total);
       if (documentRef.current?.path === path) {
         documentRef.current = null;
         draftRef.current = "";
@@ -998,6 +1041,8 @@ function Documents({
           value={document?.path ?? null}
           workspaceRoot={workspacePath}
           disabled={ioPending || !files.length}
+          onFilterChange={setPickerFilter}
+          total={documentTotal}
           onOpen={(path) => void open(path)}
           onDelete={(path) => void removeDocument(path)}
           deleteDisabled={!writable || ioPending}

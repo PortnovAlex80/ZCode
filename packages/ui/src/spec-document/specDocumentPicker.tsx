@@ -73,6 +73,8 @@ export function SpecDocumentPicker({
   value,
   workspaceRoot,
   disabled,
+  onFilterChange,
+  total,
   onOpen,
   onDelete,
   deleteDisabled,
@@ -83,6 +85,15 @@ export function SpecDocumentPicker({
   /** 仅用于展示归一（剥离绝对前缀）；打开仍然使用 files/value 里的服务原路径。 */
   workspaceRoot?: string;
   disabled?: boolean;
+  /**
+   * U-20（path half，2026-11-07）：存在即「服务端过滤模式」——输入上抛给宿主
+   * （Host 侧 fuzzy 搜索），files 已是查询结果，本地不再二次过滤（双套打分
+   * 会把服务端 fuzzy 命中再按子串误删）。无此 prop 时保持本地 findDocuments
+   * 过滤（独立/测试用法不变）。
+   */
+  onFilterChange?: (query: string) => void;
+  /** U-20：枚举总数；服务端模式下底栏如实显示 «N shown · M total»。 */
+  total?: number | null;
   onOpen: (path: string) => void;
   /**
    * U-14（活体反馈 2026-10-14 «корзина в пикере не удаляет——тихий no-op»）：
@@ -111,9 +122,13 @@ export function SpecDocumentPicker({
     () => files.map((path) => ({ path, ...documentDisplayParts(path, workspaceRoot) })),
     [files, workspaceRoot],
   );
+  // U-20：服务端过滤模式下 files 即结果集（Host fuzzy top-K），本地过滤关闭。
   const matches = useMemo(
-    () => findDocuments(entries, filter, workspaceRoot),
-    [entries, filter, workspaceRoot],
+    () =>
+      onFilterChange
+        ? entries
+        : findDocuments(entries, filter, workspaceRoot),
+    [onFilterChange, entries, filter, workspaceRoot],
   );
   const projectName = workspaceRoot?.replaceAll("\\", "/").replace(/\/+$/, "").split("/").at(-1);
 
@@ -249,7 +264,10 @@ export function SpecDocumentPicker({
             <input
               ref={filterInputRef}
               value={filter}
-              onChange={(event) => setFilter(event.target.value)}
+              onChange={(event) => {
+                setFilter(event.target.value);
+                onFilterChange?.(event.target.value);
+              }}
               onKeyDown={onFilterKeyDown}
               aria-label="Filter documents"
               placeholder="Имя файла или путь…"
@@ -387,8 +405,13 @@ export function SpecDocumentPicker({
             )}
           </ul>
           <div className="flex justify-between gap-2 border-t border-border px-3 py-1.5 text-ui-xs text-foreground-subtle">
-            <span>
-              {matches.length} / {entries.length} documents
+            {/* U-20：服务端模式如实显示截断（shown/total），不再谎报 «N / N»。 */}
+            <span data-picker-count>
+              {onFilterChange
+                ? typeof total === "number" && total > matches.length
+                  ? `${matches.length} shown · ${total} total`
+                  : `${matches.length} documents`
+                : `${matches.length} / ${entries.length} documents`}
             </span>
             <span>↑↓ select · Enter open · Esc close</span>
           </div>

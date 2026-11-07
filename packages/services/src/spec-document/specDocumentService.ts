@@ -1,6 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, open, readdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { setImmediate } from "node:timers/promises";
+import {
+  filterWorkspaceFileSearchCandidates,
+  mapWorkspaceFileEntriesToSearchCandidates,
+} from "@zcode/shared/workspaceFileSearch";
 import type { ISpecDocumentService, SpecDocumentSnapshot } from "./specDocument.js";
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -95,28 +100,64 @@ export function createSpecDocumentService(options: {
       await handle.close();
     }
   }
+  /**
+   * U-20：list 与 search 共用的单次枚举路径（同一跳过规则/扩展名白名单），
+   * 避免两条 walk 语义漂移。移植期的 200/8 硬截断废除；深度与总量上限只为
+   * 防御病态树（符号链接循环已被拒、但仍可能有超深/超多目录），目录间
+   * setImmediate yield 让共享 Host 在数千条目时保持可响应（与 upstream
+   * workspaceFileSearch 的分批理由一致）。
+   */
+  const DOCUMENT_WALK_MAX_DEPTH = 12;
+  const DOCUMENT_ENUMERATION_CAP = 20_000;
+  async function enumerateDocuments(workspace: string): Promise<string[]> {
+    const found: string[] = [];
+    async function walk(directory: string, depth: number): Promise<void> {
+      if (depth > DOCUMENT_WALK_MAX_DEPTH || found.length >= DOCUMENT_ENUMERATION_CAP) return;
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.isSymbolicLink())
+          continue;
+        const absolute = join(directory, entry.name);
+        if (entry.isDirectory()) await walk(absolute, depth + 1);
+        else if (entry.isFile() && DOCUMENT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+          found.push(relative(workspace, absolute).split(sep).join("/"));
+        }
+        if (found.length >= DOCUMENT_ENUMERATION_CAP) break;
+      }
+      await setImmediate();
+    }
+    await walk(workspace, 0);
+    return found;
+  }
   return {
     async getWorkspace({ workspacePath }) {
       return { root: await root(workspacePath), writable: options.allowUnleasedWrites === true };
     },
     async list({ workspacePath }) {
       const workspace = await root(workspacePath);
-      const found: string[] = [];
-      async function walk(directory: string, depth: number): Promise<void> {
-        if (depth > 8 || found.length >= 200) return;
-        for (const entry of await readdir(directory, { withFileTypes: true })) {
-          if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.isSymbolicLink())
-            continue;
-          const absolute = join(directory, entry.name);
-          if (entry.isDirectory()) await walk(absolute, depth + 1);
-          else if (entry.isFile() && DOCUMENT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
-            found.push(relative(workspace, absolute).split(sep).join("/"));
-          }
-          if (found.length >= 200) break;
-        }
-      }
-      await walk(workspace, 0);
-      return found.sort();
+      // U-20：截断到移植期兼容的展示上限，但排序在全量枚举后进行——深路径
+      // 不再因 8 层限制缺席；需要完整集合的调用方改用 search。
+      return (await enumerateDocuments(workspace)).sort().slice(0, 2000);
+    },
+    /**
+     * U-20（path half）：Host 侧 fuzzy top-K。候选映射复用 shared 的
+     * mapWorkspaceFileEntriesToSearchCandidates（预计算小写形式，热路径免
+     * toLowerCase），打分/排序复用 filterWorkspaceFileSearchCandidates——
+     * 与 @-提及/文件树同一算法，行为一致且不再各自维护第二套打分。
+     */
+    async search({ workspacePath, query, limit }) {
+      const workspace = await root(workspacePath);
+      const paths = await enumerateDocuments(workspace);
+      const candidates = mapWorkspaceFileEntriesToSearchCandidates(
+        paths.map((relativePath) => ({
+          name: relativePath.split("/").at(-1) ?? relativePath,
+          path: join(workspace, relativePath),
+          relativePath,
+          type: "file" as const,
+        })),
+      );
+      const effectiveLimit = Math.min(Math.max(limit ?? 50, 1), 200);
+      const best = filterWorkspaceFileSearchCandidates(candidates, query, { limit: effectiveLimit });
+      return { paths: best.map((candidate) => candidate.relativePath), total: candidates.length };
     },
     async read({ path, workspacePath }) {
       return read(path, workspacePath);

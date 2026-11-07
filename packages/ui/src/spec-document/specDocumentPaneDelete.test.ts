@@ -63,6 +63,13 @@ function deletableDocumentsService(options: { writable?: boolean; removeError?: 
     service: {
       getWorkspace: async () => ({ root: "D:\\ws", writable }),
       list: async () => Array.from(files.keys()).sort(),
+      // U-20：pane 现在走 search（Host fuzzy 契约）；fake 用朴素子串过滤。
+      search: async ({ query, limit }: { query: string; limit?: number }) => {
+        const all = Array.from(files.keys()).sort().filter((candidate) =>
+          candidate.toLowerCase().includes(query.trim().toLowerCase()),
+        );
+        return { paths: all.slice(0, limit ?? 50), total: all.length };
+      },
       read: async ({ path }: { path: string }) => {
         const content = files.get(path);
         if (content === undefined)

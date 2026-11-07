@@ -130,6 +130,13 @@ function specDocumentsService(content: string) {
   return {
     getWorkspace: async () => ({ root: "D:\\ws", writable: false }),
     list: async () => [DOC_PATH],
+    // U-20：pane 现在走 search（Host fuzzy 契约）；fake 用朴素子串过滤。
+    search: async ({ query, limit }: { query: string; limit?: number }) => {
+      const all = [DOC_PATH].filter((candidate) =>
+        candidate.toLowerCase().includes(query.trim().toLowerCase()),
+      );
+      return { paths: all.slice(0, limit ?? 50), total: all.length };
+    },
     read: async ({ path }: { path: string }) => ({ path, content, sha256: DOC_SHA }),
     save: async () => {
       throw new Error("read-only in this test");

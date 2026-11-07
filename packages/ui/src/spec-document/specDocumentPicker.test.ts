@@ -387,4 +387,44 @@ describe("U-14 picker delete (корзина)", () => {
     expect(document.querySelector("[data-picker-delete-confirm]")).toBeNull();
     expect(optionRows()).toHaveLength(FILES.length);
   });
+
+  // U-20（path half，2026-11-07）：服务端过滤模式。onFilterChange 存在时：
+  // 输入上抛宿主（Host fuzzy 搜索）、files 原样渲染（本地 findDocuments 关闭，
+  // 双套打分不会误删服务端命中）、底栏如实显示 «N shown · M total»。
+  it("server mode: typing lifts the query, files render as-is, footer shows shown/total", () => {
+    const onFilterChange = vi.fn();
+    const serverFiles = ["docs/spec-harness/IMPLEMENTATION-PLAN.md", "README.md"];
+    render(
+      createElement(SpecDocumentPicker, {
+        files: serverFiles,
+        value: null,
+        onFilterChange,
+        total: 5998,
+        onOpen: () => {},
+      }),
+    );
+    const input = openDropdown();
+    // 下拉即展示服务端结果（没有本地过滤把 IMPLEMENTATION-PLAN 误删）。
+    expect(optionRows()).toHaveLength(2);
+    expect(screen.getByText("2 shown · 5998 total")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "spec-har" } });
+    expect(onFilterChange).toHaveBeenCalledWith("spec-har");
+    // 输入不清空服务端结果集——替换列表是宿主 search 的职责。
+    expect(optionRows()).toHaveLength(2);
+    expect(screen.getByText("2 shown · 5998 total")).toBeTruthy();
+  });
+
+  it("server mode: footer falls back to a plain count when total is not greater", () => {
+    render(
+      createElement(SpecDocumentPicker, {
+        files: ["README.md"],
+        value: null,
+        onFilterChange: () => {},
+        total: 1,
+        onOpen: () => {},
+      }),
+    );
+    openDropdown();
+    expect(screen.getByText("1 documents")).toBeTruthy();
+  });
 });

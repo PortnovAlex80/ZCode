@@ -281,3 +281,56 @@ test("discussion snapshot source preserves exact bytes and normalizes the docume
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// U-20（path half，2026-11-07）：Host 侧 fuzzy search 契约。动机实测：本仓
+// 5998 个文档被移植期 200/8 截断静默隐藏（docs/ 整树不可见）。
+test("search enumerates past the legacy 200/8 truncation and reports the honest total", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "spec-document-search-cap-"));
+  try {
+    // 深度 10 的目录链：旧 8 层 walk 拿不到，search/list 都必须可见。
+    const deep = join(directory, ...Array.from({ length: 10 }, (_, i) => `d${i}`));
+    await mkdir(deep, { recursive: true });
+    await writeFile(join(deep, "deep-note.md"), "deep");
+    await writeFile(join(directory, "shallow.md"), "shallow");
+    await writeFile(join(directory, "ignored.png"), "not a text document");
+    await mkdir(join(directory, ".hidden"));
+    await writeFile(join(directory, ".hidden", "skipped.md"), "skipped");
+    const service = createSpecDocumentService({ desktopLocal: true, allowUnleasedWrites: true });
+    const emptyQuery = await service.search({ workspacePath: directory, query: "" });
+    assert.deepEqual(emptyQuery.paths, ["d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/deep-note.md", "shallow.md"]);
+    assert.equal(emptyQuery.total, 2);
+    const limited = await service.search({ workspacePath: directory, query: "", limit: 1 });
+    assert.deepEqual(limited.paths, ["d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/deep-note.md"]);
+    assert.equal(limited.total, 2);
+    // list 不再受 8 层限制；排序在全量枚举后进行。
+    assert.ok((await service.list({ workspacePath: directory })).includes("d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/deep-note.md"));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("search ranks name matches ahead of deep-path matches and clamps the limit", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "spec-document-search-rank-"));
+  try {
+    await mkdir(join(directory, "guide"), { recursive: true });
+    await writeFile(join(directory, "guide", "intro.md"), "a");
+    await writeFile(join(directory, "billing-guide.md"), "b");
+    await writeFile(join(directory, "notes.md"), "c");
+    const service = createSpecDocumentService({ desktopLocal: true, allowUnleasedWrites: true });
+    const result = await service.search({ workspacePath: directory, query: "guide" });
+    // 排序遵循 shared workspaceFileSearch 的真实语义（与 @-提及一致）：相对路径
+    // 前缀命中（guide/intro.md）排在文件名中段子串（billing-guide.md）之前；
+    // notes.md 不出现。这里钉的是「同一算法、不另起第二套打分」的契约。
+    assert.equal(result.paths[0], "guide/intro.md");
+    assert.equal(result.paths[1], "billing-guide.md");
+    assert.equal(result.paths.length, 2);
+    assert.equal(result.total, 3);
+    const clamped = await service.search({ workspacePath: directory, query: "", limit: 999 });
+    assert.equal(clamped.paths.length, 3); // total 只有 3，clamp 到 200 不影响
+    // limit 非法值被夹紧而不是拒绝：0 → 1 条（调用方 bug 不应变成 UI 崩溃）。
+    const zero = await service.search({ workspacePath: directory, query: "", limit: 0 });
+    assert.equal(zero.paths.length, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
