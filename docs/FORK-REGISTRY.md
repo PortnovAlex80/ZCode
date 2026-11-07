@@ -57,6 +57,20 @@ PanelRight-иконки caption).
    переносится из панели документа в контекстное меню/нутри нативного
    просмотра (см. реализацию), механика остаётся форкской.
 
+**Дополнение 2026-11-07 #3** (live-отчёт: у документа CLAUDE.md, открытого из
+файлового дерева, в шапке не было ни карандаша Edit, ни обсуждений — «как мне
+редактировать/сохранять/выносить в окно?»). Root cause: гейт правки в
+`FileManagerPane` (`WorkspaceFileTree.tsx`) требовал `source.type === "text"`,
+а дерево создаёт для md/txt lazy-source `type: "file"`
+(`createCodeViewerSourceForWorkspaceFile`) — native editing не включался ни для
+одного файла, открытого из дерева. Решение: гейт принимает `file` и `text` при
+`typeof path === "string"` и `isNativeEditableTextDocumentPath(path)`; в той же
+шапке рядом с [Edit/View][Save][status] теперь видны кнопки **Discuss**
+(MessageSquare → `discussWorkspaceFileDocument`) и **Open in window** (AppWindow
+→ `openWorkspaceFileDocumentWindow`) — те же входы CORR-1, что и в правом клике
+дерева (`workspaceFileEntryPoints.ts`), с теми же условиями (локальный
+workspace, текстовое расширение, path-строка).
+
 ### CORR-2. Иконка/поведение тогла боковой панели — от ОРИГИНАЛА
 
 Сейчас: форк-компонент `WorkspaceSidePaneCaptionControls` + роль-тоггл с иконкой

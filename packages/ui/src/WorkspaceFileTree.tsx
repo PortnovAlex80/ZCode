@@ -1,15 +1,31 @@
 import { usePanelRef } from "react-resizable-panels";
 import { logger } from "@/logger.js";
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
-import { FolderOpenIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
+import {
+  AppWindowIcon,
+  FolderOpenIcon,
+  MessageSquare,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+} from "lucide-react";
 import { PreviewPane } from "@/PreviewPane.js";
 import { WorkspaceFileTree } from "@/workspace-file-tree/WorkspaceFileTree.js";
-import { useNativeFileEditing } from "@/spec-document/nativeFileEditing.js";
+import {
+  isNativeEditableTextDocumentPath,
+  useNativeFileEditing,
+} from "@/spec-document/nativeFileEditing.js";
+import {
+  discussWorkspaceFileDocument,
+  openWorkspaceFileDocumentWindow,
+  type WorkspaceFileEntryPointRequest,
+} from "@/spec-document/workspaceFileEntryPoints.js";
+import { getWorkspaceFileRelativePath } from "@/workspace-file-tree/model.js";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useZCodeStore } from "@/store/StoreProvider.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
+import { getPathLeaf, isAbsoluteFilePath, joinFilePath } from "@/lib/path.js";
 import type { FileManagerTarget } from "@/lib/workspaceSidePane.js";
 
 import {
@@ -21,6 +37,25 @@ import {
 
 export { WorkspaceFileTree };
 const FILE_MANAGER_PANEL_IDS = ["directory", "preview"];
+
+/**
+ * CORR-1 follow-up (user ruling 2026-11-07 #3): the file tree produces lazy
+ * `type: "file"` sources for documents (createCodeViewerSourceForWorkspaceFile),
+ * while only inline tool previews arrive as `type: "text"`. The edit overlay and
+ * the fork document entry points must therefore key off the source path
+ * (document extension whitelist) for both source types; gating on the "text"
+ * type alone left every tree-opened document on a native-only header.
+ */
+function getNativeEditableTextDocumentPath(source: CodeViewerSource | null): string | null {
+  if (!source || (source.type !== "file" && source.type !== "text")) {
+    return null;
+  }
+  // "text" sources carry an optional path; only a real path can be edited.
+  if (typeof source.path !== "string") {
+    return null;
+  }
+  return isNativeEditableTextDocumentPath(source.path) ? source.path : null;
+}
 
 type FileManagerPaneProps = Omit<ComponentProps<typeof PreviewPane>, "source"> & {
   source: CodeViewerSource | null;
@@ -39,15 +74,62 @@ export function FileManagerPane({
   ...previewProps
 }: FileManagerPaneProps) {
   const { intl } = useZCodeIntl();
+  const editableTextDocumentPath = getNativeEditableTextDocumentPath(source);
   const nativeEditing = useNativeFileEditing({
     workspacePath: target.workspacePath,
     workspaceIdentity: target.workspaceIdentity,
-    enabled:
-      !target.workspaceRemoteSessionId &&
-      source?.type === "text" &&
-      typeof source.path === "string",
-    path: source?.type === "text" && typeof source.path === "string" ? source.path : null,
+    enabled: !target.workspaceRemoteSessionId && editableTextDocumentPath !== null,
+    path: editableTextDocumentPath,
   });
+  // CORR-1 (2026-11-07 #3): surface the context-menu document entry points on
+  // the open native tab header too — editing/discussion controls must be visible
+  // on the document, not only behind the right-click. Same eligibility as the
+  // tree menu: local workspace, text document, string path. The request format
+  // mirrors the row handlers in WorkspaceFileTreeRowView (workspace/target/path).
+  const forkDocumentRequest: WorkspaceFileEntryPointRequest | null =
+    editableTextDocumentPath !== null && !target.workspaceRemoteSessionId && canOpenLocalFileManager
+      ? {
+          workspacePath: target.workspacePath,
+          ...(target.workspaceIdentity ? { workspaceIdentity: target.workspaceIdentity } : {}),
+          // The entry-point contract carries an absolute row path; tool text
+          // previews may hold a workspace-relative one, so normalize it here.
+          path: isAbsoluteFilePath(editableTextDocumentPath)
+            ? editableTextDocumentPath
+            : joinFilePath(target.workspacePath, editableTextDocumentPath),
+          name: getPathLeaf(editableTextDocumentPath),
+        }
+      : null;
+  const forkDocumentRelativePath = forkDocumentRequest
+    ? getWorkspaceFileRelativePath(target.workspacePath, forkDocumentRequest.path)
+    : null;
+  const forkDocumentEntryActions =
+    forkDocumentRequest && forkDocumentRelativePath ? (
+      <>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Discuss document"
+          title="Discuss this document"
+          onClick={() =>
+            discussWorkspaceFileDocument({
+              request: forkDocumentRequest,
+              relativeDocumentPath: forkDocumentRelativePath,
+            })
+          }
+        >
+          <MessageSquare className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Open document in window"
+          title="Open this document in a separate window"
+          onClick={() => openWorkspaceFileDocumentWindow(forkDocumentRequest)}
+        >
+          <AppWindowIcon className="size-4" />
+        </Button>
+      </>
+    ) : null;
   const [headerContainer, setHeaderContainer] = useState<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isNarrow, setIsNarrow] = useState(mobileOverlay);
@@ -200,8 +282,18 @@ export function FileManagerPane({
               // （Edit → textarea + 500ms 自动落盘 + Save + CAS）。原生行为不动，
               // 仅本地工作区的文本文档（.md/.txt/…）获得编辑入口；remote 与代码
               // 文件保持原生只读。
+              // 2026-11-07 #3 (owner: fork): the same header cluster also carries
+              // the fork document entry points, ordered
+              // [Edit/View][Save][status][Discuss][Open in window].
               documentActions={
-                nativeEditing.documentActions ?? previewProps.documentActions
+                forkDocumentEntryActions ? (
+                  <>
+                    {nativeEditing.documentActions ?? previewProps.documentActions}
+                    {forkDocumentEntryActions}
+                  </>
+                ) : (
+                  (nativeEditing.documentActions ?? previewProps.documentActions)
+                )
               }
               sourceEditor={nativeEditing.sourceEditor ?? previewProps.sourceEditor}
               requestMarkdownViewMode={nativeEditing.requestMarkdownViewMode}
