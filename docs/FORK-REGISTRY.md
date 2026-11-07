@@ -111,6 +111,27 @@ markdown-превью внутри нативных файловых вклад�
 уже существовала в `SelectionActionMenu`). Решение — MPS12 в
 [docs/chat/markdown-preview-selection.md](chat/markdown-preview-selection.md).
 
+### 2026-11-08 #7: субагент-транскрипт открывается рядом с беседой внутри detached-окна
+
+Формулировка пользователя: клик по субагенту (строка агента в таймлайне /
+running-pill в статус-панели) внутри **вынесенного окна беседы** должен
+показывать read-only транскрипт субагента **рядом с беседой в том же окне**.
+Раньше действие уходило через `routeAction` в главное окно: оно перехватывало
+активную задачу (`handleSelectTask`) и показывало guard «This conversation is
+open in a separate window» — тупик. Статус: **IMPLEMENTED 2026-11-08**.
+
+| Слой | Механика | Файлы |
+|---|---|---|
+| Перехват в floating shell | `onOpenSubagentSession` / `onOpenSubagentDirectory` / `onSyncSubagentSessionTabs` из floating-шелла больше не маршрутизируются через `routeAction`: сессия/каталог открываются во вторичном листе окна, sync зеркально чистит лист, когда родительская проекция больше не содержит показанного child (edit/retry); остальные действия маршрутизируются как прежде | `ui/src/spec-document/ConversationWindowHost.tsx` (`handleWindowAction`, `FloatingSubpaneLeaf`) |
+| Вторичный лист | фиксированный сплит 60/40 (проценты — переживает min size 320x240), slim-заголовок с крестом (`conversation.window.subagentPane.close`, en+zh); переиспользуются main-window композиции `SubagentSessionSidePane` (read-only SessionPane, paneId `floating-subagent-<entryId>` — floating-префикс держит guard'ы выключенными) и `SubagentDirectorySidePane` (оба scope-only, контекст главного окна не нужен); повторный клик заменяет содержимое листа (React key = childSessionId), без стакинга; перепривязка ростер-записи (draft → session) сбрасывает лист | там же; `i18n/locales/{en-US,zh-CN}.ts` |
+
+Границы: detached-механика (roster/geometry/attachment) не тронута; main-window
+side panes не изменены; `onOpenBackgroundBash` из транскрипта по-прежнему
+маршрутизируется в главное окно (вне скоупа v1). Тесты:
+`ui/src/spec-document/conversationWindowSubpane.test.tsx` (6 сценариев: открытие/
+закрытие, замена без стакинга, прочие действия маршрутизируются, sync-prune,
+каталог→транскрипт, очистка состояния при закрытии окна).
+
 ### 2026-11-07 #5: discussion & side-chat detach lifted (A+B+C)
 
 Формулировка пользователя: снять ограничение «обсуждение заперто внутри окна»
@@ -234,6 +255,7 @@ controls], без `workspacePanelRoles`.
 | 2026-11-07 | **UC-2 реализован** (ruling 2026-11-07 #4): правка любого не-бинарного текста (json/yaml/env/dotfiles/…), бинарный denylist + контент-guard'ы; whitelist — только для list/search; поверхность редактора заведена для `type: "file"`-источников |
 | 2026-11-07 | **Detach lifted (2026-11-07 #5, A+B+C)**: вложенные popout'ы из дочерних окон (A), «Detach to window» для обсуждений документов с handoff владения (B), «Open in window» для бокового диалога выделения (C) |
 | 2026-11-08 | **«Discuss fragment» из всех selection-тулбаров (2026-11-08 #6, MPS12)**: единый вход `discussWorkspaceFileDocument` с quote, предзаполнение questionDraft обсуждения документа; правка + нативное превью получили третий пункт меню | |
+| 2026-11-08 | **Субагент-транскрипт внутри detached-окна (2026-11-08 #7)**: клик по субагенту открывает read-only лист рядом с беседой в том же окне (60/40, замена без стакинга, sync-prune); маршрутизация в главное окно с hijack активной задачи устранена | |
 
 ## 4. Открытая приёмка (сводно)
 

@@ -2174,6 +2174,7 @@ const zhCN: Record<string, string> = {
   "conversation.window.retryConnection": "重试连接",
   "conversation.window.retryOpening": "重试打开窗口",
   "conversation.window.return": "返回主窗口",
+  "conversation.window.subagentPane.close": "关闭子智能体面板",
   "document.window.open": "显示文档窗口",
   "document.window.attach": "贴靠到对话",
   "document.window.detach": "取消贴靠对话",

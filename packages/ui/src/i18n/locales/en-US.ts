@@ -2349,6 +2349,7 @@ const enUS: Record<string, string> = {
   "conversation.window.retryConnection": "Retry connection",
   "conversation.window.retryOpening": "Retry opening window",
   "conversation.window.return": "Return to main window",
+  "conversation.window.subagentPane.close": "Close subagent panel",
   "document.window.open": "Show document window",
   "document.window.attach": "Attach to conversation",
   "document.window.detach": "Detach from conversation",
