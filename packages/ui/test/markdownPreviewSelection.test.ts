@@ -33,6 +33,7 @@ function preview(
   content = "Selected paragraph",
   sessionId: string | null = null,
   scopeKey?: string,
+  onDiscussFragment?: (quote: string) => void,
 ) {
   return createElement(
     ZCodeIntlProvider,
@@ -47,6 +48,7 @@ function preview(
         sessionId,
         ...(scopeKey ? { draftScopeKey: scopeKey } : {}),
       },
+      onDiscussFragment,
     }),
   );
 }
@@ -253,6 +255,31 @@ describe("Markdown preview selections", () => {
       getConversationSelectionReferenceScope(null, target.workspaceKey, draftScopeKey),
     ).toMatchObject([{ text: reference.text, contentType: "markdown" }]);
     expect(getConversationSelectionReferenceScope(null, target.workspaceKey)).toEqual([]);
+    view.unmount();
+  });
+
+  // MPS12 (2026-11-08): the preview selection menu gains "Discuss fragment"
+  // next to the two chat actions. The native file tab (FileManagerPane) feeds
+  // the same handler the edit toolbar uses — the fork document entry point —
+  // so the quote routes to the document discussion with the selection text.
+  it("MPS12: Discuss fragment hands the selected text to the entry-point handler and closes the menu", async () => {
+    const onDiscussFragment = vi.fn();
+    const view = render(preview("Selected paragraph", null, undefined, onDiscussFragment));
+    await selectText();
+    expect(screen.getByRole("button", { name: "Discuss fragment" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Discuss fragment" }));
+    expect(onDiscussFragment).toHaveBeenCalledTimes(1);
+    expect(onDiscussFragment).toHaveBeenCalledWith("Selected paragraph");
+    // Menu closes after the action, same as the chat actions.
+    expect(screen.queryByRole("button", { name: "Discuss fragment" })).toBeNull();
+    view.unmount();
+  });
+
+  it("MPS12: without a discuss handler the preview menu keeps only the two chat actions", async () => {
+    const view = render(preview());
+    await selectText();
+    expect(screen.getByRole("button", { name: "Add to chat" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Discuss fragment" })).toBeNull();
     view.unmount();
   });
 });

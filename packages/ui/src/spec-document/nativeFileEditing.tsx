@@ -140,6 +140,14 @@ export function useNativeFileEditing(options: {
    * null — the MPS10 workspace opener / draftScopeKey routing applies.
    */
   selectionTarget?: MarkdownSelectionTarget | null;
+  /**
+   * MPS12 (2026-11-08): "Discuss fragment" handler for the edit-overlay
+   * toolbar, threaded from FileManagerPane with the same eligibility gate as
+   * the header fork buttons. The quote is the CURRENT textarea selection text;
+   * routing goes through discussWorkspaceFileDocument and the document pane
+   * enforces its own capability checks.
+   */
+  onDiscussFragment?: (quote: string) => void;
 }): {
   documentActions: ReactNode;
   sourceEditor: ReactNode;
@@ -148,7 +156,7 @@ export function useNativeFileEditing(options: {
   requestMarkdownViewMode: "code" | null;
 } {
   const { specDocumentService } = useServices();
-  const { path, enabled, autosaveDelayMs = 500, selectionTarget } = options;
+  const { path, enabled, autosaveDelayMs = 500, selectionTarget, onDiscussFragment } = options;
   const applicable =
     enabled && Boolean(specDocumentService) && path !== null && isTextCompatibleDocumentPath(path);
   // MPS11: the toolbar tracks this textarea's selection; the ref stays null
@@ -310,6 +318,7 @@ export function useNativeFileEditing(options: {
           sourceTitle={editorPath}
           sourcePath={editorPath}
           target={selectionTarget}
+          onDiscussFragment={onDiscussFragment}
         />
       ) : null}
     </div>

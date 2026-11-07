@@ -91,13 +91,6 @@ export function FileManagerPane({
     workspaceKey === previewProps.markdownSelectionTarget.workspaceKey
       ? previewProps.markdownSelectionTarget
       : undefined;
-  const nativeEditing = useNativeFileEditing({
-    workspacePath: target.workspacePath,
-    workspaceIdentity: target.workspaceIdentity,
-    enabled: !target.workspaceRemoteSessionId && editableTextDocumentPath !== null,
-    path: editableTextDocumentPath,
-    selectionTarget: editorSelectionTarget,
-  });
   // CORR-1 (2026-11-07 #3): surface the context-menu document entry points on
   // the open native tab header too — editing/discussion controls must be visible
   // on the document, not only behind the right-click. Same eligibility as the
@@ -119,6 +112,32 @@ export function FileManagerPane({
   const forkDocumentRelativePath = forkDocumentRequest
     ? getWorkspaceFileRelativePath(target.workspacePath, forkDocumentRequest.path)
     : null;
+  // MPS12 (2026-11-08 user ruling): "Discuss fragment" joins both selection
+  // toolbars of the native tab — the edit-overlay textarea menu and the
+  // markdown preview menu. Same eligibility as the header fork buttons (local
+  // workspace, text-compatible document, path known); the handler carries the
+  // CURRENT selection text through the entry point, which opens/focuses the
+  // document window and prefills the discussion question draft with the quote.
+  // No extra gates here: the document pane enforces its own capability checks
+  // (binding, exclusive writer, dirty buffer) on arrival.
+  const discussFragment =
+    forkDocumentRequest && forkDocumentRelativePath
+      ? (quote: string) => {
+          discussWorkspaceFileDocument({
+            request: forkDocumentRequest,
+            relativeDocumentPath: forkDocumentRelativePath,
+            quote,
+          });
+        }
+      : undefined;
+  const nativeEditing = useNativeFileEditing({
+    workspacePath: target.workspacePath,
+    workspaceIdentity: target.workspaceIdentity,
+    enabled: !target.workspaceRemoteSessionId && editableTextDocumentPath !== null,
+    path: editableTextDocumentPath,
+    selectionTarget: editorSelectionTarget,
+    onDiscussFragment: discussFragment,
+  });
   const forkDocumentEntryActions =
     forkDocumentRequest && forkDocumentRelativePath ? (
       <>
@@ -315,6 +334,9 @@ export function FileManagerPane({
               }
               sourceEditor={nativeEditing.sourceEditor ?? previewProps.sourceEditor}
               requestMarkdownViewMode={nativeEditing.requestMarkdownViewMode}
+              // MPS12: the markdown preview selection menu gains "Discuss
+              // fragment" with the same eligibility as the edit-overlay menu.
+              onDiscussFragment={discussFragment ?? previewProps.onDiscussFragment}
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-ui-base text-foreground-subtle">

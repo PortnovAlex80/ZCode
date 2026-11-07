@@ -25,6 +25,7 @@ import {
   registerSelectionSideChatOpener,
 } from "@/lib/selectionSideChatRuntime.js";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
+import { WORKSPACE_DOCUMENT_DISCUSS_EVENT } from "./workspaceFileEntryPoints.js";
 
 // FileManagerPane-level coverage composes the pane with a passthrough preview;
 // both the header actions and the sourceEditor surface must render.
@@ -76,6 +77,9 @@ const WORKSPACE_PATH = "D:\\ws";
 const WORKSPACE_KEY = WORKSPACE_PATH;
 const DOCUMENT_PATH = "docs/note.md";
 const draftScopeKey = JSON.stringify(["ns", "host", null]);
+// Same literal retainedDocumentWindows.ts dispatches (import would drag the
+// whole module graph; the contract is the event name).
+const INDEPENDENT_DOCUMENT_OPEN_EVENT = "zcode:open-independent-document";
 
 class ResizeObserverStub {
   observe() {}
@@ -109,7 +113,10 @@ function createDocumentsService() {
   };
 }
 
-function renderEditor(selectionTarget?: MarkdownSelectionTarget | null) {
+function renderEditor(
+  selectionTarget?: MarkdownSelectionTarget | null,
+  onDiscussFragment?: (quote: string) => void,
+) {
   const documents = createDocumentsService();
   const Harness = () => {
     const editing = useNativeFileEditing({
@@ -119,6 +126,7 @@ function renderEditor(selectionTarget?: MarkdownSelectionTarget | null) {
       autosaveDelayMs: 25,
       selectionTarget:
         selectionTarget === undefined ? { sessionId: null, workspaceKey: WORKSPACE_KEY } : selectionTarget,
+      onDiscussFragment,
     });
     return createElement("div", null, editing.documentActions, editing.sourceEditor);
   };
@@ -136,7 +144,7 @@ function renderEditor(selectionTarget?: MarkdownSelectionTarget | null) {
   return { view, documents };
 }
 
-function renderFileManagerPane(selectionTarget: MarkdownSelectionTarget) {
+function renderFileManagerPane(selectionTarget: MarkdownSelectionTarget, canOpenLocalFileManager = true) {
   const documents = createDocumentsService();
   const view = render(
     createElement(ZCodeIntlProvider, {
@@ -149,7 +157,7 @@ function renderFileManagerPane(selectionTarget: MarkdownSelectionTarget) {
           source: { type: "file", title: "note.md", path: DOCUMENT_PATH },
           target: { workspacePath: WORKSPACE_PATH },
           mobileOverlay: false,
-          canOpenLocalFileManager: true,
+          canOpenLocalFileManager,
           onClose: () => {},
           onNavigate: () => {},
           markdownSelectionTarget: selectionTarget,
@@ -226,6 +234,25 @@ describe("edit-overlay selection toolbar (MPS11)", () => {
     ]);
     // The menu closes after the action, mirroring the preview toolbar.
     expect(screen.queryByRole("button", { name: "Add to chat" })).toBeNull();
+  });
+
+  it("MPS12: Discuss fragment dispatches the selected text to the entry-point handler and closes the menu", async () => {
+    const onDiscussFragment = vi.fn();
+    renderEditor(undefined, onDiscussFragment);
+    await editAndSelect();
+    fireEvent.click(await screen.findByRole("button", { name: "Discuss fragment" }));
+    // The CURRENT selection text is handed over verbatim; the entry point and
+    // the document pane own everything downstream.
+    expect(onDiscussFragment).toHaveBeenCalledTimes(1);
+    expect(onDiscussFragment).toHaveBeenCalledWith("base");
+    expect(screen.queryByRole("button", { name: "Discuss fragment" })).toBeNull();
+  });
+
+  it("MPS12: without a discuss handler the menu keeps only the two chat actions", async () => {
+    renderEditor();
+    await editAndSelect();
+    expect(screen.getByRole("button", { name: "Add to chat" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Discuss fragment" })).toBeNull();
   });
 
   it("dismisses when the selection collapses, the textarea blurs, or Escape is pressed", async () => {
@@ -353,5 +380,47 @@ describe("FileManagerPane edit-overlay target guard (MPS11)", () => {
     renderFileManagerPane({ sessionId: null, workspaceKey: WORKSPACE_KEY });
     await editAndSelect();
     expect(screen.getByRole("button", { name: "Add to chat" })).toBeTruthy();
+  });
+});
+
+describe("FileManagerPane discuss-fragment routing (MPS12)", () => {
+  beforeEach(() => {
+    window.ResizeObserver =
+      window.ResizeObserver ?? (ResizeObserverStub as unknown as typeof ResizeObserver);
+    cleanup();
+  });
+
+  it("Discuss fragment from the edit toolbar dispatches the entry point with the selection quote", async () => {
+    const openListener = vi.fn();
+    const discussListener = vi.fn();
+    window.addEventListener(INDEPENDENT_DOCUMENT_OPEN_EVENT, openListener);
+    window.addEventListener(WORKSPACE_DOCUMENT_DISCUSS_EVENT, discussListener);
+    try {
+      renderFileManagerPane({ sessionId: null, workspaceKey: WORKSPACE_KEY });
+      await editAndSelect();
+      fireEvent.click(screen.getByRole("button", { name: "Discuss fragment" }));
+
+      // The exact entry-point contract: window request + discuss event that
+      // carries the CURRENT selection text as the quote.
+      expect(openListener).toHaveBeenCalledTimes(1);
+      expect(discussListener).toHaveBeenCalledTimes(1);
+      expect((discussListener.mock.calls[0]![0] as CustomEvent).detail).toEqual({
+        workspacePath: WORKSPACE_PATH,
+        documentPath: DOCUMENT_PATH,
+        quote: "base",
+      });
+      // The menu closes after routing through the entry point.
+      expect(screen.queryByRole("button", { name: "Discuss fragment" })).toBeNull();
+    } finally {
+      window.removeEventListener(INDEPENDENT_DOCUMENT_OPEN_EVENT, openListener);
+      window.removeEventListener(WORKSPACE_DOCUMENT_DISCUSS_EVENT, discussListener);
+    }
+  });
+
+  it("without local file manager capability the edit menu shows no Discuss fragment entry", async () => {
+    renderFileManagerPane({ sessionId: null, workspaceKey: WORKSPACE_KEY }, false);
+    await editAndSelect();
+    expect(screen.getByRole("button", { name: "Add to chat" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Discuss fragment" })).toBeNull();
   });
 });

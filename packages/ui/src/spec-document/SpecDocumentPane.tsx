@@ -47,7 +47,11 @@ import {
 } from "./specThread.js";
 import { useSpecWriteGuard } from "./useSpecDiscussion.js";
 import { useSpecDiscussionWriter } from "./useSpecDiscussionWriter.js";
-import { WORKSPACE_DOCUMENT_DISCUSS_EVENT, type WorkspaceDocumentDiscussRequest } from "./workspaceFileEntryPoints.js";
+import {
+  consumePendingDiscussQuote,
+  WORKSPACE_DOCUMENT_DISCUSS_EVENT,
+  type WorkspaceDocumentDiscussRequest,
+} from "./workspaceFileEntryPoints.js";
 import { watchSpecDocument } from "./specDocumentWatch.js";
 import {
   resolveSpecExecutionSessionId,
@@ -936,7 +940,15 @@ function Documents({
       (!shellParentSessionId || thread.parentSessionId === shellParentSessionId),
   );
   const activeThread = documentThreads.find((thread) => thread.id === activeThreadId);
-  function discussDocument() {
+  /**
+   * MPS12 (2026-11-08): an optional questionDraft (the "Discuss fragment"
+   * quote) prefills the question draft of the document-scope thread this
+   * activation creates, reusing the same slot the comment entry uses. When a
+   * document discussion already exists it is selected as-is — its draft is
+   * never clobbered, and no fragment-anchored thread is auto-created here
+   * (the anchor {start, quote, sha256} logic stays on discuss()).
+   */
+  function discussDocument(questionDraft?: string) {
     if (!document) return;
     const existing = documentThreads.find((thread) => thread.scope === "document");
     if (existing) {
@@ -946,7 +958,7 @@ function Documents({
     }
     discuss(
       { quote: document.path, prefix: "", suffix: "", start: -1, sha256: document.sha256 },
-      undefined,
+      questionDraft,
       "document",
     );
   }
@@ -1004,16 +1016,34 @@ function Documents({
   // presentation flag discussionsVisible=true. Mirror the header "Discussions"
   // button semantics when discussions are visible but no thread is active:
   // select the first saved thread, or start the document-scope discussion once.
-  const discussDocumentRef = useRef<() => void>(() => {});
+  const discussDocumentRef = useRef<(questionDraft?: string) => void>(() => {});
   discussDocumentRef.current = discussDocument;
   const autoDiscussAttemptedPathRef = useRef<string | null>(null);
+  // MPS12: quote carried by the live discuss event (already-mounted pane). The
+  // freshly-mounted pane instead consumes the entry module's one-shot slot.
+  const pendingDiscussQuoteRef = useRef<string | null>(null);
   const documentPath = document?.path ?? null;
   const firstDocumentThreadId = documentThreads[0]?.id ?? null;
   useEffect(() => {
     if (!discussionsVisible || activeThreadId) return;
     if (!bindingReady || !parentSessionId || !discussionWriter.writable) return;
     if (!documentPath) return;
+    // Resolve the quote exactly once per activation, before any branch: the
+    // live-event ref first, then the entry module's one-shot staged slot.
+    // Clearing unconditionally keeps a leftover quote from prefilling a later,
+    // unrelated discussion activation.
+    const liveQuote = pendingDiscussQuoteRef.current;
+    pendingDiscussQuoteRef.current = null;
+    const quote =
+      liveQuote ??
+      consumePendingDiscussQuote({
+        workspacePath,
+        workspaceIdentity,
+        documentPath,
+      });
     if (firstDocumentThreadId) {
+      // Existing discussion is selected as today; its draft is never clobbered,
+      // so a quote arriving for it is dropped.
       setActiveThreadId(firstDocumentThreadId);
       return;
     }
@@ -1021,7 +1051,7 @@ function Documents({
     // vanished) must not loop.
     if (autoDiscussAttemptedPathRef.current === documentPath) return;
     autoDiscussAttemptedPathRef.current = documentPath;
-    discussDocumentRef.current();
+    discussDocumentRef.current(quote || undefined);
   }, [
     discussionsVisible,
     activeThreadId,
@@ -1030,12 +1060,15 @@ function Documents({
     discussionWriter.writable,
     documentPath,
     firstDocumentThreadId,
+    workspacePath,
+    workspaceIdentity,
   ]);
   useEffect(() => {
     // CORR-1: live counterpart of the presentation-state handoff — reveals the
     // discussion dock when the file tree "Discuss document" action targets a
     // document this pane already holds. Thread selection/start is owned by the
-    // effect above.
+    // effect above. MPS12: a quote in the request is staged for that effect and
+    // prefills the draft of the thread it creates.
     const activate = (event: Event) => {
       const request = (event as CustomEvent<WorkspaceDocumentDiscussRequest>)
         .detail;
@@ -1046,6 +1079,8 @@ function Documents({
           (workspaceIdentity?.trim() || workspacePath)
       )
         return;
+      if (typeof request.quote === "string" && request.quote)
+        pendingDiscussQuoteRef.current = request.quote;
       setDiscussionsVisible(true);
     };
     window.addEventListener(WORKSPACE_DOCUMENT_DISCUSS_EVENT, activate);

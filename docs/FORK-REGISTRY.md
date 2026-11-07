@@ -91,6 +91,26 @@ workspace, текстовое расширение, path-строка).
   (бинарные байты) → видимый отказ по UTF-8/NUL/2 МиБ, не «Unsupported text
   document»; list/search без изменений.
 
+### 2026-11-08 #6: «Discuss fragment» из любого selection-тулбара (MPS12)
+
+Формулировка пользователя: действие **Discuss fragment** должно быть доступно из
+каждого selection-тулбара — (1) новый тулбар редактирования
+(`EditorSelectionToolbar`, textarea оверлея правки, ba24b99b) и (2) тулбар
+markdown-превью внутри нативных файловых вкладок (путь `FileManagerPane`).
+Ранее там были только «Add to chat / Add in side chat»; «Discuss fragment» жил
+только в превью внутри `SpecDocumentPane`. Статус: **IMPLEMENTED 2026-11-08**.
+
+| Слой | Механика | Файлы |
+|---|---|---|
+| Единая точка входа | `discussWorkspaceFileDocument` получил опциональный `quote` (текущий текст выделения): live-событие `WORKSPACE_DOCUMENT_DISCUSS_EVENT` несёт его смонтированной панели; для свежесмонтированной панели (новое окно документа) — одноразовый pending-quote слот в модуле входа (popout-React-дерево живёт в renderer opener'а, модульное состояние видно; localStorage сознательно не используется — персистентный quote возрождал бы устаревший фрагмент) | `ui/src/spec-document/workspaceFileEntryPoints.ts` |
+| Панель документа | discuss-активация с quote открывает док обсуждений и предзаполняет `questionDraft` нового document-scope треда (тот же слот, что у комментария; не автосообщение; существующий тред выбирается как есть — его черновик не перезаписывается; anchor-логика `{start, quote, sha256}` остаётся в `discuss()`) | `ui/src/spec-document/SpecDocumentPane.tsx` |
+| Тулбары выделения | третий пункт «Discuss fragment» в `EditorSelectionToolbar` (parity с превью, через общий `SelectionActionMenu`) и в `MarkdownSelectionTooltip` нативной вкладки; handler один — тот же вход с текущим текстом выделения; гейт = fork-кнопки шапки (локальный workspace + text-compatible документ + известный path) | `editorSelectionToolbar.tsx`, `nativeFileEditing.tsx`, `WorkspaceFileTree.tsx` |
+
+Границы: CodeViewer/Shadow-DOM не входит (MPS11); remote-вкладки тулбаров
+редактирования не получают; новых i18n-ключей нет (английская надпись кнопки
+уже существовала в `SelectionActionMenu`). Решение — MPS12 в
+[docs/chat/markdown-preview-selection.md](chat/markdown-preview-selection.md).
+
 ### 2026-11-07 #5: discussion & side-chat detach lifted (A+B+C)
 
 Формулировка пользователя: снять ограничение «обсуждение заперто внутри окна»
@@ -161,7 +181,7 @@ controls], без `workspacePanelRoles`.
 | Оверлей правки на нативном просмотре (Edit → textarea, 500 мс автосейв, Save, CAS) | O | keep | `nativeFileEditing.tsx`; `WorkspaceFileTree.tsx:42-53,192-206`; `PreviewPane.tsx` (+`sourceEditor`,`documentActions`,`requestMarkdownViewMode`) — ruling 2026-11-07; UC-2: любой text-compatible документ (бинарный denylist), поверхность редактора и для `type: "file"`-источников |
 | Автосейв/Save в документной вкладке (U-18; фикс мёртвой сессии 2026-10-31: error/closed ≠ писатель) | F | keep (внутри CORR-1 судьба панели = decide) | `SpecDocumentPane.tsx:749-847`; `useSpecDiscussion.ts` (guard) |
 | Find-in-document Ctrl/Cmd+F (U-19) | F | keep | `documentFind.ts`; view=CSS Highlight, edit=selection |
-| Обсуждения документа на нативных сессиях (D-02..D-04), writer-lease (Web Locks), паспорта `.harness/project.json` (U-02) | F | keep (вход = правый клик дерева «Обсудить документ» → независимое окно, CORR-1) | `SpecDiscussionPane.tsx`, `specThread.ts`, `projectMetadata*.ts`, `workspaceFileEntryPoints.ts` |
+| Обсуждения документа на нативных сессиях (D-02..D-04), writer-lease (Web Locks), паспорта `.harness/project.json` (U-02) | F | keep (входы = правый клик дерева «Обсудить документ» и «Discuss fragment» из selection-тулбаров нативной вкладки, CORR-1 + MPS12; оба → независимое окно) | `SpecDiscussionPane.tsx`, `specThread.ts`, `projectMetadata*.ts`, `workspaceFileEntryPoints.ts` |
 | Независимые окна документов/бесед + retained-восстановление | F | keep | `DocumentWindowSurface.tsx`, `retainedDocumentWindows.ts`, `nativeConversationPopouts.ts` (desktop main) |
 | PiP-попапы документа/дискуссий (U-06/U-07/U-17) | F | keep | `specPopoutWindow.ts`, `specPopoutRegion.tsx` |
 | Watcher внешних изменений + персистентность presentation/drafts (D-01/D-05) | F | keep | `specDocumentWatch.ts`, `specDocumentPresentationState.ts` |
@@ -213,6 +233,7 @@ controls], без `workspacePanelRoles`.
 | 2026-11-07 | **CORR-1/CORR-2 реализованы** (ветка `u20-document-search`): нативный first-open, правый клик = форк-входы (обсуждение/окно/боковой диалог), caption = upstream-кластер; SpecDocumentPane — только документные окна/беседы |
 | 2026-11-07 | **UC-2 реализован** (ruling 2026-11-07 #4): правка любого не-бинарного текста (json/yaml/env/dotfiles/…), бинарный denylist + контент-guard'ы; whitelist — только для list/search; поверхность редактора заведена для `type: "file"`-источников |
 | 2026-11-07 | **Detach lifted (2026-11-07 #5, A+B+C)**: вложенные popout'ы из дочерних окон (A), «Detach to window» для обсуждений документов с handoff владения (B), «Open in window» для бокового диалога выделения (C) |
+| 2026-11-08 | **«Discuss fragment» из всех selection-тулбаров (2026-11-08 #6, MPS12)**: единый вход `discussWorkspaceFileDocument` с quote, предзаполнение questionDraft обсуждения документа; правка + нативное превью получили третий пункт меню | |
 
 ## 4. Открытая приёмка (сводно)
 

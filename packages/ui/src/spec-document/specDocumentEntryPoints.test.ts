@@ -22,6 +22,10 @@ import {
   documentPresentationKey,
   writeDocumentPresentation,
 } from "./specDocumentPresentationState.js";
+import {
+  discussWorkspaceFileDocument,
+  WORKSPACE_DOCUMENT_DISCUSS_EVENT,
+} from "./workspaceFileEntryPoints.js";
 
 const entry = vi.hoisted(() => ({
   layer: null as unknown as ReturnType<typeof createEntryLayer>,
@@ -484,6 +488,119 @@ describe("D-03 document pane entry points, reasons and exact fragment bytes", ()
     expect((discuss as HTMLButtonElement).disabled).toBe(true);
     // 能力缺失时不创建任何线程绑定。
     expect(threadStore(identity).get().length).toBe(0);
+  });
+
+  // ==========================================================================
+  // MPS12 (2026-11-08): "Discuss fragment" from the native tab selection
+  // toolbars. The discuss request may carry a quote (the selected text); the
+  // pane opens the discussion dock and prefills the question draft of the
+  // document-scope thread this activation creates — never auto-sends, never
+  // clobbers an existing discussion's draft.
+  // ==========================================================================
+  it("MPS12: a discuss event with a quote prefills the question draft of the discussion it starts", async () => {
+    const identity = "entry-quote-live";
+    renderEntryPane({ identity, parentSessionId: "parent-1" });
+    const editor = (await screen.findByLabelText(
+      "Document source editor",
+    )) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toBe(DOC_CONTENT));
+    expect(threadStore(identity).get()).toEqual([]);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(WORKSPACE_DOCUMENT_DISCUSS_EVENT, {
+          detail: {
+            workspacePath: "D:\\ws",
+            workspaceIdentity: identity,
+            documentPath: DOC_PATH,
+            quote: FRAGMENT,
+          },
+        }),
+      );
+    });
+    await waitFor(() => expect(threadStore(identity).get()).toHaveLength(1));
+    const thread = threadStore(identity).get()[0]!;
+    // The activation starts the document-scope discussion; the quote sits in
+    // its question draft slot (same slot the comment entry uses).
+    expect(thread.scope).toBe("document");
+    expect(thread.questionDraft).toBe(FRAGMENT);
+    expect(thread.anchor.quote).toBe(DOC_PATH);
+    expect(thread.anchor.start).toBe(-1);
+
+    // A follow-up discuss event with another quote selects the existing
+    // discussion; its draft is never clobbered and no second thread appears.
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(WORKSPACE_DOCUMENT_DISCUSS_EVENT, {
+          detail: {
+            workspacePath: "D:\\ws",
+            workspaceIdentity: identity,
+            documentPath: DOC_PATH,
+            quote: "another quote",
+          },
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Discussions" })
+          .getAttribute("aria-pressed"),
+      ).toBe("true"),
+    );
+    expect(threadStore(identity).get()).toHaveLength(1);
+    expect(threadStore(identity).get()[0]!.questionDraft).toBe(FRAGMENT);
+  });
+
+  it("MPS12: a quote staged before mount (fresh document window) prefills the question draft", async () => {
+    const identity = "entry-quote-fresh";
+    const workspacePath = "D:\\ws";
+    // The entry point runs while no pane listener exists yet (fresh document
+    // window): the presentation handoff arms discussionsVisible for the
+    // mounting pane and the entry module's one-shot slot carries the quote
+    // past the missed window event. The edit-mode flag mirrors a pane that was
+    // previously editing this document (the entry preserves unrelated fields).
+    writeDocumentPresentation(documentPresentationKey(workspacePath, identity), {
+      ...defaultDocumentPresentation(),
+      path: DOC_PATH,
+      editing: true,
+    });
+    discussWorkspaceFileDocument({
+      request: {
+        workspacePath,
+        workspaceIdentity: identity,
+        path: "D:\\ws\\docs\\exact-bytes.md",
+        name: "exact-bytes.md",
+      },
+      relativeDocumentPath: DOC_PATH,
+      quote: FRAGMENT,
+    });
+    render(
+      createElement(
+        ServiceProvider,
+        {
+          services: {
+            specDocumentService: specDocumentsService(DOC_CONTENT),
+            fileWatcherService: fileWatcherStub,
+          } as unknown as Parameters<typeof ServiceProvider>[0]["services"],
+          children: createElement(SpecDocumentPane, {
+            workspacePath,
+            workspaceIdentity: identity,
+            parentSessionId: "parent-1",
+            onClose: () => {},
+          }),
+        },
+      ),
+    );
+    const editor = (await screen.findByLabelText(
+      "Document source editor",
+    )) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toBe(DOC_CONTENT));
+    await waitFor(() => expect(threadStore(identity).get()).toHaveLength(1));
+    const thread = threadStore(identity).get()[0]!;
+    expect(thread.scope).toBe("document");
+    expect(thread.questionDraft).toBe(FRAGMENT);
+    expect(thread.parentSessionId).toBe("parent-1");
   });
 });
 

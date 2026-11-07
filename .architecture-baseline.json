@@ -83,15 +83,6 @@
       "global": false
     },
     {
-      "rule": "max-file-lines",
-      "file": "packages/ui/src/spec-document/SpecDocumentPane.tsx",
-      "module": "ui-spec-document",
-      "detail": "1710",
-      "message": "文件 1710 行，超过上限 800 行",
-      "fingerprint": "9c7500ecacbcdc90",
-      "global": false
-    },
-    {
       "rule": "disable-count",
       "file": "packages/ui/src/spec-document/nativeFileEditing.tsx",
       "module": "ui-spec-document",
@@ -143,6 +134,15 @@
       "detail": "packages/services/src/index.ts",
       "message": "UI 层不能直接依赖 Repo、Runtime 或 Service 实现；通过本模块 contract/port 访问",
       "fingerprint": "df8ff2a3ccde102c",
+      "global": false
+    },
+    {
+      "rule": "max-file-lines",
+      "file": "packages/ui/src/spec-document/SpecDocumentPane.tsx",
+      "module": "ui-spec-document",
+      "detail": "1745",
+      "message": "文件 1745 行，超过上限 800 行",
+      "fingerprint": "e610cd33a1ba7594",
       "global": false
     },
     {

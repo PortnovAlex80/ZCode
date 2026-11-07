@@ -26,12 +26,20 @@ import {
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 
 // FileManagerPane-level suite: the pane composes heavy native panels; only the
-// documentActions cluster matters here, so PreviewPane is reduced to a passthrough.
+// documentActions cluster and the threaded selection-toolbar props matter here,
+// so PreviewPane is reduced to a passthrough that records its props.
+let lastPreviewProps: Record<string, unknown> | null = null;
 vi.mock("@/PreviewPane.js", async () => {
   const { createElement } = await import("react");
   return {
-    PreviewPane: ({ documentActions }: { documentActions?: ReactNode }) =>
-      createElement("div", { "data-preview-actions": "true" }, documentActions ?? null),
+    PreviewPane: (props: Record<string, unknown>) => {
+      lastPreviewProps = props;
+      return createElement(
+        "div",
+        { "data-preview-actions": "true" },
+        (props.documentActions as ReactNode) ?? null,
+      );
+    },
   };
 });
 vi.mock("@/workspace-file-tree/WorkspaceFileTree.js", async () => {
@@ -296,6 +304,7 @@ describe("FileManagerPane header fork controls (2026-11-07 #3)", () => {
   beforeEach(() => {
     window.ResizeObserver =
       window.ResizeObserver ?? (ResizeObserverStub as unknown as typeof ResizeObserver);
+    lastPreviewProps = null;
     cleanup();
   });
 
@@ -368,5 +377,42 @@ describe("FileManagerPane header fork controls (2026-11-07 #3)", () => {
       window.removeEventListener(INDEPENDENT_DOCUMENT_OPEN_EVENT, openListener);
       window.removeEventListener("zcode:workspace-document-discuss", discussListener);
     }
+  });
+
+  // MPS12 (2026-11-08): the markdown PREVIEW selection toolbar inside the
+  // native tab gains "Discuss fragment" too — FileManagerPane threads the same
+  // handler it gives the edit-overlay toolbar down to PreviewPane.
+  it("MPS12: the preview selection toolbar receives the discuss-fragment entry with the same fork gate", () => {
+    renderFileManagerPane({
+      source: { type: "file", title: "note.md", path: "docs/note.md" },
+    });
+    expect(typeof lastPreviewProps?.onDiscussFragment).toBe("function");
+
+    // The preview toolbar's quote routes through the same entry point as the
+    // header Discuss button: discuss event carries the CURRENT selection text.
+    const openListener = vi.fn();
+    const discussListener = vi.fn();
+    window.addEventListener(INDEPENDENT_DOCUMENT_OPEN_EVENT, openListener);
+    window.addEventListener("zcode:workspace-document-discuss", discussListener);
+    try {
+      (lastPreviewProps!.onDiscussFragment as (quote: string) => void)("chosen text");
+      expect(openListener).toHaveBeenCalledTimes(1);
+      expect(discussListener).toHaveBeenCalledTimes(1);
+      expect((discussListener.mock.calls[0]![0] as CustomEvent).detail).toEqual({
+        workspacePath: WORKSPACE_PATH,
+        documentPath: "docs/note.md",
+        quote: "chosen text",
+      });
+    } finally {
+      window.removeEventListener(INDEPENDENT_DOCUMENT_OPEN_EVENT, openListener);
+      window.removeEventListener("zcode:workspace-document-discuss", discussListener);
+    }
+
+    // Binary documents keep the preview menu fork-free (same gate as the
+    // header buttons).
+    renderFileManagerPane({
+      source: { type: "file", title: "logo.png", path: "assets/logo.png" },
+    });
+    expect(lastPreviewProps?.onDiscussFragment).toBeUndefined();
   });
 });

@@ -249,12 +249,19 @@ export function EditorSelectionToolbar({
   sourceTitle,
   sourcePath,
   target,
+  onDiscussFragment,
 }: {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   sourceKey: string;
   sourceTitle: string;
   sourcePath?: string;
   target: MarkdownSelectionTarget;
+  /**
+   * MPS12 (2026-11-08): "Discuss fragment" parity with the preview toolbar.
+   * No gates here — routing goes through the fork document entry point and the
+   * document pane enforces its own capability checks on arrival.
+   */
+  onDiscussFragment?: (quote: string) => void;
 }) {
   const { intl } = useZCodeIntl();
   // Scope change (file/session/target switch) must not let a stale snapshot
@@ -319,6 +326,14 @@ export function EditorSelectionToolbar({
           : requestSelectionSideChatOpenForWorkspace(target.workspaceKey, createReference());
         if (opened) close();
       }}
+      onDiscussFragment={
+        onDiscussFragment
+          ? () => {
+              onDiscussFragment(state.text);
+              close();
+            }
+          : undefined
+      }
     />
   );
 }

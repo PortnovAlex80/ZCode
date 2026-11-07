@@ -114,3 +114,14 @@ MPS09 发送证据加强：E2E 从真实 provider 请求的 user 文本提取 us
 - 独立文档窗口（SpecDocumentPane）的编辑面沿用其自身编辑引擎，不在本条范围内。
 
 验证（2026-11-07）：新增 `editorSelectionToolbar` 单测钉住 textarea 选区出浮层、选中文字进入 add-to-chat 引用（含 path）、折叠/失焦/Escape 关闭、8,000 字符上限展示、无 session 时 workspace opener 路由与未就绪禁用；既有 `markdownPreviewSelection`、`selectionSideChatRuntime` 与 `nativeFileEditing` 套件回归。
+
+### 选区「Discuss fragment」入口（MPS12，accepted，2026-11-08 用户裁决）
+
+用户需求：fork 的「Discuss fragment」必须出现在每一个选区浮层——新编辑态 textarea 浮层（EditorSelectionToolbar，MPS11）与原生文件标签内的 markdown 预览浮层（FileManagerPane 路径）此前只有「Add to chat / Add in side chat」；「Discuss fragment」原本只存在于 SpecDocumentPane 宿主的预览。
+
+- 三个动作共用同一 SelectionActionMenu；入口统一走 `discussWorkspaceFileDocument`（与头部 Discuss 按钮、树右键菜单同一条目点），新增可选 `quote`（当前选区文字）。资格门槛与 fork 头部按钮一致（本地 workspace、文本兼容文档、path 已知）；浮层层不再叠加额外门槛——路由交给条目点，文档窗口内的 SpecDocumentPane 到场后自行执行能力检查（binding、独占 writer、dirty）。
+- quote 双路交接，覆盖两种挂载顺序：live `WORKSPACE_DOCUMENT_DISCUSS_EVENT` payload 直达已挂载 pane；新开文档窗口的 pane 挂载晚于事件，由条目模块内的一次性 pending-quote 槽承接。槽选型说明：文档弹出窗口的 React 子树本就在 opener renderer 内（SpecPopoutRegionPortal 在主文档锚点与 PiP document 之间移动同一 DOM host），模块态对 pane 可见；刻意不落 localStorage——持久化的 quote 会在重载或日后的手动打开中复活陈旧选段，一次性模块态随上下文消亡。消费按 workspace key + 相对文档路径匹配、单次消费、异主消费清槽不返回。
+- pane 收到带 quote 的 discuss 激活：打开讨论坞，并把 quote 预填进本次激活新建的 document-scope 线程的 questionDraft 槽（与预览注释入口同一路径，经 transferNativeDiscussionDraft 进入原生 composer）。只预填、不自动发送、不自动创建 fragment 锚点线程（anchor {start, quote, sha256} 逻辑仍留在 pane 的 discuss()）；已存在讨论时按原逻辑选中，绝不覆写其草稿（quote 丢弃）。
+- 无新增 i18n 文案（按钮沿用 SelectionActionMenu 现有英文 "Discuss fragment"）、无协议/Host/runtime 变化；desktop-continuous 与 web-remote-replayable 边界不动。CodeViewer/Shadow-DOM 的行选区不在范围（MPS11 正确性边界）。
+
+验证（2026-11-08）：新增 `workspaceFileEntryPoints.test.ts`（事件 payload 携带 quote、无 quote 不加字段、槽匹配/一次性/异主清槽）；`specDocumentEntryPoints.test.ts` 新增 live 事件 quote 预填 questionDraft、已存在讨论不被覆写、挂载前 staged quote 全链路预填；`editorSelectionToolbar.test.tsx` 新增编辑浮层第三按钮 dispatch 选区文字、无 handler 只有两动作、FileManagerPane 编辑浮层 dispatch 契约与无本地能力无入口；`nativeFileEditing.test.tsx` 新增预览工具栏接线与二进制门槛；`markdownPreviewSelection.test.ts` 新增预览浮层第三按钮。`packages/ui/src/spec-document/` 全量 33 文件 229 条与 `markdownPreviewSelection` 通过；`pnpm typecheck`、`pnpm lint`（0 error，既有 warning）通过。手机真机与真实远程链路未补测——入口仅本地 workspace 提供。
