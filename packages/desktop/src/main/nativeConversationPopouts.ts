@@ -106,6 +106,53 @@ export function conversationPopoutOpenPolicy(details: {
   };
 }
 
+/**
+ * One adoption path for every conversation surface. Nested popouts (for example
+ * a discussion detached from inside a document window) reuse the same allowlist,
+ * menu removal, navigation guard, tracking and geometry ownership, so a deeper
+ * surface can never be weaker than a direct child: only trusted blank
+ * zcode-conversation-* frames pass; every other window.open stays denied.
+ */
+function adoptConversationPopoutSurface(
+  child: BrowserWindow,
+  frameName: string,
+  groups: NativeWindowAttachments,
+  resolveGeometry: () => Promise<ConversationGeometryRuntime>,
+): void {
+  children.add(child.id);
+  child.setMenu(null);
+  if (typeof child.getBounds === "function") groups.register(frameName, child, false);
+  child.webContents.setWindowOpenHandler(conversationPopoutOpenPolicy);
+  // Same-origin blank documents only: a child must never navigate into an arbitrary site.
+  child.webContents.on("will-navigate", (event) => event.preventDefault());
+  child.webContents.on("did-create-window", (nested, details) => {
+    if (!isConversationFrameName(details.frameName)) return;
+    adoptConversationPopoutSurface(nested, details.frameName, groups, resolveGeometry);
+  });
+  // Geometry is Main-owned; presentation children receive no new privileged IPC.
+  if (typeof child.getNormalBounds === "function") {
+    const attachment = (async () => {
+      const runtime = await resolveGeometry();
+      await runtime.store.ready;
+      if (child.isDestroyed()) return;
+      const capture = attachConversationGeometry(
+        child,
+        frameName,
+        runtime.store,
+        runtime.getDisplays,
+      );
+      captures.add(capture);
+      groups.ready(frameName);
+      child.on("closed", () => captures.delete(capture));
+    })().catch(() => undefined);
+    attachments.add(attachment);
+    void attachment.finally(() => attachments.delete(attachment));
+  }
+  child.on("closed", () => {
+    children.delete(child.id);
+  });
+}
+
 /** Native placement only: the existing React tree and Host remain the sole owners. */
 export function installNativeConversationPopouts(
   owner: BrowserWindow,
@@ -120,38 +167,17 @@ export function installNativeConversationPopouts(
   attachmentOwners.set(ownerWebContentsId, groups);
   const owned = new Set<BrowserWindow>();
   let hiddenForChildren = false;
+  const resolveGeometry = async () => {
+    const runtime = geometry ?? (await getGeometryRuntime());
+    nativeDisplays = runtime.getDisplays;
+    return runtime;
+  };
   owner.webContents.setWindowOpenHandler(conversationPopoutOpenPolicy);
   owner.webContents.on("did-create-window", (child, details) => {
     if (!isConversationFrameName(details.frameName)) return;
-    children.add(child.id);
     owned.add(child);
-    child.setMenu(null);
-    if (typeof child.getBounds === "function") groups.register(details.frameName, child, false);
-    child.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    // 修复根因：可迁移 UI 仅允许同源空白文档，禁止子窗口导航变成任意网站。
-    child.webContents.on("will-navigate", (event) => event.preventDefault());
-    // Geometry is Main-owned; presentation children receive no new privileged IPC.
-    if (typeof child.getNormalBounds === "function") {
-      const attachment = (async () => {
-        const runtime = geometry ?? (await getGeometryRuntime());
-        nativeDisplays = runtime.getDisplays;
-        await runtime.store.ready;
-        if (child.isDestroyed()) return;
-        const capture = attachConversationGeometry(
-          child,
-          details.frameName,
-          runtime.store,
-          runtime.getDisplays,
-        );
-        captures.add(capture);
-        groups.ready(details.frameName);
-        child.on("closed", () => captures.delete(capture));
-      })().catch(() => undefined);
-      attachments.add(attachment);
-      void attachment.finally(() => attachments.delete(attachment));
-    }
+    adoptConversationPopoutSurface(child, details.frameName, groups, resolveGeometry);
     child.on("closed", () => {
-      children.delete(child.id);
       owned.delete(child);
       if (
         owned.size === 0 &&

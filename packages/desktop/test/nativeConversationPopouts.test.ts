@@ -137,6 +137,44 @@ describe("native conversation placement", () => {
     child.emit("closed");
   });
 
+  it("a child surface may open a nested conversation popout and receives the same guards", () => {
+    const owner = fakeWindow(20);
+    const child = fakeWindow(21);
+    const nested = Object.assign(fakeWindow(22), {
+      getNormalBounds: () => ({ x: 0, y: 0, width: 400, height: 300 }),
+      isMaximized: () => false,
+    });
+    installNativeConversationPopouts(owner as never, () => false);
+    owner.webContents.emit("did-create-window", child, {
+      frameName: "zcode-conversation-doc",
+    });
+    // The child no longer gets a blanket deny: it carries the same allowlist.
+    const childHandler = child.webContents.setWindowOpenHandler.mock.calls[0][0] as (
+      details: { url: string; frameName: string },
+    ) => { action: string };
+    expect(
+      childHandler({ url: "about:blank", frameName: "zcode-conversation-nested" }).action,
+    ).toBe("allow");
+    // Arbitrary targets from a child stay denied.
+    expect(childHandler({ url: "https://example.com", frameName: "zcode-conversation-nested" }).action).toBe("deny");
+    expect(childHandler({ url: "about:blank", frameName: "arbitrary" }).action).toBe("deny");
+    // The nested surface is adopted like a direct child: tracked, menu-free and
+    // carrying the same policy for any deeper surface.
+    child.webContents.emit("did-create-window", nested, {
+      frameName: "zcode-conversation-nested",
+    });
+    expect(isNativeConversationPopout(nested)).toBe(true);
+    expect(nested.setMenu).toHaveBeenCalledOnce();
+    expect(nested.webContents.setWindowOpenHandler).toHaveBeenCalledOnce();
+    const nestedHandler = nested.webContents.setWindowOpenHandler.mock.calls[0][0] as (
+      details: { url: string; frameName: string },
+    ) => { action: string };
+    expect(nestedHandler({ url: "about:blank", frameName: "zcode-conversation-deep" }).action).toBe("allow");
+    expect(nestedHandler({ url: "https://example.com", frameName: "zcode-conversation-deep" }).action).toBe("deny");
+    child.emit("closed");
+    nested.emit("closed");
+  });
+
   it("hydrates addressed native bounds and saves close geometry without giving children IPC", async () => {
     const folder = await mkdtemp(join(tmpdir(), "zcode-popout-lifecycle-"));
     try {
