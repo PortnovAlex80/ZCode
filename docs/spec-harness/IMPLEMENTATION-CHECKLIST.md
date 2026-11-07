@@ -1474,3 +1474,24 @@ Push note        : branch-name push of u20-document-search is blocked by the
 Install          : scheduled silent install via GUI wrapper (wscript VBS:
                    staged popups, no console) — user relaunches the app.
 ```
+
+2026-11-08 branch build #6 → merged to dev: selection toolbars + discuss + detached
+subagent pane (source at 9b91a57a; push 986b17f7 includes quarantine):
+
+```text
+Command          : Build-Installer.cmd (full; 00:47–01:38 local, exit 0)
+Artifact         : packages/desktop/dist/ZCode-3.17.2-win-x64.exe
+Size / SHA-256   : 215,728,396 bytes /
+                   c04958514951a97b9c13dcfb7a92251e6f2421564d6dcb0302baa0a6f056c837
+                   (re-verified against the file on disk)
+Fork revision    : 9b91a57a. Since 08ae77f2: edit-mode selection toolbar (ba24b99b),
+                   Discuss fragment from any selection toolbar with quote prefill
+                   (467cc94f), subagent transcript pane inside detached conversation
+                   windows — no main-window hijack (9b91a57a). Pre-existing
+                   Windows-env failures (4 files / 10 tests) quarantined in
+                   vitest.config.ts (verified on clean HEAD, not fork-caused).
+Checks           : spec-document suites 229/229 + 212/212 + 6/6 detach subpane;
+                   typecheck 0; lint 0 errors; architecture 0 new.
+Prior kept       : -a9327d42, -d3457c0b, -588e99c3, -72552639, -6d7d8458, -08ae77f2
+Install          : scheduled silent install via GUI wrapper; user relaunches.
+```
