@@ -71,6 +71,26 @@ PanelRight-иконки caption).
 дерева (`workspaceFileEntryPoints.ts`), с теми же условиями (локальный
 workspace, текстовое расширение, path-строка).
 
+### UC-2. Редактирование любого текстово-совместимого документа (2026-11-07 #4)
+
+Формулировка пользователя: **any non-binary file** — не только .md/.txt/.rst,
+но и json/yaml/yml/toml/ini/cfg/conf/env/properties/xml/csv/tsv/log, dotfiles
+без расширения (.gitignore, .env, LICENSE) и т.п. — редактируется через
+нативный оверлей; **бинарные форматы отсекаются**.
+
+| Слой | Механика | Файлы |
+|---|---|---|
+| UI-гейт (Edit/Discuss/Open-in-window в шапке, правый клик дерева) | бинарный denylist `isTextCompatibleDocumentPath`: images/audio/video/archives/executables/fonts/pdf/office/databases/bin/iso/lock; без расширения и dotfiles = текст | `spec-document/nativeFileEditing.tsx`, `WorkspaceFileTree.tsx`, `workspace-file-tree/WorkspaceFileTreeRowView.tsx` |
+| Контент-защита (главная, сервис) | UTF-8 round-trip + NUL-байты → «Only valid UTF-8 text documents are supported»; >2 МиБ → «…up to 2 MiB»; расширение больше не гейтит read/save/remove | `services/src/spec-document/specDocumentService.ts` (`resolveDocument`) |
+| Поверхность редактора | оверлей-редактор рендерится и для `type: "file"`-источников — до этого textarea была только в `type: "text"`-ветке, и у дерева Edit был без поля ввода | `previewPaneContent.tsx` (file-ветка, зеркало text-гейта) |
+
+- **Listing/search scope не менялся**: `DOCUMENT_EXTENSIONS`
+  (.md/.markdown/.txt/.rst) остался только для `list()`/`search()` — пикер и
+  поиск по-прежнему перечисляют prose-документы.
+- Приёмка: read+save `.json`/`.yaml`/`.env`/`.gitignore` проходят; read `.png`
+  (бинарные байты) → видимый отказ по UTF-8/NUL/2 МиБ, не «Unsupported text
+  document»; list/search без изменений.
+
 ### CORR-2. Иконка/поведение тогла боковой панели — от ОРИГИНАЛА
 
 Сейчас: форк-компонент `WorkspaceSidePaneCaptionControls` + роль-тоггл с иконкой
@@ -120,10 +140,10 @@ controls], без `workspacePanelRoles`.
 
 | Элемент | Класс | Статус | Файлы / факты |
 |---|---|---|---|
-| Document IO-сервис (read/save CAS `expectedSha256`, remove, list, **search** fuzzy top-K) | F | keep | `services/src/spec-document/specDocument{,Service}.ts`; whitelist `.md/.markdown/.txt/.rst`, ≤2 МиБ; U-14/U-18/U-20 |
+| Document IO-сервис (read/save CAS `expectedSha256`, remove, list, **search** fuzzy top-K) | F | keep | `services/src/spec-document/specDocument{,Service}.ts`; whitelist `.md/.markdown/.txt/.rst` — **listing-only** (list/search, UC-2); read/save/remove — любой не-бинарный текст, guard'ы UTF-8/NUL, ≤2 МиБ; U-14/U-18/U-20 |
 | Перехват нативных вкладок → `SpecDocumentPane` | R | **retired 2026-11-07 (CORR-1)** | нативные вкладки → `FileManagerPane`; панель осталась в независимых окнах |
 | «Open doc» + пикер-комбобокс (U-08/U-12/U-13) + серверный поиск (U-20 path-half, «N shown · M total») | R→F | **launcher entry removed 2026-11-07 (CORR-1)** | пикер остался внутри `SpecDocumentPane` документных окон (`specDocumentPicker.tsx`); лаунчер-пункт и popout-кнопка удалены |
-| Оверлей правки на нативном просмотре (Edit → textarea, 500 мс автосейв, Save, CAS) | O | keep | `nativeFileEditing.tsx`; `WorkspaceFileTree.tsx:42-53,192-206`; `PreviewPane.tsx` (+`sourceEditor`,`documentActions`,`requestMarkdownViewMode`) — ruling 2026-11-07 |
+| Оверлей правки на нативном просмотре (Edit → textarea, 500 мс автосейв, Save, CAS) | O | keep | `nativeFileEditing.tsx`; `WorkspaceFileTree.tsx:42-53,192-206`; `PreviewPane.tsx` (+`sourceEditor`,`documentActions`,`requestMarkdownViewMode`) — ruling 2026-11-07; UC-2: любой text-compatible документ (бинарный denylist), поверхность редактора и для `type: "file"`-источников |
 | Автосейв/Save в документной вкладке (U-18; фикс мёртвой сессии 2026-10-31: error/closed ≠ писатель) | F | keep (внутри CORR-1 судьба панели = decide) | `SpecDocumentPane.tsx:749-847`; `useSpecDiscussion.ts` (guard) |
 | Find-in-document Ctrl/Cmd+F (U-19) | F | keep | `documentFind.ts`; view=CSS Highlight, edit=selection |
 | Обсуждения документа на нативных сессиях (D-02..D-04), writer-lease (Web Locks), паспорта `.harness/project.json` (U-02) | F | keep (вход = правый клик дерева «Обсудить документ» → независимое окно, CORR-1) | `SpecDiscussionPane.tsx`, `specThread.ts`, `projectMetadata*.ts`, `workspaceFileEntryPoints.ts` |
@@ -176,6 +196,7 @@ controls], без `workspacePanelRoles`.
 | 2026-11-07 | Ruling «натив-first + наша правка; swap выпилить»; U-20 path-half; оверлей правки; swap удалён; сборки `d3457c0b`, `588e99c3` |
 | 2026-11-07 | **CORR-1/CORR-2 зарегистрированы** (этот документ): открытие файлов и тогл — вернуть к оригиналу |
 | 2026-11-07 | **CORR-1/CORR-2 реализованы** (ветка `u20-document-search`): нативный first-open, правый клик = форк-входы (обсуждение/окно/боковой диалог), caption = upstream-кластер; SpecDocumentPane — только документные окна/беседы |
+| 2026-11-07 | **UC-2 реализован** (ruling 2026-11-07 #4): правка любого не-бинарного текста (json/yaml/env/dotfiles/…), бинарный denylist + контент-guard'ы; whitelist — только для list/search; поверхность редактора заведена для `type: "file"`-источников |
 
 ## 4. Открытая приёмка (сводно)
 

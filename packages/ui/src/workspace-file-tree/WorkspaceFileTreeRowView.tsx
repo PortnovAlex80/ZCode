@@ -36,6 +36,7 @@ import { usePlatform } from "@/hooks/usePlatform.js";
 import { useOptionalServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { ArtifactMetadataEditor } from "@/spec-document/ArtifactMetadataEditor.js";
+import { isTextCompatibleDocumentPath } from "@/spec-document/nativeFileEditing.js";
 import {
   discussWorkspaceFileDocument,
   openWorkspaceFileDocumentWindow,
@@ -248,8 +249,9 @@ export function WorkspaceFileTreeRowView({
   // CORR-1 (user ruling 2026-11-07): the fork document entry points (discussion,
   // separate window, side conversation) live in this context menu for text
   // documents on local desktop workspaces. Remote/external trees keep the native
-  // menu only. The document whitelist matches the document IO service
-  // (.md/.markdown/.txt/.rst) and the ruling's list.
+  // menu only. 2026-11-07 #4: any text-compatible document qualifies — the gate
+  // is a binary denylist (isTextCompatibleDocumentPath), not a prose extension
+  // whitelist; binaries are refused again by the service content guards.
   const canUseForkDocumentActions =
     row.type === "file" &&
     !isDeletedFile &&
@@ -257,7 +259,7 @@ export function WorkspaceFileTreeRowView({
     !isRemoteWorkspaceFileTree &&
     !workspaceRemoteSessionId &&
     canOpenLocalFileManager &&
-    /\.(md|markdown|txt|rst)$/i.test(row.name);
+    isTextCompatibleDocumentPath(row.name);
   const forkDocumentRequest: WorkspaceFileEntryPointRequest = {
     workspacePath,
     ...(workspaceIdentity ? { workspaceIdentity } : {}),

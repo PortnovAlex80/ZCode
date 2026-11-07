@@ -1,15 +1,23 @@
 // @vitest-environment jsdom
-// 2026-11-07 用户裁决覆盖：原生文件预览叠加 fork 编辑（U-18 引擎）。
-// 覆盖：可编辑判定（扩展名）、Edit 进入即读盘并显示缓冲、键入防抖自动落盘
-//   （CAS 载荷）、外部改写后自动保存可见失败且不自动重试、markdown 视图请求。
+// 2026-11-07 user ruling coverage: the fork editing overlay (U-18 engine) on
+// top of the native file preview.
+// Covered: editability gate (binary denylist — json/.env editable, png not),
+//   Edit reads the disk snapshot into the buffer, debounced autosave with the
+//   CAS payload, visible autosave failure after an external rewrite (no silent
+//   retry), markdown view request.
 // 2026-11-07 #3 (owner: fork): FileManagerPane-level coverage — tree "file"
 //   sources gain Edit/Discuss/Open-in-window in the native preview header, and
 //   the Discuss click dispatches exactly what the tree context menu dispatches.
+// 2026-11-07 #4 (UC-2): editability is any non-binary text file — json/yaml/
+//   env/dotfiles gain the overlay; binaries stay native-only.
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceProvider } from "../hooks/useServices.js";
-import { useNativeFileEditing } from "./nativeFileEditing.js";
+import {
+  isTextCompatibleDocumentPath,
+  useNativeFileEditing,
+} from "./nativeFileEditing.js";
 import { FileManagerPane } from "../WorkspaceFileTree.js";
 import {
   discussWorkspaceFileDocument,
@@ -62,6 +70,8 @@ const WORKSPACE_PATH = "D:\\ws";
 function createDocumentsService() {
   const disk = new Map<string, { content: string; sha256: string }>([
     ["docs/note.md", { content: "# base\n", sha256: "sha-native-base" }],
+    // UC-2: a dotfile seed for the extensionless-editability coverage below.
+    [".env", { content: "# base\n", sha256: "sha-native-base" }],
   ]);
   const saveCalls: { path: string; content: string; expectedSha256: string }[] = [];
   let revision = 0;
@@ -125,10 +135,74 @@ describe("native file preview editing overlay (2026-11-07 ruling)", () => {
     cleanup();
   });
 
-  it("offers no editing affordance for non-text documents (code files stay native)", () => {
-    const { view } = renderHost({ path: "config/.oxfmtrc.json" });
+  it("UC-2 denylist: dotfiles and extensionless names are text, known binaries are not", () => {
+    // Text-compatible: config formats, dotfiles, extensionless names,
+    // multi-dot dotfiles, absolute/backslash paths.
+    for (const path of [
+      "config/app.json",
+      "deploy/values.yaml",
+      "app.toml",
+      "notes.csv",
+      "server.log",
+      ".env",
+      ".gitignore",
+      ".env.local",
+      "LICENSE",
+      "Makefile",
+      "D:\\ws\\.env",
+      "/srv/ws/config/app.json",
+      "package-lock.json",
+    ]) {
+      expect(isTextCompatibleDocumentPath(path), path).toBe(true);
+    }
+    // Binary denylist (case-insensitive), including absolute paths.
+    for (const path of [
+      "assets/logo.png",
+      "assets/photo.JPG",
+      "media/track.mp3",
+      "media/clip.MP4",
+      "dist/bundle.zip",
+      "tools/app.exe",
+      "fonts/inter.woff2",
+      "docs/report.pdf",
+      "docs/report.docx",
+      "db/data.sqlite",
+      "raw/image.bin",
+      "pkg/pkg.lock",
+      "D:\\ws\\assets\\logo.png",
+    ]) {
+      expect(isTextCompatibleDocumentPath(path), path).toBe(false);
+    }
+  });
+
+  it("offers no editing affordance for binary documents (denylist stays native)", () => {
+    const { view } = renderHost({ path: "assets/logo.png" });
     expect(screen.queryByLabelText("Edit")).toBeNull();
     expect(view.container.textContent).toBe("");
+  });
+
+  it("UC-2: any text-compatible document gains the edit affordance (json, dotfiles)", () => {
+    renderHost({ path: "config/app.json" });
+    expect(screen.getByLabelText("Edit")).toBeTruthy();
+    cleanup();
+    renderHost({ path: ".env" });
+    expect(screen.getByLabelText("Edit")).toBeTruthy();
+  });
+
+  it("UC-2: edits a dotfile end-to-end with the same CAS autosave payload", async () => {
+    const { documents } = renderHost({ path: ".env" });
+    fireEvent.click(screen.getByLabelText("Edit"));
+
+    const editor = (await screen.findByLabelText("Document source editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toBe("# base\n"));
+
+    fireEvent.change(editor, { target: { value: "# base\nTOKEN=secret" } });
+    await waitFor(() => expect(documents.saveCalls.length).toBe(1));
+    expect(documents.saveCalls[0]).toMatchObject({
+      path: ".env",
+      content: "# base\nTOKEN=secret",
+      expectedSha256: "sha-native-base",
+    });
   });
 
   it("Edit reads the disk snapshot, autosaves typed edits with the CAS hash and clears the draft", async () => {
@@ -234,9 +308,18 @@ describe("FileManagerPane header fork controls (2026-11-07 #3)", () => {
     expect(screen.getByLabelText("Open document in window")).toBeTruthy();
   });
 
-  it("keeps code files native-only: no Edit, Discuss or Open-in-window", () => {
+  it("UC-2: json documents gain Edit, Discuss and Open-in-window", () => {
     renderFileManagerPane({
       source: { type: "file", title: "settings.json", path: "config/settings.json" },
+    });
+    expect(screen.getByLabelText("Edit")).toBeTruthy();
+    expect(screen.getByLabelText("Discuss document")).toBeTruthy();
+    expect(screen.getByLabelText("Open document in window")).toBeTruthy();
+  });
+
+  it("UC-2: binary documents stay native-only: no Edit, Discuss or Open-in-window", () => {
+    renderFileManagerPane({
+      source: { type: "file", title: "logo.png", path: "assets/logo.png" },
     });
     expect(screen.queryByLabelText("Edit")).toBeNull();
     expect(screen.queryByLabelText("Discuss document")).toBeNull();

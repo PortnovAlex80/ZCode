@@ -426,6 +426,19 @@ export function PreviewPaneContent({
     );
   }
 
+  const fileLanguage = inferCodeLanguage(source.path, filePreview.content);
+  const isMarkdownFile = fileLanguage === "markdown";
+  const isSvgFile = isSvgPath(source.path);
+  // Fork edit overlay (2026-11-07 #4): file sources must render the editor
+  // surface exactly like the "text" branch above does. Without this gate a
+  // tree-opened document showed the header Edit button but kept the read-only
+  // code view below it — no typing surface. The gate is inert while no edit
+  // session is active (sourceEditor is null), so the native preview flow
+  // (empty-file placeholder, markdown/svg preview, code view) is untouched.
+  if (source.type === "file" && sourceEditor && (!isMarkdownFile || markdownViewMode === "code")) {
+    return sourceEditor;
+  }
+
   if (filePreview.content.length === 0) {
     return (
       <div className="p-3 text-ui-base text-foreground-subtle">
@@ -434,13 +447,10 @@ export function PreviewPaneContent({
     );
   }
 
-  const fileLanguage = inferCodeLanguage(source.path, filePreview.content);
   const codeReviewProjection =
     source.type === "code-review"
       ? resolveCodeReviewContentProjection(source, filePreview.content)
       : null;
-  const isMarkdownFile = fileLanguage === "markdown";
-  const isSvgFile = isSvgPath(source.path);
   if (source.type !== "code-review" && isMarkdownFile && markdownViewMode === "preview") {
     return (
       <MarkdownPreviewContent

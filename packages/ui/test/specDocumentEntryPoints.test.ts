@@ -236,8 +236,10 @@ describe("native-first file opening (CORR-1)", () => {
     expect(rowSource).toContain("discussWorkspaceFileDocument");
     expect(rowSource).toContain("openWorkspaceFileDocumentWindow");
     expect(rowSource).toContain("requestWorkspaceFileSideConversation");
-    // Whitelist matches the document IO service (.md/.markdown/.txt/.rst).
-    expect(rowSource).toMatch(/\\\.\(md\|markdown\|txt\|rst\)\$/);
+    // UC-2 (user ruling 2026-11-07 #4): any text-compatible document qualifies —
+    // the gate is the binary denylist predicate, not the prose extension
+    // whitelist; binaries are refused again by the service content guards.
+    expect(rowSource).toContain("isTextCompatibleDocumentPath(row.name)");
     // Local desktop workspaces only.
     expect(rowSource).toMatch(
       /!isRemoteWorkspaceFileTree\s*&&\s*!workspaceRemoteSessionId\s*&&\s*canOpenLocalFileManager/,

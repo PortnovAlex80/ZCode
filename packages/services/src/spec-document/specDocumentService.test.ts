@@ -334,3 +334,72 @@ test("search ranks name matches ahead of deep-path matches and clamps the limit"
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// UC-2 (user ruling 2026-11-07 #4): any non-binary text document is editable —
+// json/yaml/env/dotfiles are no longer refused by the extension whitelist. The
+// content guards (UTF-8 round-trip, NUL, 2 MiB) are the only binary gate: the
+// refusal must be a visible content error, never the retired "Unsupported text
+// document". The list/search enumeration scope keeps the prose whitelist.
+test("UC-2: any text-compatible document is editable; binaries fail the content guards", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "spec-document-any-text-"));
+  try {
+    await mkdir(join(directory, "config"), { recursive: true });
+    await writeFile(join(directory, "config", "app.json"), '{"mode": "fast"}\n');
+    await writeFile(join(directory, "config", "settings.yaml"), "mode: fast\n");
+    await writeFile(join(directory, ".env"), "TOKEN=secret\n");
+    await writeFile(join(directory, ".gitignore"), "node_modules\n");
+    await writeFile(join(directory, "data.csv"), "a,b\n1,2\n");
+    const service = createSpecDocumentService({ desktopLocal: true, allowUnleasedWrites: true });
+
+    for (const path of [
+      "config/app.json",
+      "config/settings.yaml",
+      ".env",
+      ".gitignore",
+      "data.csv",
+    ]) {
+      const snapshot = await service.read({ workspacePath: directory, path });
+      const saved = await service.save({
+        workspacePath: directory,
+        path,
+        content: `${snapshot.content}# edited\n`,
+        expectedSha256: snapshot.sha256,
+      });
+      assert.equal(saved.path, path);
+    }
+    assert.equal(await readFile(join(directory, ".env"), "utf8"), "TOKEN=secret\n# edited\n");
+
+    // Binary bytes are refused by the UTF-8/NUL content guard with a visible
+    // error — never by the retired extension whitelist.
+    await writeFile(
+      join(directory, "logo.png"),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]),
+    );
+    await assert.rejects(
+      service.read({ workspacePath: directory, path: "logo.png" }),
+      (error: unknown) => {
+        assert.match(String(error), /UTF-8/);
+        assert.doesNotMatch(String(error), /Unsupported/);
+        return true;
+      },
+    );
+    // Text content over 2 MiB is refused by the size guard.
+    await writeFile(join(directory, "huge.log"), "x".repeat(2 * 1024 * 1024 + 1));
+    await assert.rejects(
+      service.read({ workspacePath: directory, path: "huge.log" }),
+      (error: unknown) => {
+        assert.match(String(error), /2 MiB/);
+        assert.doesNotMatch(String(error), /Unsupported/);
+        return true;
+      },
+    );
+
+    // Listing/search scope unchanged: prose extensions only — none of the files
+    // above match DOCUMENT_EXTENSIONS.
+    assert.deepEqual(await service.list({ workspacePath: directory }), []);
+    const found = await service.search({ workspacePath: directory, query: "app" });
+    assert.equal(found.total, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

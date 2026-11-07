@@ -230,4 +230,36 @@ describe("PreviewPaneContent text files", () => {
     expect(html).toContain("The target line does not exist");
     expect(html).toContain('data-selected-lines=""');
   });
+
+  // Fork edit overlay (2026-11-07 #4 / UC-2): a tree-opened document is a
+  // `type: "file"` source; while an edit session is active the editor surface
+  // must replace the read-only code view, exactly like the "text" branch does.
+  it("renders the editor surface for file sources while an edit session is active", () => {
+    const html = renderFileContent({
+      sourceEditor: createElement("textarea", { "data-native-document-editor": "true" }),
+    });
+
+    expect(html).toContain("<textarea");
+    expect(html).toContain("data-native-document-editor");
+    expect(html).not.toContain("<diffs-container");
+  });
+
+  it("keeps the markdown preview while the editor defers to preview mode", () => {
+    const html = renderFileContent({
+      source: { type: "file", title: "note.md", path: "/workspace/note.md" },
+      filePreview: {
+        path: "/workspace/note.md",
+        content: "# Heading\nbody text",
+        offset: 0,
+        bytesRead: 17,
+        totalBytes: 17,
+        truncated: false,
+        isBinary: false,
+      },
+      markdownViewMode: "preview",
+      sourceEditor: createElement("textarea", { "data-native-document-editor": "true" }),
+    });
+
+    expect(html).not.toContain("<textarea");
+  });
 });

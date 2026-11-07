@@ -11,7 +11,7 @@ import {
 import { PreviewPane } from "@/PreviewPane.js";
 import { WorkspaceFileTree } from "@/workspace-file-tree/WorkspaceFileTree.js";
 import {
-  isNativeEditableTextDocumentPath,
+  isTextCompatibleDocumentPath,
   useNativeFileEditing,
 } from "@/spec-document/nativeFileEditing.js";
 import {
@@ -42,9 +42,14 @@ const FILE_MANAGER_PANEL_IDS = ["directory", "preview"];
  * CORR-1 follow-up (user ruling 2026-11-07 #3): the file tree produces lazy
  * `type: "file"` sources for documents (createCodeViewerSourceForWorkspaceFile),
  * while only inline tool previews arrive as `type: "text"`. The edit overlay and
- * the fork document entry points must therefore key off the source path
- * (document extension whitelist) for both source types; gating on the "text"
- * type alone left every tree-opened document on a native-only header.
+ * the fork document entry points must therefore key off the source path for both
+ * source types; gating on the "text" type alone left every tree-opened document
+ * on a native-only header.
+ *
+ * 2026-11-07 #4 (user ruling): any text-compatible document is editable — the
+ * gate is a binary denylist (isTextCompatibleDocumentPath), not a prose
+ * extension whitelist. Binaries are additionally refused by the service-side
+ * content guards on the first read.
  */
 function getNativeEditableTextDocumentPath(source: CodeViewerSource | null): string | null {
   if (!source || (source.type !== "file" && source.type !== "text")) {
@@ -54,7 +59,7 @@ function getNativeEditableTextDocumentPath(source: CodeViewerSource | null): str
   if (typeof source.path !== "string") {
     return null;
   }
-  return isNativeEditableTextDocumentPath(source.path) ? source.path : null;
+  return isTextCompatibleDocumentPath(source.path) ? source.path : null;
 }
 
 type FileManagerPaneProps = Omit<ComponentProps<typeof PreviewPane>, "source"> & {
@@ -278,10 +283,12 @@ export function FileManagerPane({
               {...previewProps}
               source={source}
               headerContainer={headerContainer}
-              // 2026-11-07（用户裁决）：原生文件预览叠加 fork 的 U-18 编辑引擎
-              // （Edit → textarea + 500ms 自动落盘 + Save + CAS）。原生行为不动，
-              // 仅本地工作区的文本文档（.md/.txt/…）获得编辑入口；remote 与代码
-              // 文件保持原生只读。
+              // 2026-11-07 (user ruling): the native file preview carries the
+              // fork U-18 editing engine (Edit -> textarea + 500ms autosave +
+              // Save + CAS). Native behavior is untouched; any non-binary text
+              // document on a local workspace gets the edit entry (binary
+              // denylist + service-side content guards as the backstop);
+              // remote tabs stay natively read-only.
               // 2026-11-07 #3 (owner: fork): the same header cluster also carries
               // the fork document entry points, ordered
               // [Edit/View][Save][status][Discuss][Open in window].

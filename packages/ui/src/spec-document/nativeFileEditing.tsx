@@ -18,17 +18,97 @@ import type { SpecDocumentSnapshot } from "@zcode/services";
  * per-path 草稿槽）；未保存关闭标签会丢弃缓冲——草稿跨重开恢复仍属文档 tab
  * 的 U-18 语义，不在此复制第二份真相。
  *
- * 范围裁决：仅文本文档（.md/.markdown/.txt/.rst，与服务端白名单一致）；代码
- * 文件（json/ts/…）保持原生只读。
+ * Scope ruling (2026-11-07 #4): any non-binary text document is editable
+ * (json/yaml/toml/ini/env/xml/csv/log, extensionless dotfiles, etc.). The UI
+ * gate is a binary denylist; the final backstop is the service-side content
+ * validation (UTF-8 round-trip, NUL, 2 MiB) — binary content never survives
+ * read/save. Markdown keeps its Preview/Source switching behavior unchanged.
  */
 
-/** 与 services 侧 DOCUMENT_EXTENSIONS 保持一致（服务端仍按白名单拒绝写入）。 */
-const NATIVE_EDITING_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".rst"]);
+/**
+ * Binary denylist (user ruling 2026-11-07 #4): everything not listed here is
+ * treated as text-compatible and gains the edit overlay. The service-side
+ * content guards (UTF-8 round-trip, NUL bytes, 2 MiB limit) are the real
+ * backstop — a mis-classified binary still fails its first read with a visible
+ * error instead of being edited as text.
+ */
+const BINARY_DOCUMENT_EXTENSIONS = new Set([
+  // images
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "bmp",
+  "webp",
+  "avif",
+  "ico",
+  "tiff",
+  "heic",
+  // audio / video
+  "mp3",
+  "wav",
+  "ogg",
+  "flac",
+  "m4a",
+  "mp4",
+  "avi",
+  "mkv",
+  "mov",
+  "webm",
+  // archives
+  "zip",
+  "gz",
+  "tar",
+  "rar",
+  "7z",
+  "bz2",
+  "xz",
+  "br",
+  // executables / libraries
+  "exe",
+  "dll",
+  "so",
+  "dylib",
+  "msi",
+  "app",
+  "jar",
+  "class",
+  // fonts
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  // documents / office
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  // databases
+  "sqlite",
+  "db",
+  "db3",
+  // disk images / raw blobs
+  "bin",
+  "iso",
+  "img",
+  // lockfiles that are machine-generated binary-ish state
+  "lock",
+]);
 
-export function isNativeEditableTextDocumentPath(path: string): boolean {
-  const dot = path.lastIndexOf(".");
-  const ext = dot < 0 ? "" : path.slice(dot).toLowerCase();
-  return NATIVE_EDITING_EXTENSIONS.has(ext);
+/**
+ * True unless the path carries a known binary extension. Extensionless names
+ * (LICENSE, Makefile) and dotfiles (".env", ".gitignore") are text.
+ */
+export function isTextCompatibleDocumentPath(path: string): boolean {
+  const leaf = path.split(/[\\/]/).at(-1) ?? path;
+  const dot = leaf.lastIndexOf(".");
+  // No dot, or a leading dot (dotfile): no usable extension, treat as text.
+  if (dot <= 0) return true;
+  const ext = leaf.slice(dot + 1).toLowerCase();
+  return !BINARY_DOCUMENT_EXTENSIONS.has(ext);
 }
 
 /** 绝对路径归一为工作区相对 POSIX 路径（与 SpecDocumentPane 打开链路同规则）。 */
@@ -61,7 +141,7 @@ export function useNativeFileEditing(options: {
   const { specDocumentService } = useServices();
   const { path, enabled, autosaveDelayMs = 500 } = options;
   const applicable =
-    enabled && Boolean(specDocumentService) && path !== null && isNativeEditableTextDocumentPath(path);
+    enabled && Boolean(specDocumentService) && path !== null && isTextCompatibleDocumentPath(path);
 
   const [editing, setEditing] = useState(false);
   const [document, setDocument] = useState<SpecDocumentSnapshot | null>(null);

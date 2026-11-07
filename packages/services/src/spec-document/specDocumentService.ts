@@ -9,6 +9,10 @@ import {
 import type { ISpecDocumentService, SpecDocumentSnapshot } from "./specDocument.js";
 
 const MAX_BYTES = 2 * 1024 * 1024;
+/**
+ * U-20: listing/search scope only. The picker and search enumerate prose
+ * documents; this set must not gate read/save/remove (see resolveDocument).
+ */
 const DOCUMENT_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".rst"]);
 
 /**
@@ -60,8 +64,12 @@ export function createSpecDocumentService(options: {
     if (!local || local === ".." || local.startsWith(`..${sep}`) || isAbsolute(local)) {
       throw new Error("Document is outside the granted workspace.");
     }
-    if (!DOCUMENT_EXTENSIONS.has(extname(local).toLowerCase()))
-      throw new Error("Unsupported text document.");
+    // Editable = any non-binary text file (user ruling 2026-11-07 #4): json,
+    // yaml, toml, ini, env, xml, csv, dotfiles without extensions, etc. There is
+    // deliberately no extension whitelist here — content validation is the
+    // guard: snapshot() rejects non-UTF-8 bytes, NUL bytes and anything over
+    // 2 MiB with visible errors, so a binary file never survives read/save.
+    // The extension whitelist stays listing-only (DOCUMENT_EXTENSIONS above).
     // Symlink/junction traversal is refused, including intermediate directories.
     let cursor = workspace;
     for (const part of local.split(sep)) {
