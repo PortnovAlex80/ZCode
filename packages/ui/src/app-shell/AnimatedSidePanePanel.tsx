@@ -56,10 +56,11 @@ import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { composerScopeKey, resolveComposerScope } from "@/v4/composer/composerDraftStore.js";
 import { SidePaneTerminalPane } from "@/SidePaneTerminalPane.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
-import { WorkspaceSidePaneCaptionControls } from "@/app-shell/WorkspaceSidePaneCaptionControls.js";
+import { WorkspaceSidePaneToggleButton } from "@/WorkspaceSidePaneToggleButton.js";
 import {
   SIDE_PANE_FULL_VIEW_CONVERSATION_TAB_VALUE,
   SidePaneFullViewConversationTab,
+  SidePaneFullViewToggleButton,
   type SidePaneFullViewSurface,
 } from "@/side-pane-full-view/index.js";
 import { DesktopWindowControls } from "@/DesktopWindowControls.js";
@@ -131,9 +132,7 @@ import { formatTaskRelativeTime } from "@/lib/taskListItemPresentation.js";
 import {
   shouldMountSidePaneContent,
   shouldMountBrowserTabGuest,
-  buildSpecDocumentPickerSource,
   openCodeViewerSidePane,
-  isUnboundSpecDocumentPickerSource,
   type BrowserSidePaneTab,
   type BrowserUseSidePaneTab,
   type BrowserSidePaneMetadata,
@@ -153,16 +152,16 @@ import {
   BugIcon,
   ChevronRightIcon,
   FileDiffIcon,
-  FileTextIcon,
   FolderOpenIcon,
   EarthIcon,
   GlobeIcon,
   MessageSquareTextIcon,
+  PanelLeftOpen,
   PlusIcon,
   SquareTerminalIcon,
   type LucideIcon,
 } from "lucide-react";
-import type { WorkspaceBodyRoleTogglePresentation } from "@/spec-document/workspacePanelRoles.js";
+import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 
 const SIDE_PANE_CONTENT_WIDTH_LOCK_DURATION_MS = 200;
 const PREVIEW_PANE_RESIZE_SETTLE_DELAY_MS = 220;
@@ -171,12 +170,11 @@ type TabsScrollMaskEdges = {
   right: boolean;
 };
 type OpenTabLauncherItem = {
-  id: OpenTabLauncherItemId | "documents";
+  id: OpenTabLauncherItemId;
   label: string;
   description: string;
   icon: LucideIcon;
   onOpen: () => void;
-  disabled?: boolean;
 };
 const EMPTY_SIDE_PANE_TABS: WorkspaceSidePaneState["tabs"] = [];
 const EMPTY_TABS_SCROLL_MASK_EDGES: TabsScrollMaskEdges = {
@@ -360,7 +358,8 @@ export function AnimatedSidePanePanel({
   isMacDesktop,
   isVisible,
   generalChatCollapsed = false,
-  sidePaneRoleToggle,
+  /** Restore entry for the fork-only collapsed-chat state (specGeneralChatCollapse). */
+  onToggleGeneralChat,
   onSpecDocumentActiveChange,
   sidePaneState,
   recentClosedSidePaneTabs,
@@ -459,11 +458,13 @@ export function AnimatedSidePanePanel({
   isVisible: boolean;
   generalChatCollapsed?: boolean;
   /**
-   * U-04 角色开关（«Скрыть/Показать боковую панель»）：由宿主按 workspacePanelRoles
-   * 解析后下发；隐藏/恢复当前 AUXILIARY 区域，有区域被隐藏时优先恢复（U-05）。
-   * 旧的 onCloseSidePane 固定面板开关与「恢复聊天」方向箭头均已并入此入口。
+   * Restore action for the fork-only collapsed-chat state. CORR-2 (2026-11-07):
+   * the caption toggle itself is the native "close/show side pane" control again;
+   * the role model (workspacePanelRoles) is no longer consulted. The collapsed
+   * chat keeps a dedicated restore affordance next to the native toggle so the
+   * specGeneralChatCollapse feature stays reachable without the role model.
    */
-  sidePaneRoleToggle?: WorkspaceBodyRoleTogglePresentation | null;
+  onToggleGeneralChat?: () => void;
   onSpecDocumentActiveChange?: (active: boolean) => void;
   sidePaneState: WorkspaceSidePaneState | null;
   recentClosedSidePaneTabs: RecentClosedSidePaneTab[];
@@ -584,6 +585,18 @@ export function AnimatedSidePanePanel({
   const documentContexts = useRef(
     new Map<string, RetainedDocumentWindow>(detachedDocuments),
   );
+  // Latest host state for the independent-document window factory; listeners keep
+  // stable deps and read current values through this ref.
+  const independentDocumentHostRef = useRef({
+    specDocumentWorkspace,
+    activeTaskId,
+    sidePaneOwnerId,
+  });
+  independentDocumentHostRef.current = {
+    specDocumentWorkspace,
+    activeTaskId,
+    sidePaneOwnerId,
+  };
   for (const tab of tabs) {
     if (
       tab.type !== "code-viewer" ||
@@ -637,53 +650,73 @@ export function AnimatedSidePanePanel({
       return next;
     });
   };
+  /**
+   * CORR-1 (2026-11-07 ruling): the single owner of "document in its own window".
+   * Both the context-menu entry point (INDEPENDENT_DOCUMENT_OPEN_EVENT, dispatched
+   * from the file tree rows) and the managed-discussion reflow go through here.
+   * Only bound document sources (specDocument flag) are accepted; matching reuses
+   * the existing retained window per workspace + session + file path.
+   */
+  const ensureIndependentDocumentWindow = (
+    request: IndependentDocumentOpenRequest,
+  ) => {
+    if (
+      !request ||
+      request.source.type !== "file" ||
+      !request.source.specDocument ||
+      request.source.workspaceRemoteSessionId
+    )
+      return;
+    const key = request.workspaceIdentity?.trim() || request.workspacePath;
+    const source = request.source;
+    // Session fallback: file-tree entry points do not know the active session, so
+    // resolve it from the current host state (latest values via ref).
+    const host = independentDocumentHostRef.current;
+    const parentSessionId =
+      request.parentSessionId ??
+      host.specDocumentWorkspace?.sessionId ??
+      host.activeTaskId ??
+      host.sidePaneOwnerId ??
+      null;
+    const existing = Array.from(documentContexts.current.values()).find(
+      (entry) =>
+        (entry.workspaceIdentity?.trim() || entry.workspacePath) === key &&
+        entry.parentSessionId === parentSessionId &&
+        (entry.tab.source.type === "file" &&
+          entry.tab.source.path.replaceAll("\\", "/") ===
+            source.path.replaceAll("\\", "/")),
+    );
+    if (existing && focusRetainedDocument(existing.tab.id)) return;
+    const created = openCodeViewerSidePane(
+      null,
+      source,
+      parentSessionId,
+    ).tabs[0];
+    if (created?.type !== "code-viewer") return;
+    // Standalone IDs are per owner, unlike source keys which can repeat across sessions.
+    const entry: RetainedDocumentWindow = existing ?? {
+      workspacePath: request.workspacePath,
+      workspaceIdentity: request.workspaceIdentity,
+      parentSessionId,
+      tab: {
+        ...created,
+        id: `document-window:${crypto.randomUUID()}`,
+        ownerTaskId: parentSessionId,
+        workspaceKey: key,
+      },
+    };
+    documentContexts.current.set(entry.tab.id, entry);
+    setDetachedDocuments((previous) => {
+      const next = new Map(previous).set(entry.tab.id, entry);
+      writeRetainedDocumentWindows(Array.from(next.values()));
+      return next;
+    });
+  };
   useEffect(() => {
     const openIndependent = (event: Event) => {
-      const request = (event as CustomEvent<IndependentDocumentOpenRequest>)
-        .detail;
-      if (
-        !request ||
-        request.source.type !== "file" ||
-        !request.source.specDocument ||
-        request.source.workspaceRemoteSessionId
-      )
-        return;
-      const key = request.workspaceIdentity?.trim() || request.workspacePath;
-      const source = request.source;
-      const existing = Array.from(documentContexts.current.values()).find(
-        (entry) =>
-          (entry.workspaceIdentity?.trim() || entry.workspacePath) === key &&
-          entry.parentSessionId === request.parentSessionId &&
-          (isUnboundSpecDocumentPickerSource(source) ||
-            (entry.tab.source.type === "file" &&
-              entry.tab.source.path.replaceAll("\\", "/") ===
-                source.path.replaceAll("\\", "/"))),
+      ensureIndependentDocumentWindow(
+        (event as CustomEvent<IndependentDocumentOpenRequest>).detail,
       );
-      if (existing && focusRetainedDocument(existing.tab.id)) return;
-      const created = openCodeViewerSidePane(
-        null,
-        source,
-        request.parentSessionId,
-      ).tabs[0];
-      if (created?.type !== "code-viewer") return;
-      // Standalone IDs are per owner, unlike source keys which can repeat across sessions.
-      const entry: RetainedDocumentWindow = existing ?? {
-        workspacePath: request.workspacePath,
-        workspaceIdentity: request.workspaceIdentity,
-        parentSessionId: request.parentSessionId,
-        tab: {
-          ...created,
-          id: `document-window:${crypto.randomUUID()}`,
-          ownerTaskId: request.parentSessionId,
-          workspaceKey: key,
-        },
-      };
-      documentContexts.current.set(entry.tab.id, entry);
-      setDetachedDocuments((previous) => {
-        const next = new Map(previous).set(entry.tab.id, entry);
-        writeRetainedDocumentWindows(Array.from(next.values()));
-        return next;
-      });
     };
     window.addEventListener(INDEPENDENT_DOCUMENT_OPEN_EVENT, openIndependent);
     return () =>
@@ -691,6 +724,8 @@ export function AnimatedSidePanePanel({
         INDEPENDENT_DOCUMENT_OPEN_EVENT,
         openIndependent,
       );
+    // The ensure helper only reads refs and stable setters, so a stable listener is safe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const updateDocumentAttachment = (
     entry: RetainedDocumentWindow,
@@ -860,30 +895,6 @@ export function AnimatedSidePanePanel({
   const normalizeDocumentPath = (path: string) =>
     path.replaceAll("\\", "/").replace(/\/$/, "").toLowerCase();
   const hasSpecDocumentGrant = Boolean(specDocumentRoot);
-  // Bug 修复（U-12 活体回归 2026-10-14，build d67a52cd）：«+» 的 Open doc 入口此前
-  // 每次都以同一 sourceKey（file:{workspace 根}）打开，第二次点击只会激活既有 tab——
-  // 已开着文档时看起来“按了没反应”。现在未绑定文档的选择器入口不再参与 sourceKey
-  // 去重（见 workspaceSidePane.getCodeViewerTabSourceKey），每次点击都新开一张
-  // 「Open doc」tab；面板内选择文档后经 onSpecDocumentPathChange 绑定文件身份
-  // （标题=文件名，同文件链接复用该 tab）。恢复/重开监听只做“确保至少一张文档 tab”。
-  const openSpecDocument = () => {
-    if (!hasSpecDocumentGrant) return;
-    onOpenCodeViewer(
-      // U-15：入口 source 也带解析后的文档 workspace——attachSpecDocumentSidePaneTab
-      // 用 source.workspacePath 拼绝对路径，tab 身份必须与面板实际根一致。
-      buildSpecDocumentPickerSource({
-        workspacePath: specDocumentWorkspacePath,
-        ...(specDocumentWorkspaceIdentity
-          ? { workspaceIdentity: specDocumentWorkspaceIdentity }
-          : {}),
-      }),
-    );
-  };
-  // reopen 监听需要“当前”可见 tabs 来复用已有文档 tab；effect 依赖保持稳定
-  //（不随 tabs 变化重挂监听），经 ref 读最新值（与 SpecDocumentPane 的回调 ref 同款）。
-  const reopenSpecDocumentRef = useRef(
-    (_target: ManagedNativeDiscussionOpenRequest) => {},
-  );
   useEffect(() => {
     const reopen = (event: Event) => {
       const target = (event as CustomEvent<ManagedNativeDiscussionOpenRequest>)
@@ -891,14 +902,36 @@ export function AnimatedSidePanePanel({
       if (
         !target ||
         !hasSpecDocumentGrant ||
-        // U-15：回流请求携带的是文档面板（解析后）的 workspacePath；比较同根。
+        // The reflow request carries the document workspace (resolved) path; compare same root.
         normalizeDocumentPath(target.workspacePath) !==
           normalizeDocumentPath(specDocumentWorkspacePath) ||
         target.workspaceIdentity !== specDocumentWorkspaceIdentity
       )
         return;
-      // 复用同文件同 owner 的 tab；目标文件未打开时新建已绑定文件的 tab。
-      reopenSpecDocumentRef.current(target);
+      // CORR-1 (2026-11-07 ruling): discussions no longer reopen a document tab in
+      // the tabs container — native file tabs always render FileManagerPane. A
+      // managed discussion reflows into the existing retained/independent document
+      // window instead (same host that INDEPENDENT_DOCUMENT_OPEN_EVENT uses). The
+      // presentation state (path + activeThreadId + discussionsVisible) was already
+      // written by activateManagedNativeDiscussionOwner before this event, so the
+      // SpecDocumentPane inside the window activates the requested thread.
+      ensureIndependentDocumentWindow({
+        workspacePath: target.workspacePath,
+        ...(target.workspaceIdentity
+          ? { workspaceIdentity: target.workspaceIdentity }
+          : {}),
+        parentSessionId: null,
+        source: {
+          type: "file",
+          specDocument: true,
+          workspacePath: target.workspacePath,
+          ...(target.workspaceIdentity
+            ? { workspaceIdentity: target.workspaceIdentity }
+            : {}),
+          path: joinFilePath(target.workspacePath, target.documentPath),
+          title: target.documentPath.split("/").at(-1) ?? target.documentPath,
+        },
+      });
     };
     window.addEventListener(MANAGED_NATIVE_DISCUSSION_OPEN_EVENT, reopen);
     return () =>
@@ -908,43 +941,6 @@ export function AnimatedSidePanePanel({
     specDocumentWorkspacePath,
     specDocumentWorkspaceIdentity,
   ]);
-  const canOpenSpecDocument = (source: CodeViewerSource) => {
-    if (
-      !hasSpecDocumentGrant ||
-      source.type !== "file" ||
-      source.workspaceRemoteSessionId ||
-      !source.workspacePath ||
-      normalizeDocumentPath(source.workspacePath) !==
-        normalizeDocumentPath(specDocumentWorkspacePath) ||
-      (source.workspaceIdentity &&
-        source.workspaceIdentity !== specDocumentWorkspaceIdentity)
-    )
-      return false;
-    if (source.specDocument) return true;
-    const path = source.path.replaceAll("\\", "/");
-    const root = normalizeDocumentPath(specDocumentWorkspacePath);
-    const relativePath = normalizeDocumentPath(path).startsWith(root + "/")
-      ? path.slice(root.length + 1)
-      : path;
-    return (
-      /\.(md|markdown|txt)$/i.test(path) &&
-      !/^(?:\/|[a-z]:)/i.test(relativePath) &&
-      !relativePath.split("/").some((part) => part === ".." || part === "")
-    );
-  };
-  reopenSpecDocumentRef.current = (target) => {
-    // 回流必须指定文件；任意 tab/未绑定选择器不能恢复已关闭讨论的文档身份。
-    onOpenCodeViewer({
-      type: "file",
-      specDocument: true,
-      workspacePath: target.workspacePath,
-      ...(target.workspaceIdentity
-        ? { workspaceIdentity: target.workspaceIdentity }
-        : {}),
-      path: joinFilePath(target.workspacePath, target.documentPath),
-      title: target.documentPath.split("/").at(-1) ?? target.documentPath,
-    });
-  };
   const managedDiscussion = useManagedNativeDiscussionThread(
     specDocumentWorkspacePath,
     specDocumentWorkspaceIdentity,
@@ -967,10 +963,14 @@ export function AnimatedSidePanePanel({
   const activeSpecTab = visibleTabs.find(
     (tab) => tab.id === visibleActiveTabId,
   );
+  // CORR-1: "document active" now only covers fork document windows/tabs
+  // (source.specDocument). Native file tabs preview through FileManagerPane and
+  // must not trigger the chat-collapse document state.
   const specDocumentActive = Boolean(
     isVisible &&
-    activeSpecTab?.type === "code-viewer" &&
-    canOpenSpecDocument(activeSpecTab.source),
+      activeSpecTab?.type === "code-viewer" &&
+      activeSpecTab.source.type === "file" &&
+      activeSpecTab.source.specDocument,
   );
   useLayoutEffect(() => {
     onSpecDocumentActiveChange?.(specDocumentActive);
@@ -1363,31 +1363,51 @@ export function AnimatedSidePanePanel({
           !isOfficeMode || (itemId !== "terminal" && itemId !== "review"),
       )
       .map((itemId) => openTabLauncherItemById[itemId]);
+  // CORR-1 (2026-11-07 ruling): the launcher exposes only native entries. The fork
+  // "Open doc" item is removed; its role is performed by the native Files tab, and
+  // document discussions/windows moved to the file tree context menu.
   const openTabLauncherItems: OpenTabLauncherItem[] = [
-    ...(isDesktop && !workspaceRemoteSessionId
-      ? [
-          {
-            id: "documents",
-            label: "Open doc",
-            description: "Open doc",
-            icon: FileTextIcon,
-            onOpen: openSpecDocument,
-            disabled: !hasSpecDocumentGrant,
-          } satisfies OpenTabLauncherItem,
-        ]
-      : []),
     ...nativeOpenTabLauncherItems,
   ];
-  // U-04：caption 控制簇统一由 WorkspaceSidePaneCaptionControls 渲染；
-  // 「恢复聊天」方向箭头与固定右侧的面板开关已并入角色开关（见
-  // workspacePanelRoles.ts 与该组件头注释）。2026-11-07：swap 移除（用户裁决）。
-  const sidePaneCaptionControls =
-    isVisible && !mobileOverlay ? (
-      <WorkspaceSidePaneCaptionControls
-        roleToggle={sidePaneRoleToggle}
-        showWindowControls={showWindowControls}
-        fullViewToggle={fullViewToggle ?? undefined}
-      />
+  // CORR-2 (2026-11-07 ruling): the caption control cluster is the upstream
+  // a9fe401e inline block again — [full view toggle → side pane toggle
+  // (PanelRightClose/Open) → window controls] — with no fork role model. The
+  // fork-only collapsed-chat state (specGeneralChatCollapse) keeps a dedicated
+  // restore button next to the native toggle so the hidden chat stays reachable.
+  const closeSidePaneButton =
+    isVisible && !mobileOverlay && onCloseSidePane ? (
+      <div className="flex shrink-0 items-center gap-0.5 [app-region:no-drag]">
+        {fullViewToggle ? (
+          <SidePaneFullViewToggleButton
+            active={fullViewToggle.active}
+            onToggle={fullViewToggle.onToggle}
+            shortcutLabel={fullViewToggle.shortcutLabel}
+          />
+        ) : null}
+        <WorkspaceSidePaneToggleButton
+          isSidePaneOpen
+          onToggleSidePane={onCloseSidePane}
+          shortcutLabel={toggleSidePaneShortcutLabel}
+        />
+        {generalChatCollapsed && onToggleGeneralChat ? (
+          <ControlHintTooltip
+            title={intl.formatMessage({ id: "sidePane.restoreChat" })}
+            side="bottom"
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-md"
+              className="text-foreground hover:bg-hover hover:text-foreground [app-region:no-drag]"
+              aria-label={intl.formatMessage({ id: "sidePane.restoreChat" })}
+              onClick={onToggleGeneralChat}
+            >
+              <PanelLeftOpen className="size-4" />
+            </Button>
+          </ControlHintTooltip>
+        ) : null}
+        {showWindowControls ? <DesktopWindowControls /> : null}
+      </div>
     ) : null;
 
   const openTabLauncher = (
@@ -1406,9 +1426,6 @@ export function AnimatedSidePanePanel({
                 icon={item.icon}
                 label={item.label}
                 description={item.description}
-                // fork：无文档 grant 时 Open doc 必须可见地禁用；处理器内部会按
-                // 许可拒绝，不传 disabled 会让按钮看似可用却无任何反馈。
-                disabled={item.disabled}
                 onOpen={item.onOpen}
               />
             ))}
@@ -1694,7 +1711,7 @@ export function AnimatedSidePanePanel({
 
                     <div className="ml-auto flex h-full shrink-0 items-center gap-1 px-2">
                       {isTabsOverflowing ? addTabButton : null}
-                      {sidePaneCaptionControls}
+                      {closeSidePaneButton}
                     </div>
                   </div>
                   {/* Expand Panel 按钮按要求先注释保留，相关逻辑已删除。
@@ -1717,36 +1734,10 @@ export function AnimatedSidePanePanel({
                     <div className="absolute inset-0 z-10">{openTabLauncher}</div>
                   ) : null}
                   {renderedTabs.map((tab) => {
-                    const documentContext =
-                      documentContexts.current.get(tab.id) ??
-                      (tab.type === "code-viewer" &&
-                      tab.source.type === "file" &&
-                      isDesktop &&
-                      !workspaceRemoteSessionId &&
-                      canOpenSpecDocument(tab.source)
-                        ? {
-                            tab: {
-                              ...tab,
-                              source: { ...tab.source, specDocument: true },
-                            },
-                            workspacePath:
-                              tab.source.workspacePath ||
-                              specDocumentWorkspacePath,
-                            workspaceIdentity:
-                              tab.source.workspaceIdentity ||
-                              specDocumentWorkspaceIdentity,
-                            parentSessionId:
-                              tab.ownerTaskId ??
-                              specDocumentWorkspace?.sessionId ??
-                              activeTaskId ??
-                              sidePaneOwnerId,
-                          }
-                        : undefined);
-                    if (
-                      documentContext &&
-                      !documentContexts.current.has(tab.id)
-                    )
-                      documentContexts.current.set(tab.id, documentContext);
+                    // CORR-1 (2026-11-07 ruling): only fork document windows/tabs
+                    // (source.specDocument) get a document context. Native
+                    // code-viewer/file-manager tabs are never intercepted anymore.
+                    const documentContext = documentContexts.current.get(tab.id);
                     if (
                       (tab.type === "browser" || tab.type === "browser-use") &&
                       !shouldMountBrowserTabGuest(tab)
@@ -1899,9 +1890,9 @@ export function AnimatedSidePanePanel({
                         ) : tab.type === "code-viewer" &&
                           tab.source.type === "file" &&
                           isDesktop &&
-                          (documentContext ||
-                            (!workspaceRemoteSessionId &&
-                              canOpenSpecDocument(tab.source))) ? (
+                          documentContext &&
+                          documentContext.tab.source.type === "file" &&
+                          documentContext.tab.source.specDocument === true ? (
                           <DocumentWindowSurface
                             entry={documentContext!}
                             visible={
@@ -1943,12 +1934,8 @@ export function AnimatedSidePanePanel({
                                 }
                                 instanceKey={tab.id}
                                 initialPath={
-                                  documentContext?.tab.source.type === "file"
-                                    ? isUnboundSpecDocumentPickerSource(
-                                        documentContext.tab.source,
-                                      )
-                                      ? undefined
-                                      : documentContext.tab.source.path
+                                  documentContext
+                                    ? documentContext.tab.source.path
                                     : tab.source.path
                                 }
                                 autoOpenLastDocument={false}

@@ -1644,6 +1644,7 @@ const enUS: Record<string, string> = {
   "sidePane.expand": "Expand side pane",
   "sidePane.collapse": "Collapse side pane",
   "sidePane.togglePanel": "Toggle panel",
+  "sidePane.restoreChat": "Show main chat",
   "sidePane.fullView.enter": "Enter full view",
   "sidePane.fullView.exit": "Exit full view",
   "sidePane.fullView.openAnswer": "Show messages",
@@ -2504,6 +2505,9 @@ const enUS: Record<string, string> = {
   "workspaceFileTree.openInBrowser": "Open in built-in browser",
   "workspaceFileTree.openFailed": "Could not open this item",
   "workspaceFileTree.addToChat": "Add to chat",
+  "workspaceFileTree.discussDocument": "Discuss document",
+  "workspaceFileTree.openDocumentWindow": "Open in separate window",
+  "workspaceFileTree.openSideConversation": "Side conversation",
   "workspaceFileTree.gitStatus.ignored": "Ignored",
 
   // SSH dialog

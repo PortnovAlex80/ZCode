@@ -1,32 +1,24 @@
 // @vitest-environment jsdom
-// U-03 回归：文档/聊天分隔条的拖拽与键盘方向（含 5.2a 实机回归）。
+// U-03 regression: chat/document divider drag AND keyboard direction.
 //
-// 背景（根因）：RRP 面板在重注册（约束变化）时按 offsetLeft 排序，拖拽/键盘的
-// pivot 顺序来自该注册顺序。产品此前把 order 的渲染期重申按「排列模式字符串」
-// 锁存；窗口 resize 触发自动收起/展开 → collapsible/disabled/defaultSize 翻转 →
-// 面板重注册，若此刻 order 被重置（元素重建、模式未变），注册排序回到换位前
-// 的顺序，分隔条绑定到换位前的一侧，拖拽方向颠倒。
-//
-// 5.2a（用户 2026-10-14 实机回归，build 9fe78d6c）：document-center 下中部分隔条
-// 仍有输入路径方向颠倒——wave-6 只覆盖了拖拽路径。库内两条输入路径的配对来源
-// 不同：pointerdown 每次都用 Je() 从当前 DOM（offsetLeft 排序）现算 hit region；
-// 键盘路径用的是注册期缓存的 separatorToPanels + 面板注册表。任何让缓存配对
-// 与实际视觉排列脱节的路径都会让键盘方向颠倒而拖拽正常（或反之）。本文件
-// 因此对每个检查点同时验证拖拽（双向）与键盘（双向）。
-//
-// 修复后的不变式：宿主每次渲染都重申 order（applySpecShellLayoutSwapOrders 差量
-// 写入），任何重注册读取到的 offsetLeft 必然反映当前排列。本文件三层验证：
-// 1) 差量写入语义（值相同不触碰 style）；
-// 2) 源码契约：锁存已删除，渲染期无条件重申；
-// 3) 真实 react-resizable-panels + 产品级接线（ResizablePanelGroup + localStorage
-//    持久化 + rAF 命令式 collapse/resize）下，拖拽与键盘方向在两种排列、容器
-//    resize（缩小/放大）、模式切换、收起/重开、聊天隐藏/恢复、以及交换排列
-//    持久化后的重载全部跟随实际视觉位置。
+// Background: react-resizable-panels orders panels by offsetLeft at
+// (re)registration, and the drag/keyboard pivots derive from that registry
+// order. If the inline flex order is ever reset while RRP re-registers (window
+// resize flips collapsible/disabled/defaultSize), the registry can fall back to
+// the pre-registration order and the divider direction flips. The product
+// invariant: WorkspaceShellLayout restates the order on every render
+// (applySpecShellLayoutSwapOrders, diff-aware writes) before any re-registration
+// effect runs. Since the side-swap arrangement was retired (user ruling
+// 2026-11-07) the arrangement is fixed: chat column order 1, tabs container
+// order 3. This file keeps the mechanism coverage for that single arrangement:
+// 1) source contract: per-render restatement + order-writing ref callbacks;
+// 2) real react-resizable-panels with product-like wiring: drag (both ways) and
+//    keyboard (both ways) must always grow/shrink the visually-left panel,
+//    across container resizes, side-pane close/reopen and chat hide/restore.
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createElement, useCallback, useEffect, useRef, useState } from "react";
+import { act, createElement, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { act } from "react";
 import type {
   GroupImperativeHandle,
   PanelImperativeHandle,
@@ -37,75 +29,22 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable.js";
-import {
-  applySpecShellLayoutSwapOrders,
-  specShellBodyLayoutId,
-  SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_DEFAULT_SIZE,
-  SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_MIN_SIZE,
-  SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE,
-  SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_MAX_SIZE,
-} from "@/spec-document/specShellLayoutSwap.js";
-import {
-  transitionSpecGeneralChatLayout,
-  type SpecGeneralChatLayoutMemory,
-} from "@/spec-document/specGeneralChatCollapse.js";
+import { applySpecShellLayoutSwapOrders } from "@/spec-document/specShellLayoutSwap.js";
 
 const SEPARATOR_WIDTH = 4;
-const NORMAL_PANEL_IDS = ["conversation-column", "browser"];
-const DOCUMENT_CENTER_PANEL_IDS = ["browser", "conversation-column"];
 const SIDE_PANE_DEFAULT = "45%";
 
-describe("applySpecShellLayoutSwapOrders write semantics (U-03)", () => {
-  it("writes the swapped orders and reports readiness", () => {
-    const conversation = document.createElement("div");
-    const sidePane = document.createElement("div");
-    expect(applySpecShellLayoutSwapOrders(null, sidePane, true)).toBe(false);
-    expect(applySpecShellLayoutSwapOrders(conversation, null, false)).toBe(
-      false,
-    );
-    expect(applySpecShellLayoutSwapOrders(conversation, sidePane, true)).toBe(
-      true,
-    );
-    expect(conversation.style.order).toBe("3");
-    expect(sidePane.style.order).toBe("1");
-    expect(applySpecShellLayoutSwapOrders(conversation, sidePane, false)).toBe(
-      true,
-    );
-    expect(conversation.style.order).toBe("1");
-    expect(sidePane.style.order).toBe("3");
-  });
-
-  it("re-asserts after the inline order is reset without a mode change (diff-aware)", () => {
-    // 窗口 resize 场景的另一半：元素重建/样式清理把 order 抹掉而排列模式未变，
-    // 每次渲染的重申必须把它写回——否则 RRP 注册排序回到换位前的顺序。
-    const conversation = document.createElement("div");
-    const sidePane = document.createElement("div");
-    applySpecShellLayoutSwapOrders(conversation, sidePane, true);
-    const conversationSetProperty = vi.spyOn(conversation.style, "setProperty");
-    // 稳态重申：值相同不得触碰 style（避免每帧样式突变）。
-    applySpecShellLayoutSwapOrders(conversation, sidePane, true);
-    expect(conversationSetProperty).not.toHaveBeenCalled();
-    // order 丢失后重申恢复。
-    conversation.style.removeProperty("order");
-    sidePane.style.removeProperty("order");
-    applySpecShellLayoutSwapOrders(conversation, sidePane, true);
-    expect(conversation.style.order).toBe("3");
-    expect(sidePane.style.order).toBe("1");
-    conversationSetProperty.mockRestore();
-  });
-});
-
 describe("WorkspaceShellLayout source contract for order re-assertion (U-03)", () => {
-  it("re-asserts the swap orders on every render instead of latching on the mode string", async () => {
+  it("restates the fixed orders on every render instead of latching on state", async () => {
     const layoutSource = await readFile(
       resolve("packages/ui/src/app-shell/WorkspaceShellLayout.tsx"),
       "utf8",
     );
-    // 修复前：shellLayoutSwapOrderStateRef 按模式字符串锁存，resize 触发的重注册
-    // 可能读到被重置的 order，面板注册顺序回到换位前的一侧。
+    // The restatement must run unconditionally during render (diff-aware writes
+    // keep it zero-mutation in steady state).
     expect(layoutSource).not.toContain("shellLayoutSwapOrderStateRef");
     expect(layoutSource).toMatch(
-      /applySpecShellLayoutSwapOrders\(\s*conversationColumnOuterElementRef\.current,\s*sidePanePanelElementRef\.current,\s*isDocumentCenterLayout,\s*\);/u,
+      /applySpecShellLayoutSwapOrders\(\s*\w+Ref\.current,\s*\w+Ref\.current,?\s*\)/u,
     );
   });
 
@@ -118,26 +57,19 @@ describe("WorkspaceShellLayout source contract for order re-assertion (U-03)", (
       resolve("packages/ui/src/app-shell/AnimatedSidePanePanel.tsx"),
       "utf8",
     );
-    expect(layoutSource).toContain(
-      'element.style.order = isDocumentCenterLayout ? "3" : "1"',
-    );
-    expect(sidePaneSource).toContain(
-      'element.style.order = documentCenter ? "1" : "3"',
-    );
+    expect(layoutSource).toContain('element.style.order = "1"');
+    expect(sidePaneSource).toContain('element.style.order = "3"');
   });
 });
 
 /**
- * 机制验证（真实 react-resizable-panels + 产品级接线）。jsdom 不做布局：
- * - offsetLeft 按 style.order 桩化（与浏览器中 flex order 反映到 offsetLeft 的
- *   语义一致）——RRP 注册期排序因此始终跟随当前 order，这正是修复后产品保证
- *   的不变式（渲染期无条件重申 order，且先于任何重注册 effect）。
- * - getBoundingClientRect/offsetWidth 用按当前布局百分比铺排的 rect 桩承载
- *   pointer 命中测试与 groupSize 换算。
- * - ResizeObserver 可控：测试手动触发 group 元素回调，模拟容器/窗口 resize。
+ * Mechanism verification (real react-resizable-panels + product-like wiring).
+ * jsdom does no layout: offsetLeft is stubbed to follow style.order (matching
+ * how flex order maps to visual position in the browser), rects follow the
+ * current layout percentages, and ResizeObserver is manually triggered.
  */
 describe("divider drag direction across the shell flow matrix (U-03 mechanism)", () => {
-  it("keeps drag AND keyboard direction tied to the visual arrangement in both modes and across resizes", async () => {
+  it("keeps drag AND keyboard direction tied to the visual arrangement across resizes", async () => {
     (
       globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -182,7 +114,7 @@ describe("divider drag direction across the shell flow matrix (U-03 mechanism)",
           (child.hasAttribute("data-panel") ||
             child.hasAttribute("data-separator")),
       ) as HTMLElement[];
-      // 与 offsetLeft 桩一致：按 style.order 铺排视觉位置。
+      // Same contract as the offsetLeft stub: visual position follows style.order.
       children.sort((a, b) => {
         const orderA = Number.parseFloat(a.style.order || "0");
         const orderB = Number.parseFloat(b.style.order || "0");
@@ -255,7 +187,8 @@ describe("divider drag direction across the shell flow matrix (U-03 mechanism)",
       }
     };
 
-    // 键盘路径：库把 keydown 监听挂在分隔条元素上，Ge→B 用注册期缓存的面板配对。
+    // The library attaches keydown on the separator element; the keyboard path
+    // uses the registration-time cached panel pairing.
     const keyboard = (key: string) => {
       const separator = container.querySelector(
         "[data-separator]",
@@ -298,84 +231,58 @@ describe("divider drag direction across the shell flow matrix (U-03 mechanism)",
       return layoutDeltas(before, groupRef.current?.getLayout() ?? {});
     };
 
-    // 回到确定性中位，避免上一个探针把布局顶到 min/max 饱和，掩盖方向判断。
-    const resetLayout = (documentCenter: boolean) => {
+    // Deterministic midpoint so one probe cannot saturate at min/max and hide
+    // the direction of the next probe.
+    const resetLayout = () => {
       act(() => {
-        groupRef.current?.setLayout(
-          documentCenter
-            ? {
-                browser: Number.parseFloat(
-                  SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE,
-                ),
-                "conversation-column": Number.parseFloat(
-                  SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_DEFAULT_SIZE,
-                ),
-              }
-            : { "conversation-column": 52, browser: 48 },
-        );
+        groupRef.current?.setLayout({
+          "conversation-column": 52,
+          browser: 48,
+        });
       });
       syncRects();
     };
 
     /**
-     * 5.2a 核心断言：在当前排列下，拖拽（双向）与键盘（双向）都必须让
-     * 「视觉上在左的面板」随右移输入变宽、随左移输入变窄。
-     * 任一路径颠倒（例如键盘用注册期缓存配对而缓存已过期）即实机回归。
+     * Core assertion: drag (both ways) and keyboard (both ways) must grow the
+     * visually-left panel (the chat column) on rightward input and shrink it on
+     * leftward input. A flip on either path is the live regression.
      */
-    const expectDirectionFollowsPlacement = (
-      documentCenter: boolean,
-      label: string,
-      options: { reset: boolean } = { reset: true },
-    ) => {
-      if (options.reset) resetLayout(documentCenter);
+    const expectDirectionFollowsPlacement = (label: string) => {
+      resetLayout();
       const dragRight = dragProbe(120);
       const dragLeft = dragProbe(-120);
-      if (options.reset) resetLayout(documentCenter);
+      resetLayout();
       const keyRight = keyboardProbe("ArrowRight");
       const keyLeft = keyboardProbe("ArrowLeft");
-      // 视觉左侧面板：chat-center=聊天列；document-center=tabs 容器（文档）。
-      const leftGrowByDrag = documentCenter
-        ? dragRight.browserDelta
-        : dragRight.conversationDelta;
-      const leftGrowByKey = documentCenter
-        ? keyRight.browserDelta
-        : keyRight.conversationDelta;
-      const leftShrinkByDrag = documentCenter
-        ? dragLeft.browserDelta
-        : dragLeft.conversationDelta;
-      const leftShrinkByKey = documentCenter
-        ? keyLeft.browserDelta
-        : keyLeft.conversationDelta;
       expect(
-        leftGrowByDrag,
+        dragRight.conversationDelta,
         `${label}: drag right grows the visually-left panel`,
       ).toBeGreaterThan(0);
       expect(
-        leftShrinkByDrag,
+        dragLeft.conversationDelta,
         `${label}: drag left shrinks the visually-left panel`,
       ).toBeLessThan(0);
       expect(
-        leftGrowByKey,
+        keyRight.conversationDelta,
         `${label}: ArrowRight grows the visually-left panel (keyboard path)`,
       ).toBeGreaterThan(0);
       expect(
-        leftShrinkByKey,
+        keyLeft.conversationDelta,
         `${label}: ArrowLeft shrinks the visually-left panel (keyboard path)`,
       ).toBeLessThan(0);
     };
 
-    const render = async (
-      documentCenter: boolean,
-      sidePaneOpen: boolean,
-      chatExpanded = true,
-    ) => {
+    const render = async (options: {
+      sidePaneOpen: boolean;
+      chatExpanded?: boolean;
+    }) => {
       act(() => {
         root?.render(
-          createElement(SwappableBody, {
-            documentCenter,
+          createElement(WorkspaceBody, {
             groupRef,
-            sidePaneOpen,
-            chatExpanded,
+            sidePaneOpen: options.sidePaneOpen,
+            chatExpanded: options.chatExpanded ?? true,
           }),
         );
       });
@@ -391,66 +298,31 @@ describe("divider drag direction across the shell flow matrix (U-03 mechanism)",
       act(() => {
         root = createRoot(container);
       });
-      // 普通排列：聊天在左。
-      await render(false, true);
-      expectDirectionFollowsPlacement(false, "chat-center initial");
+      await render({ sidePaneOpen: true });
+      expectDirectionFollowsPlacement("initial");
 
-      // 容器缩小/放大后（普通排列）方向保持。
+      // Direction survives container shrink/grow (re-registration pressure).
       groupWidth = 700;
       fireGroupResize(groupWidth);
       syncRects();
-      expectDirectionFollowsPlacement(
-        false,
-        "chat-center after container shrink",
-      );
+      expectDirectionFollowsPlacement("after container shrink");
       groupWidth = 1600;
       fireGroupResize(groupWidth);
       syncRects();
-      expectDirectionFollowsPlacement(
-        false,
-        "chat-center after container grow",
-      );
+      expectDirectionFollowsPlacement("after container grow");
 
-      // 切到 «Документ в центре»：文档在左、聊天在右。
-      await render(true, true);
-      expectDirectionFollowsPlacement(true, "doc-center after swap");
+      // Window-resize auto-collapse → reopen: the separator remounts and the
+      // side pane re-registers; direction must survive.
+      await render({ sidePaneOpen: false });
+      await render({ sidePaneOpen: true });
+      expectDirectionFollowsPlacement("after side-pane close/reopen");
 
-      // 容器缩小后方向保持。
-      groupWidth = 700;
-      fireGroupResize(groupWidth);
-      syncRects();
-      expectDirectionFollowsPlacement(
-        true,
-        "doc-center after container shrink",
-      );
+      // Fork chat collapse/restore keeps the direction intact.
+      await render({ sidePaneOpen: true, chatExpanded: false });
+      await render({ sidePaneOpen: true, chatExpanded: true });
+      expectDirectionFollowsPlacement("after chat hide/restore");
 
-      // 容器放大后方向保持。
-      groupWidth = 1600;
-      fireGroupResize(groupWidth);
-      syncRects();
-      expectDirectionFollowsPlacement(true, "doc-center after container grow");
-
-      // 窗口 resize 自动收起 → 重新打开（重注册 + 分隔条重挂载）后方向保持。
-      await render(true, false);
-      await render(true, true);
-      expectDirectionFollowsPlacement(
-        true,
-        "doc-center after auto-collapse/reopen",
-      );
-
-      // 角色模型隐藏聊天（AUXILIARY 隐藏 ⇒ PRIMARY 铺满）再恢复后方向保持。
-      await render(true, true, false);
-      await render(true, true, true);
-      expectDirectionFollowsPlacement(
-        true,
-        "doc-center after chat hide/restore",
-      );
-
-      // 切回普通排列：方向语义恢复。
-      await render(false, true);
-      expectDirectionFollowsPlacement(false, "chat-center after toggle back");
-
-      // 「重载」：换位排列已持久化（localStorage 里的 layout + 模式），新 root 首帧即交换排列。
+      // "Reload": persisted layout, fresh root — first frame already ordered.
       act(() => {
         root?.unmount();
       });
@@ -458,87 +330,13 @@ describe("divider drag direction across the shell flow matrix (U-03 mechanism)",
       act(() => {
         root = createRoot(container);
       });
-      await render(true, true);
-      expectDirectionFollowsPlacement(
-        true,
-        "doc-center after reload with swapped layout persisted",
-      );
+      await render({ sidePaneOpen: true });
+      expectDirectionFollowsPlacement("after reload with persisted layout");
 
-      // 重载后再 resize（缩小）仍保持。
       groupWidth = 800;
       fireGroupResize(groupWidth);
       syncRects();
-      expectDirectionFollowsPlacement(true, "doc-center after reload + shrink");
-
-      // 5.2a 实机回归路径：spec 文档激活期保存的 ordinaryLayout（chat-center 的
-      // key 顺序）在用户交换排列后被恢复。修复前 transitionSpecGeneralChatLayout
-      // 直接 setLayout 旧顺序布局——RRP 的 le() 按值的位置（Object.values）解释
-      // 布局，而 pivot/约束按当前注册表（视觉）顺序取下标，槽位错位后拖拽与
-      // 键盘全部反向。修复后恢复前按当前注册表顺序重排。这里不做 resetLayout——
-      // reset 会按当前排列重写布局、把错位「治好」，掩盖回归。
-      act(() => {
-        root?.unmount();
-      });
-      observers.length = 0;
-      window.localStorage.clear();
-      act(() => {
-        root = createRoot(container);
-      });
-      const layoutMemory: SpecGeneralChatLayoutMemory = {
-        workspaceKey: null,
-        ordinaryLayout: null,
-      };
-      const columnMemory = { expandedSize: null as number | null };
-      // chat-center 下「激活文档」：捕获 ordinary 布局（cc key 顺序）。
-      await render(false, true);
-      act(() => {
-        transitionSpecGeneralChatLayout(
-          groupRef.current,
-          "ws-spec",
-          layoutMemory,
-          columnMemory,
-        );
-      });
-      expect(layoutMemory.ordinaryLayout).toBeTruthy();
-      // 用户交换到 document-center（文档仍激活），随后「文档失活」触发恢复。
-      await render(true, true);
-      act(() => {
-        transitionSpecGeneralChatLayout(
-          groupRef.current,
-          null,
-          layoutMemory,
-          columnMemory,
-        );
-      });
-      expectDirectionFollowsPlacement(
-        true,
-        "doc-center after spec-doc transition restored a cc-ordered layout",
-        { reset: false },
-      );
-
-      // 反向路径：dc 下捕获、cc 下恢复，同样不得错位。
-      act(() => {
-        transitionSpecGeneralChatLayout(
-          groupRef.current,
-          "ws-spec-2",
-          layoutMemory,
-          columnMemory,
-        );
-      });
-      await render(false, true);
-      act(() => {
-        transitionSpecGeneralChatLayout(
-          groupRef.current,
-          null,
-          layoutMemory,
-          columnMemory,
-        );
-      });
-      expectDirectionFollowsPlacement(
-        false,
-        "chat-center after spec-doc transition restored a dc-ordered layout",
-        { reset: false },
-      );
+      expectDirectionFollowsPlacement("after reload + shrink");
     } finally {
       act(() => {
         root?.unmount();
@@ -551,14 +349,12 @@ describe("divider drag direction across the shell flow matrix (U-03 mechanism)",
   });
 });
 
-/** 与 WorkspaceShellLayout + AnimatedSidePanePanel + useAnimatedResizablePanel 同构的接线。 */
-function SwappableBody({
-  documentCenter,
+/** Mirrors WorkspaceShellLayout + AnimatedSidePanePanel wiring for the fixed arrangement. */
+function WorkspaceBody({
   groupRef,
   sidePaneOpen,
   chatExpanded,
 }: {
-  documentCenter: boolean;
   groupRef: { current: GroupImperativeHandle | null };
   sidePaneOpen: boolean;
   chatExpanded: boolean;
@@ -570,7 +366,7 @@ function SwappableBody({
   const [sidePaneVisible, setSidePaneVisible] = useState(sidePaneOpen);
   const [chatCollapsed, setChatCollapsed] = useState(!chatExpanded);
 
-  // useAnimatedResizablePanel：关闭同步、打开 rAF 延迟一帧。
+  // useAnimatedResizablePanel: close syncs, open defers one frame via rAF.
   useEffect(() => {
     if (!sidePaneOpen) {
       setSidePaneVisible(false);
@@ -580,58 +376,53 @@ function SwappableBody({
     return () => window.cancelAnimationFrame(raf);
   }, [sidePaneOpen]);
 
-  // 命令式 collapse/resize 延后一帧（同 useAnimatedResizablePanel 的 rAF 命令）。
+  // Imperative collapse/resize deferred one frame (same rAF pattern).
   useEffect(() => {
     const raf = window.requestAnimationFrame(() => {
       if (!sidePaneVisible) {
         sidePanePanelRef.current?.collapse();
       } else {
-        sidePanePanelRef.current?.resize(
-          documentCenter
-            ? SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE
-            : SIDE_PANE_DEFAULT,
-        );
+        sidePanePanelRef.current?.resize(SIDE_PANE_DEFAULT);
       }
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [sidePaneVisible, documentCenter]);
+  }, [sidePaneVisible]);
 
   useEffect(() => {
     const raf = window.requestAnimationFrame(() => {
       if (chatCollapsed) conversationPanelRef.current?.collapse();
-      else conversationPanelRef.current?.resize(documentCenter ? "38%" : "52%");
+      else conversationPanelRef.current?.resize("52%");
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [chatCollapsed, documentCenter]);
+  }, [chatCollapsed]);
 
-  // 修复后的产品语义：渲染期无条件重申 order（差量写入），先于任何重注册 effect。
+  // Product semantics: unconditional per-render order restatement (diff-aware).
   applySpecShellLayoutSwapOrders(
     conversationElementRef.current,
     sidePaneElementRef.current,
-    documentCenter,
   );
 
   const handleConversationElementRef = useCallback(
     (element: HTMLDivElement | null) => {
       conversationElementRef.current = element;
-      if (element) element.style.order = documentCenter ? "3" : "1";
+      if (element) element.style.order = "1";
     },
-    [documentCenter],
+    [],
   );
   const handleSidePaneElementRef = useCallback(
     (element: HTMLDivElement | null) => {
       sidePaneElementRef.current = element;
-      if (element) element.style.order = documentCenter ? "1" : "3";
+      if (element) element.style.order = "3";
     },
-    [documentCenter],
+    [],
   );
 
   return createElement(
     ResizablePanelGroup,
     {
       groupRef,
-      layoutId: specShellBodyLayoutId("u03-divider-direction", documentCenter),
-      panelIds: documentCenter ? DOCUMENT_CENTER_PANEL_IDS : NORMAL_PANEL_IDS,
+      layoutId: "workspace-body-layout:u03-divider-direction",
+      panelIds: ["conversation-column", "browser"],
     },
     createElement(
       ResizablePanel,
@@ -640,16 +431,8 @@ function SwappableBody({
         panelRef: conversationPanelRef,
         collapsible: chatCollapsed,
         collapsedSize: "0px",
-        defaultSize: documentCenter
-          ? sidePaneVisible
-            ? SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_DEFAULT_SIZE
-            : undefined
-          : sidePaneVisible
-            ? "52%"
-            : undefined,
-        minSize: documentCenter
-          ? SPEC_SHELL_DOCUMENT_CENTER_CONVERSATION_MIN_SIZE
-          : "35%",
+        defaultSize: sidePaneVisible ? "52%" : undefined,
+        minSize: "35%",
         elementRef: handleConversationElementRef,
       },
       "chat",
@@ -660,15 +443,9 @@ function SwappableBody({
     createElement(ResizablePanel, {
       id: "browser",
       panelRef: sidePanePanelRef,
-      defaultSize: documentCenter
-        ? SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE
-        : "45%",
+      defaultSize: "45%",
       minSize: "240px",
-      maxSize: chatCollapsed
-        ? "100%"
-        : documentCenter
-          ? SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_MAX_SIZE
-          : "65%",
+      maxSize: chatCollapsed ? "100%" : "65%",
       collapsible: !sidePaneVisible,
       disabled: !sidePaneVisible,
       collapsedSize: "0px",
@@ -694,8 +471,8 @@ function installGeometry() {
   Element.prototype.getBoundingClientRect = function (this: Element) {
     return rects.get(this) ?? new DOMRect(0, 0, 0, 0);
   };
-  // offsetLeft 跟随 style.order：浏览器中 flex order 决定视觉位置，offsetLeft 是
-  // 布局后位置——注册期排序因此始终读取当前 order（修复后的产品不变式）。
+  // offsetLeft follows style.order: in the browser flex order determines the
+  // visual position, so registration-time sorting always reads the live order.
   Object.defineProperty(HTMLElement.prototype, "offsetLeft", {
     configurable: true,
     get(this: HTMLElement) {

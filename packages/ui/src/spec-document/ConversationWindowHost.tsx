@@ -5,7 +5,6 @@ import { useServices } from "@/hooks/useServices.js";
 import { V4PaneConversationProvider } from "@/v4/V4ConversationContext.js";
 import { WorkbenchLeafPane, type WorkbenchShellBinding } from "@/v4/WorkbenchPane.js";
 import { paneWorkspaceKey } from "@/v4/paneLayoutStore.js";
-import { buildSpecDocumentPickerSource } from "@/lib/workspaceSidePane.js";
 import { SpecPopoutRegionPortal, useSpecPopoutRegion } from "./specPopoutRegion.js";
 import {
   bindConversationWindow,
@@ -197,20 +196,6 @@ function ConversationWindow({
           data-floating-workspace={entry.scope.workspacePath}
         >
           <V4PaneConversationProvider scope={entry.scope}>
-            {!entry.scope.remoteSessionId ? (
-              <div className="flex shrink-0 justify-end border-b border-border px-2 py-1">
-                <Button
-                  variant="ghost"
-                  onClick={() =>
-                    routeAction(entry, "onOpenCodeViewer", [
-                      buildSpecDocumentPickerSource(entry.scope),
-                    ])
-                  }
-                >
-                  Open doc
-                </Button>
-              </div>
-            ) : null}
             <div className="relative min-h-0 flex-1">
               <AdmittedConversation entry={entry} routeAction={routeAction} />
             </div>

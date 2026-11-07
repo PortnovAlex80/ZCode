@@ -47,6 +47,7 @@ import {
 } from "./specThread.js";
 import { useSpecWriteGuard } from "./useSpecDiscussion.js";
 import { useSpecDiscussionWriter } from "./useSpecDiscussionWriter.js";
+import { WORKSPACE_DOCUMENT_DISCUSS_EVENT, type WorkspaceDocumentDiscussRequest } from "./workspaceFileEntryPoints.js";
 import { watchSpecDocument } from "./specDocumentWatch.js";
 import {
   resolveSpecExecutionSessionId,
@@ -998,6 +999,60 @@ function Documents({
       setDiscussionsVisible(false);
     }
   }, [bindingReady, activeThreadId, threads]);
+  // CORR-1 (2026-11-07): discussions are entered from the file tree context menu,
+  // which opens this pane (inside an independent document window) with the
+  // presentation flag discussionsVisible=true. Mirror the header "Discussions"
+  // button semantics when discussions are visible but no thread is active:
+  // select the first saved thread, or start the document-scope discussion once.
+  const discussDocumentRef = useRef<() => void>(() => {});
+  discussDocumentRef.current = discussDocument;
+  const autoDiscussAttemptedPathRef = useRef<string | null>(null);
+  const documentPath = document?.path ?? null;
+  const firstDocumentThreadId = documentThreads[0]?.id ?? null;
+  useEffect(() => {
+    if (!discussionsVisible || activeThreadId) return;
+    if (!bindingReady || !parentSessionId || !discussionWriter.writable) return;
+    if (!documentPath) return;
+    if (firstDocumentThreadId) {
+      setActiveThreadId(firstDocumentThreadId);
+      return;
+    }
+    // One creation attempt per document: a failed attempt (no lease, session
+    // vanished) must not loop.
+    if (autoDiscussAttemptedPathRef.current === documentPath) return;
+    autoDiscussAttemptedPathRef.current = documentPath;
+    discussDocumentRef.current();
+  }, [
+    discussionsVisible,
+    activeThreadId,
+    bindingReady,
+    parentSessionId,
+    discussionWriter.writable,
+    documentPath,
+    firstDocumentThreadId,
+  ]);
+  useEffect(() => {
+    // CORR-1: live counterpart of the presentation-state handoff — reveals the
+    // discussion dock when the file tree "Discuss document" action targets a
+    // document this pane already holds. Thread selection/start is owned by the
+    // effect above.
+    const activate = (event: Event) => {
+      const request = (event as CustomEvent<WorkspaceDocumentDiscussRequest>)
+        .detail;
+      if (
+        !request ||
+        request.documentPath !== documentRef.current?.path ||
+        (request.workspaceIdentity?.trim() || request.workspacePath) !==
+          (workspaceIdentity?.trim() || workspacePath)
+      )
+        return;
+      setDiscussionsVisible(true);
+    };
+    window.addEventListener(WORKSPACE_DOCUMENT_DISCUSS_EVENT, activate);
+    return () => {
+      window.removeEventListener(WORKSPACE_DOCUMENT_DISCUSS_EVENT, activate);
+    };
+  }, [workspaceIdentity, workspacePath]);
   const nativeSource = useMemo<CodeViewerSource | null>(
     () =>
       document

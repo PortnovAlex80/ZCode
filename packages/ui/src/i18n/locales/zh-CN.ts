@@ -1504,6 +1504,7 @@ const zhCN: Record<string, string> = {
   "sidePane.expand": "展开侧边面板",
   "sidePane.collapse": "收起侧边面板",
   "sidePane.togglePanel": "切换面板",
+  "sidePane.restoreChat": "显示主聊天",
   "sidePane.fullView.enter": "进入完整视图",
   "sidePane.fullView.exit": "退出完整视图",
   "sidePane.fullView.openAnswer": "展开消息",
@@ -2317,6 +2318,9 @@ const zhCN: Record<string, string> = {
   "workspaceFileTree.openInBrowser": "用内置浏览器打开",
   "workspaceFileTree.openFailed": "无法打开该条目",
   "workspaceFileTree.addToChat": "添加到聊天",
+  "workspaceFileTree.discussDocument": "讨论文档",
+  "workspaceFileTree.openDocumentWindow": "在独立窗口中打开",
+  "workspaceFileTree.openSideConversation": "侧边对话",
   "workspaceFileTree.gitStatus.ignored": "已忽略",
 
   // SSH 对话框

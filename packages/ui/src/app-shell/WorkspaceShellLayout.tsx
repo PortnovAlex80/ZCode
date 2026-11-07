@@ -37,19 +37,15 @@ import {
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import {
   applySpecGeneralChatColumn,
-  canCollapseSpecGeneralChat,
   resolveSpecGeneralChatCollapsed,
   specGeneralChatLayoutId,
   transitionSpecGeneralChatLayout,
   toggleSpecGeneralChatCollapse,
 } from "@/spec-document/specGeneralChatCollapse.js";
-import {
-  resolveWorkspaceBodyRoleState,
-  type WorkspaceBodyRoleTogglePresentation,
-} from "@/spec-document/workspacePanelRoles.js";
 // 2026-11-07（用户裁决）：swap 排列移除；仅保留渲染期 order 重申（U-03 防拖拽方向颠倒）。
 import { applySpecShellLayoutSwapOrders } from "@/spec-document/specShellLayoutSwap.js";
 import { useSpecDocumentWorkspace } from "@/spec-document/useSpecDocumentWorkspace.js";
+import { WORKSPACE_FILE_SIDE_CONVERSATION_EVENT } from "@/spec-document/workspaceFileEntryPoints.js";
 import {
   SpecPopoutIconButton,
   SpecPopoutRegionPortal,
@@ -1029,45 +1025,12 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
     });
     return () => window.cancelAnimationFrame(frame);
   }, [generalChatCollapsed]);
-  // U-04 角色模型：PRIMARY（中心宽区）/AUXILIARY（右侧窄区）固定（2026-11-07 用户
-  // 裁决移除 swap，documentCenter 恒 false）。唯一的角色开关隐藏/恢复当前
-  // AUXILIARY；有区域被隐藏时优先恢复（U-05 restore-first）。
-  const workspaceBodyRoleState = resolveWorkspaceBodyRoleState({
-    documentCenter: false,
-    sidePaneVisible: isSidePaneOpen,
-    generalChatCollapsed,
-  });
-  const bodyHiddenRegion = workspaceBodyRoleState.hiddenRegion;
-  // 无活动文档时聊天列不允许折叠（canCollapseSpecGeneralChat 既有守卫）：目标为聊天且
-  // 当前可见时按钮禁用，避免一个点击无反馈的假开关；恢复方向永远可用。
-  const canHideGeneralChatNow = canCollapseSpecGeneralChat({
-    workspaceKey,
-    documentActive: isSpecDocumentActive,
-    sidePaneOpen: isSidePaneOpen,
-    workspaceMainView,
-  });
-  const roleToggleTargetsGeneralChat = workspaceBodyRoleState.roleToggleTarget === "general-chat";
-  // tabs 容器 caption 的角色开关呈现（AnimatedSidePanePanel 只负责渲染，不解析角色）。
-  const sidePaneRoleToggle: WorkspaceBodyRoleTogglePresentation = {
-    targetHidden: workspaceBodyRoleState.roleToggleTargetHidden,
-    onToggle: roleToggleTargetsGeneralChat ? handleToggleGeneralChat : handleToggleSidePane,
-    disabled:
-      roleToggleTargetsGeneralChat &&
-      !workspaceBodyRoleState.roleToggleTargetHidden &&
-      !canHideGeneralChatNow,
-    shortcutLabel: roleToggleTargetsGeneralChat ? undefined : toggleSidePaneShortcutLabel,
-  };
-  // U-05：聊天列 Header 是 tabs 容器被隐藏时的常驻恢复入口（锚定在壳层、不在被隐藏
-  // 区域内）。WorkspaceHeader/WorkspaceHeaderActionSection 的旧契约把「面板开关」与
-  // 「内联窗控」绑在同一个 isSidePaneOpen 门上（二者同显隐），因此这里保持窗控路由
-  // 布尔不变，只在无需内联窗控的平台（macOS/Web）把无事可做的恢复按钮抑制掉。
-  const handleChatCaptionRestorePanel = useCallback(() => {
-    if (bodyHiddenRegion !== "side-pane") return;
-    handleToggleSidePane();
-  }, [bodyHiddenRegion, handleToggleSidePane]);
-  const chatCaptionRestoreTargetsSidePane = bodyHiddenRegion === "side-pane";
-  const chatCaptionSuppressIdleRestore =
-    !usesInlineWindowControls && !chatCaptionRestoreTargetsSidePane;
+  // CORR-2 (2026-11-07 ruling): the caption toggle is the native "close/show side
+  // pane" control again; the U-04 role model (workspacePanelRoles) is dismantled
+  // from the caption path. The fork-only chat collapse (specGeneralChatCollapse,
+  // keep) keeps its own restore entry: while the chat is collapsed the side-pane
+  // caption renders a dedicated restore button (onToggleGeneralChat), and closing
+  // the side pane still auto-restores the chat via resolveSpecGeneralChatCollapsed.
   const simplifyHeaderForNarrowRemote = isWebRemoteControlShell && isWebRemoteControlMobileViewport;
   const showTopOverlayNewTaskButton = !isSidebarVisible;
   const workspaceSidebarResizeLabel = intl.formatMessage({
@@ -2300,6 +2263,16 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
       });
     }
   }, [activeTaskId, workspaceKey]);
+  // CORR-1 (2026-11-07): the file tree context menu opens the same side
+  // conversation as the launcher. The request routes through the identical
+  // opener registration (mounted main SessionPane); without an active session
+  // the launcher handler logs and no-ops, matching the fixed launcher entry.
+  useEffect(() => {
+    const open = () => handleOpenSelectionSideConversationLauncher();
+    window.addEventListener(WORKSPACE_FILE_SIDE_CONVERSATION_EVENT, open);
+    return () =>
+      window.removeEventListener(WORKSPACE_FILE_SIDE_CONVERSATION_EVENT, open);
+  }, [handleOpenSelectionSideConversationLauncher]);
   // U-01 «Документ в центре」：交换排列下最右外沿面板换成聊天列、tabs 容器成为内嵌面板，
   // 圆角/边框与 Windows 窗控必须跟随实际位置而不是固定右侧。
   const workspaceWindowChromeClass = resolveWorkspaceShellWindowChromeClass({
@@ -2322,9 +2295,6 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
     },
     isWebRemoteControlShell,
   );
-  // U-04 泛化的铺满规则：AUXILIARY 被隐藏时 PRIMARY 铺满整宽并回到最外沿——与角色无关。
-  // chat-center 隐藏 tabs 容器 ⇒ 聊天列铺满；document-center 隐藏聊天 ⇒ tabs 容器铺满。
-  const sidePaneCaptionCarriesWindowControls = generalChatCollapsed;
   const hasUpdateStatusButton =
     updateReadyVersion !== null ||
     updateState?.kind === "update-available" ||
@@ -2336,9 +2306,11 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
       isDesktop={isDesktop}
       isWindowsDesktop={isWindowsDesktop}
       frameClassName={workspaceWindowChromeClass}
-      showWindowControls={
-        !options.mobileOverlay && usesInlineWindowControls && sidePaneCaptionCarriesWindowControls
-      }
+      // Upstream window-control routing restored (CORR-2): the visible caption
+      // carries the inline controls — side-pane caption while it is open, chat
+      // header once it is closed. While the fork collapses the chat the column
+      // header is inert, so the side-pane caption is the only live carrier anyway.
+      showWindowControls={!options.mobileOverlay && usesInlineWindowControls}
       // 工作区保活与侧栏动画会保留 DOM；独立 guest 浮层必须同步服从当前页面的展示状态。
       isVisible={
         isWorkspaceVisible &&
@@ -2374,8 +2346,8 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
       }
       fullViewSlotRef={options.mobileOverlay ? undefined : setFullViewSlotElement}
       sidePaneState={sidePaneState}
-      sidePaneRoleToggle={sidePaneRoleToggle}
       generalChatCollapsed={generalChatCollapsed}
+      onToggleGeneralChat={handleToggleGeneralChat}
       onSpecDocumentActiveChange={handleSpecDocumentActiveChange}
       recentClosedSidePaneTabs={recentClosedSidePaneTabs}
       isBrowserOpen={isBrowserOpen}
@@ -3127,25 +3099,16 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                             simplifyForNarrowRemote={simplifyHeaderForNarrowRemote}
                             isSidebarVisible={isSidebarVisible}
                             isTerminalOpen={isTerminalOpen}
-                            // U-01：交换排列下聊天列是最右面板，Windows/Linux 内联窗控必须
-                            // 由它的 Header 承载（tabs 容器 caption 不再贴窗口右上角）。
-                            // U-04：isSidePaneOpen 同时门控 Header 的面板恢复按钮与内联窗控
-                            // （WorkspaceHeaderActionSection 旧契约同门）。窗控路由布尔保持
-                            // 不变；macOS/Web 无内联窗控时抑制无事可做的恢复按钮（U-05 常驻
-                            // 恢复入口只在确有隐藏区域时出现，避免位置相关假开关回潮）。
-                            isSidePaneOpen={
-                              (isSidePaneOpen && sidePaneCaptionCarriesWindowControls) ||
-                              chatCaptionSuppressIdleRestore
-                            }
+                            // Upstream chat-caption wiring restored (CORR-2): the
+                            // header shows the side-pane restore button and carries
+                            // the inline window controls only while the side pane
+                            // (and its caption) is closed.
+                            isSidePaneOpen={isSidePaneOpen}
                             onRefreshGit={handleRefreshGit}
                             onToggleTerminal={handleToggleTerminal}
                             onToggleBrowser={handleToggleBrowser}
-                            onToggleSidePane={handleChatCaptionRestorePanel}
-                            toggleSidePaneShortcutLabel={
-                              chatCaptionRestoreTargetsSidePane
-                                ? toggleSidePaneShortcutLabel
-                                : undefined
-                            }
+                            onToggleSidePane={handleToggleSidePane}
+                            toggleSidePaneShortcutLabel={toggleSidePaneShortcutLabel}
                             onReloadSession={handleReloadSession}
                             reloadSessionDisabled={workspaceSessionActionDisabled}
                             reloadSessionPending={reloadSessionPending}

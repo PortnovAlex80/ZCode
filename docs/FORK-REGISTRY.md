@@ -18,7 +18,10 @@
 
 Требования подтверждены пользователем по итогам сборки `588e99c3`: реализовано
 частично — правка наложена на нативный просмотр, но **система открытия файла и
-иконка тогла остались форкскими**. Статус: **OPEN**.
+иконка тогла остались форкскими**. Статус: **IMPLEMENTED 2026-11-07** (CORR-1 +
+CORR-2 в одной ветке `u20-document-search`; приёмка по критериям ниже —
+нативные вкладки, «+» без Open doc, три пункта в контекстном меню дерева,
+PanelRight-иконки caption).
 
 ### CORR-1. Система открытия файлов — от ОРИГИНАЛА, не от форка (уточнение 2026-11-07 #2)
 
@@ -31,12 +34,12 @@
 
 Что сейчас не так (форк перехватывает нативный поток):
 
-| # | Точка перехвата | Файл:строка | Что делает форк |
-|---|---|---|---|
-| 1 | **Перехват вкладок**: code-viewer вкладки с `.md/.markdown/.txt` внутри spec-root рендерят `SpecDocumentPane` вместо нативного `FileManagerPane` | `app-shell/AnimatedSidePanePanel.tsx:1899-1965`; предикат `canOpenSpecDocument` `:911-934` | Подмена нативного файлового таба документной панелью форка |
-| 2 | **Пункт «Open doc»** в нативном лаунчере «+» (первым пунктом, форк-иконка FileText, требует форк-grant) | `AnimatedSidePanePanel.tsx:1357-1379`, `:864-879`; `lib/workspaceSidePane.ts:1042-1057` | Вторая, форк-система листинга/выбора документов (пикер) параллельно нативному дереву |
-| 3 | Тегирование вкладок `specDocument: true` + привязка таба к файлу | `lib/codeViewer.ts:28`; `workspaceSidePane.ts:1796-1833, 1842+`; `useAppPanels.ts:529-537` | Форк-механика биндинга/дедупликации вкладок |
-| 4 | Обработчики форк-входов (managed discussion reflow, retained windows) открывают документные вкладки | `AnimatedSidePanePanel.tsx:591-791, 887-910` | Маршрутизация через форк-табы |
+| # | Точка перехвата | Файл:строка | Что делает форк | Статус |
+|---|---|---|---|---|
+| 1 | **Перехват вкладок**: code-viewer вкладки с `.md/.markdown/.txt` внутри spec-root рендерят `SpecDocumentPane` вместо нативного `FileManagerPane` | `app-shell/AnimatedSidePanePanel.tsx` | Подмена нативного файлового таба документной панелью форка | **dismantled 2026-11-07** — все `code-viewer`/`file-manager` вкладки рендерят `FileManagerPane` (+ overlay правки); `SpecDocumentPane` остался только в независимых окнах/возвращённых документных табах (`source.specDocument`) |
+| 2 | **Пункт «Open doc»** в нативном лаунчере «+» (первым пунктом, форк-иконка FileText, требует форк-grant) | `AnimatedSidePanePanel.tsx`, `lib/workspaceSidePane.ts` | Вторая, форк-система листинга/выбора документов (пикер) параллельно нативному дереву | **removed 2026-11-07** из лаунчера (и из popout-окон бесед); пикер внутри `SpecDocumentPane` (выбор файла в документном окне) сохранён |
+| 3 | Тегирование вкладок `specDocument: true` + привязка таба к файлу | `lib/codeViewer.ts:28`; `workspaceSidePane.ts`; `useAppPanels.ts` | Форк-механика биндинга/дедупликации вкладок | keep (только для документных окон/возвращённых табов; нативные вкладки не тегируются) |
+| 4 | Обработчики форк-входов (managed discussion reflow, retained windows) открывают документные вкладки | `AnimatedSidePanePanel.tsx` | Маршрутизация через форк-табы | **reworked 2026-11-07** — reflow и новый контекст-меню открывают независимое окно документа (`ensureIndependentDocumentWindow`, `INDEPENDENT_DOCUMENT_OPEN_EVENT`); входы: правый клик дерева («Обсудить документ», «Открыть в отдельном окне», «Боковой диалог» — `spec-document/workspaceFileEntryPoints.ts`) |
 
 Критерии приёмки:
 1. Клик по файлу в дереве/ссылке из чата на desktop всегда даёт **нативную**
@@ -94,12 +97,12 @@ controls], без `workspacePanelRoles`.
 | Элемент | Класс | Статус | Файлы / факты |
 |---|---|---|---|
 | Document IO-сервис (read/save CAS `expectedSha256`, remove, list, **search** fuzzy top-K) | F | keep | `services/src/spec-document/specDocument{,Service}.ts`; whitelist `.md/.markdown/.txt/.rst`, ≤2 МиБ; U-14/U-18/U-20 |
-| Перехват нативных вкладок → `SpecDocumentPane` | R | **open (CORR-1)** | см. CORR-1 п.1 |
-| «Open doc» + пикер-комбобокс (U-08/U-12/U-13) + серверный поиск (U-20 path-half, «N shown · M total») | R | **open (CORR-1)** | `specDocumentPicker.tsx`; лаунчер-пункт `AnimatedSidePanePanel.tsx:1357-1379` |
+| Перехват нативных вкладок → `SpecDocumentPane` | R | **retired 2026-11-07 (CORR-1)** | нативные вкладки → `FileManagerPane`; панель осталась в независимых окнах |
+| «Open doc» + пикер-комбобокс (U-08/U-12/U-13) + серверный поиск (U-20 path-half, «N shown · M total») | R→F | **launcher entry removed 2026-11-07 (CORR-1)** | пикер остался внутри `SpecDocumentPane` документных окон (`specDocumentPicker.tsx`); лаунчер-пункт и popout-кнопка удалены |
 | Оверлей правки на нативном просмотре (Edit → textarea, 500 мс автосейв, Save, CAS) | O | keep | `nativeFileEditing.tsx`; `WorkspaceFileTree.tsx:42-53,192-206`; `PreviewPane.tsx` (+`sourceEditor`,`documentActions`,`requestMarkdownViewMode`) — ruling 2026-11-07 |
 | Автосейв/Save в документной вкладке (U-18; фикс мёртвой сессии 2026-10-31: error/closed ≠ писатель) | F | keep (внутри CORR-1 судьба панели = decide) | `SpecDocumentPane.tsx:749-847`; `useSpecDiscussion.ts` (guard) |
 | Find-in-document Ctrl/Cmd+F (U-19) | F | keep | `documentFind.ts`; view=CSS Highlight, edit=selection |
-| Обсуждения документа на нативных сессиях (D-02..D-04), writer-lease (Web Locks), паспорта `.harness/project.json` (U-02) | F | decide (при CORR-1) | `SpecDiscussionPane.tsx`, `specThread.ts`, `projectMetadata*.ts` |
+| Обсуждения документа на нативных сессиях (D-02..D-04), writer-lease (Web Locks), паспорта `.harness/project.json` (U-02) | F | keep (вход = правый клик дерева «Обсудить документ» → независимое окно, CORR-1) | `SpecDiscussionPane.tsx`, `specThread.ts`, `projectMetadata*.ts`, `workspaceFileEntryPoints.ts` |
 | Независимые окна документов/бесед + retained-восстановление | F | keep | `DocumentWindowSurface.tsx`, `retainedDocumentWindows.ts`, `nativeConversationPopouts.ts` (desktop main) |
 | PiP-попапы документа/дискуссий (U-06/U-07/U-17) | F | keep | `specPopoutWindow.ts`, `specPopoutRegion.tsx` |
 | Watcher внешних изменений + персистентность presentation/drafts (D-01/D-05) | F | keep | `specDocumentWatch.ts`, `specDocumentPresentationState.ts` |
@@ -109,9 +112,9 @@ controls], без `workspacePanelRoles`.
 | Элемент | Класс | Статус | Файлы / факты |
 |---|---|---|---|
 | Swap «Чат в центре / Документ в центре» (U-01/U-03) | F | **retired 2026-11-07** | `specShellLayoutSwap.ts` → только render-order restatement; кнопка/режимы/размеры удалены (`588e99c3`) |
-| Роль-тогглы (U-04/U-05) + `Columns2` | R | **open (CORR-2)** | см. CORR-2 |
+| Роль-тогглы (U-04/U-05) + `Columns2` | R | **retired 2026-11-07 (CORR-2)** | `workspacePanelRoles.ts` и `WorkspaceSidePaneCaptionControls.tsx` удалены; `WorkspaceSidePaneToggleButton` восстановлен байт-в-байт upstream (`PanelRightClose/Open`, без `disabled`), caption-кластер снова инлайн в `AnimatedSidePanePanel` в порядке [full-view → тоггл → window controls]; отдельная кнопка «restore chat» в caption осталась только для форк-состояния свернутого чата |
 | Full-view тоггл, window controls, «+», нативный лаунчер | O | keep (оригинал) | `side-pane-full-view/`, `DesktopWindowControls.tsx` — байт-в-байт upstream |
-| Сворачивание чата при активном документе | F | keep | `specGeneralChatCollapse.ts` |
+| Сворачивание чата при активном документе | F | keep | `specGeneralChatCollapse.ts`; document-active теперь только для документных вкладок/окон (`source.specDocument`) |
 
 ### 2.3 Провайдеры/аутентификация (сохранено полностью)
 
@@ -148,6 +151,7 @@ controls], без `workspacePanelRoles`.
 | 2026-11-03 | Мерж v3.17.2 (без тега, по «го» пользователя); трей-точка убрана upstream |
 | 2026-11-07 | Ruling «натив-first + наша правка; swap выпилить»; U-20 path-half; оверлей правки; swap удалён; сборки `d3457c0b`, `588e99c3` |
 | 2026-11-07 | **CORR-1/CORR-2 зарегистрированы** (этот документ): открытие файлов и тогл — вернуть к оригиналу |
+| 2026-11-07 | **CORR-1/CORR-2 реализованы** (ветка `u20-document-search`): нативный first-open, правый клик = форк-входы (обсуждение/окно/боковой диалог), caption = upstream-кластер; SpecDocumentPane — только документные окна/беседы |
 
 ## 4. Открытая приёмка (сводно)
 

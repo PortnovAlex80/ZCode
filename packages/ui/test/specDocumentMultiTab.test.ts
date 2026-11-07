@@ -10,7 +10,7 @@
  *    文件互不重置；onDocumentOpen 按实例回传相对路径；autoOpenLastDocument=false
  *    的新选择器 tab 不自动恢复上一次文档（保持 Open doc 初始态）。
  */
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -206,6 +206,16 @@ function specDocumentsService() {
   return {
     getWorkspace: async () => ({ root: "D:\\ws", writable: false }),
     list: async () => DOC_FILES,
+    // U-20 path half: Host-side fuzzy top-K. The multi-tab contract relies on
+    // Enter-to-pick taking the first match, so keep query filtering honest.
+    search: async ({ query, limit }: { query: string; limit?: number }) => {
+      const needle = query.trim().toLowerCase();
+      const paths = needle
+        ? DOC_FILES.filter((path) => path.toLowerCase().includes(needle))
+        : DOC_FILES;
+      const capped = paths.slice(0, limit ?? paths.length);
+      return { paths: capped, total: paths.length };
+    },
     read: async ({ path }: { path: string }) => ({
       path,
       content: `content of ${path}`,
@@ -260,6 +270,11 @@ async function openDocumentFromPicker(container: HTMLElement, relativePath: stri
   fireEvent.click(within(container).getByLabelText("Choose project document"));
   const filter = within(container).getByLabelText("Filter documents");
   fireEvent.change(filter, { target: { value: relativePath } });
+  // U-20: server-side filtering is debounced (150 ms) and Enter opens the top
+  // match of the CURRENT result set; wait for the filtered list to land first.
+  await act(async () => {
+    await new Promise((resolveTimer) => setTimeout(resolveTimer, 200));
+  });
   fireEvent.keyDown(filter, { key: "Enter" });
 }
 

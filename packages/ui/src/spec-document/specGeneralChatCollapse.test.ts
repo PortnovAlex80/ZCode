@@ -425,23 +425,17 @@ test("actual native publisher preserves scope exclusions when the selected main 
   );
 });
 
-test("actual side panel keeps a restore route in the caption and relaxes bounds only while collapsed", async () => {
+test("actual side panel keeps a restore route for the collapsed chat and relaxes bounds only while collapsed", async () => {
   const source = await parse("../app-shell/AnimatedSidePanePanel.tsx");
-  const captionSource = await parse(
-    "../app-shell/WorkspaceSidePaneCaptionControls.tsx",
-  );
-  // U-04 迁移：SpecDocumentPane 不再持有聊天显隐 props——⤢ «Развернуть документ» 已并入
-  // tabs caption 的角色开关；文档头不再出现位置相关的聊天控制。
+  // CORR-1 (2026-11-07): SpecDocumentPane survives only inside the retained
+  // document window host; onActivate still routes through DocumentWindowSurface's
+  // render prop (activateDocument: focus the popout window, else returnDocument).
   const documentPane = descendants(
     source,
     (node) =>
       ts.isJsxSelfClosingElement(node) &&
       node.tagName.getText(source) === "SpecDocumentPane",
   )[0] as ts.JsxSelfClosingElement;
-  // U-04 迁移 + 文档窗口化：SpecDocumentPane 的 onActivate 走 DocumentWindowSurface 的
-  // render-prop（activateDocument：popout 时聚焦窗口，否则走宿主 onActivate 恢复路由）。
-  // 恢复路由仍存在，只是换了接线：宿主 onActivate 经 returnDocument 把保留文档写回
-  // 任务记忆并广播 activateRetainedDocument 激活事件（不再直接调用 onActivateTab）。
   assert.equal(
     prop(documentPane, "onActivate", source),
     "onActivate={activateDocument}",
@@ -480,40 +474,36 @@ test("actual side panel keeps a restore route in the caption and relaxes bounds 
     prop(panel, "maxSize", source),
     'maxSize={generalChatCollapsed ? "100%" : panelLayout.maxSize}',
   );
-  // 恢复入口：caption 控制簇中的统一角色开关（有区域被隐藏时优先恢复，U-05 restore-first）。
+  // CORR-2 (2026-11-07): the caption toggle is the native "close side pane"
+  // control again (upstream a9fe401e composition), no role model.
   const captionToggle = descendants(
-    captionSource,
+    source,
     (node) =>
       (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
-      node.tagName.getText(captionSource) === "WorkspaceSidePaneToggleButton",
+      node.tagName.getText(source) === "WorkspaceSidePaneToggleButton",
   )[0] as ts.JsxOpeningElement;
-  assert.ok(
-    captionToggle,
-    "caption controls must render the unified role toggle",
-  );
+  assert.ok(captionToggle, "caption must render the native side pane toggle");
+  assert.equal(prop(captionToggle, "isSidePaneOpen", source), "isSidePaneOpen");
   assert.equal(
-    prop(captionToggle, "isSidePaneOpen", captionSource),
-    "isSidePaneOpen={!roleToggle.targetHidden}",
+    prop(captionToggle, "onToggleSidePane", source),
+    "onToggleSidePane={onCloseSidePane}",
   );
-  assert.equal(
-    prop(captionToggle, "onToggleSidePane", captionSource),
-    "onToggleSidePane={roleToggle.onToggle}",
-  );
-  assert.equal(
-    prop(captionToggle, "disabled", captionSource),
-    "disabled={roleToggle.disabled}",
-  );
-  const headerControls = descendants(
+  assert.equal(prop(captionToggle, "disabled", source), undefined);
+  // Fork keep (specGeneralChatCollapse): while the chat is collapsed, the caption
+  // must still offer a dedicated restore button (the native toggle no longer
+  // retargets to the chat — that was the removed role model).
+  const closeSidePane = descendants(
     source,
     (node) =>
       ts.isVariableDeclaration(node) &&
-      node.name.getText(source) === "sidePaneCaptionControls",
+      node.name.getText(source) === "closeSidePaneButton",
   )[0];
-  assert.ok(headerControls);
+  assert.ok(closeSidePane, "caption cluster must be the upstream inline block");
   assert.match(
-    headerControls.getText(source),
-    /WorkspaceSidePaneCaptionControls/,
+    closeSidePane.getText(source),
+    /generalChatCollapsed && onToggleGeneralChat/,
   );
+  assert.match(closeSidePane.getText(source), /sidePane\.restoreChat/);
 });
 
 test("discussion activation uses the native reveal-and-reuse entry without changing general chat", async () => {
@@ -661,24 +651,24 @@ test("actual Workbench admission guard prevents a second managed discussion cont
   assert.deepEqual(lookups.at(-1), ["local-project", "workspace-a", null]);
 });
 
-test("launcher documents entry keeps its grant-gated disabled state through SidePaneLauncherRow", async () => {
-  // 回归：Open doc 项在没有 spec-document grant 时必须可见地禁用。合并到上游
-  // SidePaneLauncherRow 网格时 disabled 曾丢失——处理器仍按许可拒绝，按钮却看似可点。
-  const source = await parse("../app-shell/AnimatedSidePanePanel.tsx");
-  const row = descendants(
-    source,
-    (node) =>
-      ts.isJsxSelfClosingElement(node) &&
-      node.tagName.getText(source) === "SidePaneLauncherRow",
-  )[0] as ts.JsxSelfClosingElement;
-  assert.ok(row, "SidePaneLauncherRow render must exist");
-  assert.equal(
-    prop(row, "disabled", source),
-    "disabled={item.disabled}",
-  );
+test("launcher exposes only native entries after CORR-1 removes the fork Open doc item", async () => {
+  // CORR-1 (2026-11-07 ruling): the "+" launcher lists native apps only; the fork
+  // "Open doc" picker entry is gone (its role is the native Files tab, and the
+  // document entry points moved to the file tree context menu).
   const panelText = await readFile(
     new URL("../app-shell/AnimatedSidePanePanel.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(panelText, /disabled: !hasSpecDocumentGrant/);
+  assert.doesNotMatch(panelText, /id: "documents"/);
+  assert.doesNotMatch(panelText, /\bopenSpecDocument\b/);
+  assert.doesNotMatch(panelText, /buildSpecDocumentPickerSource/);
+  // The document grant itself stays: it still gates the managed-discussion
+  // reflow and owner activation (discussion mechanics are a fork keep).
+  assert.match(panelText, /hasSpecDocumentGrant/);
+  // The context menu owns the fork entry points now: the panel must route the
+  // independent-document requests through one shared factory used by both the
+  // window event and the managed-discussion reflow.
+  assert.match(panelText, /ensureIndependentDocumentWindow/);
+  assert.match(panelText, /INDEPENDENT_DOCUMENT_OPEN_EVENT/);
+  assert.match(panelText, /MANAGED_NATIVE_DISCUSSION_OPEN_EVENT/);
 });

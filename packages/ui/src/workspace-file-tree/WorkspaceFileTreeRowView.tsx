@@ -4,12 +4,15 @@ import type { EditorInfo, OpenInEditorRemoteTarget } from "@zcode/shared";
 import { useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import {
   AlertCircle,
+  AppWindowIcon,
   ChevronRight,
   CopyIcon,
   FolderOpenIcon,
   GlobeIcon,
   LoaderCircle,
+  MessagesSquareIcon,
   MessageSquarePlusIcon,
+  MessageSquareTextIcon,
   PanelRightIcon,
 } from "lucide-react";
 import { TID_WORKSPACE_FILE_TREE_ROW, testId } from "@zcode/shared/test-ids";
@@ -33,6 +36,12 @@ import { usePlatform } from "@/hooks/usePlatform.js";
 import { useOptionalServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { ArtifactMetadataEditor } from "@/spec-document/ArtifactMetadataEditor.js";
+import {
+  discussWorkspaceFileDocument,
+  openWorkspaceFileDocumentWindow,
+  requestWorkspaceFileSideConversation,
+  type WorkspaceFileEntryPointRequest,
+} from "@/spec-document/workspaceFileEntryPoints.js";
 import { FileDisplayIcon, resolveFileDisplayDescriptor } from "@/lib/fileDisplay.js";
 import { logger } from "@/logger.js";
 import { resolveWorkspaceFileManagerEditor } from "@/lib/workspaceEditorSelection.js";
@@ -235,6 +244,25 @@ export function WorkspaceFileTreeRowView({
       deleted: isDeletedFile,
       kind: isDirectory ? "directory" : "file",
     });
+  };
+  // CORR-1 (user ruling 2026-11-07): the fork document entry points (discussion,
+  // separate window, side conversation) live in this context menu for text
+  // documents on local desktop workspaces. Remote/external trees keep the native
+  // menu only. The document whitelist matches the document IO service
+  // (.md/.markdown/.txt/.rst) and the ruling's list.
+  const canUseForkDocumentActions =
+    row.type === "file" &&
+    !isDeletedFile &&
+    !isDirectory &&
+    !isRemoteWorkspaceFileTree &&
+    !workspaceRemoteSessionId &&
+    canOpenLocalFileManager &&
+    /\.(md|markdown|txt|rst)$/i.test(row.name);
+  const forkDocumentRequest: WorkspaceFileEntryPointRequest = {
+    workspacePath,
+    ...(workspaceIdentity ? { workspaceIdentity } : {}),
+    path: row.path,
+    name: row.name,
   };
   const rowElement = (
     <SidebarNativeTooltip>
@@ -457,6 +485,34 @@ export function WorkspaceFileTreeRowView({
             <MessageSquarePlusIcon aria-hidden="true" className="size-4" />
             {contextMenuLabels.addToChat}
           </ContextMenuItem>
+          {canUseForkDocumentActions ? (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onSelect={() =>
+                  discussWorkspaceFileDocument({
+                    request: forkDocumentRequest,
+                    relativeDocumentPath: relativePath,
+                  })
+                }
+              >
+                <MessagesSquareIcon aria-hidden="true" className="size-4" />
+                {intl.formatMessage({ id: "workspaceFileTree.discussDocument" })}
+              </ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => openWorkspaceFileDocumentWindow(forkDocumentRequest)}
+              >
+                <AppWindowIcon aria-hidden="true" className="size-4" />
+                {intl.formatMessage({ id: "workspaceFileTree.openDocumentWindow" })}
+              </ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => requestWorkspaceFileSideConversation(forkDocumentRequest)}
+              >
+                <MessageSquareTextIcon aria-hidden="true" className="size-4" />
+                {intl.formatMessage({ id: "workspaceFileTree.openSideConversation" })}
+              </ContextMenuItem>
+            </>
+          ) : null}
           {canEditMetadata ? (
             <>
               <ContextMenuSeparator />

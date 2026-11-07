@@ -61,15 +61,12 @@ function renderHost(options: { path: string | null; enabled?: boolean; delay?: n
     );
   };
   const view = render(
-    createElement(
-      ServiceProvider,
-      {
-        services: { specDocumentService: documents.service } as unknown as Parameters<
-          typeof ServiceProvider
-        >[0]["services"],
-      },
-      createElement(Harness),
-    ),
+    createElement(ServiceProvider, {
+      services: { specDocumentService: documents.service } as unknown as Parameters<
+        typeof ServiceProvider
+      >[0]["services"],
+      children: createElement(Harness),
+    }),
   );
   return { view, documents };
 }
