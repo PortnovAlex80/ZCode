@@ -3,6 +3,8 @@ import { Eye, Pencil, Save } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { useServices } from "@/hooks/useServices.js";
 import type { SpecDocumentSnapshot } from "@zcode/services";
+import { EditorSelectionToolbar } from "@/spec-document/editorSelectionToolbar.js";
+import type { MarkdownSelectionTarget } from "@/lib/conversationSelectionReference.js";
 
 /**
  * 2026-11-07（用户裁决，分支 u20-document-search）：«сохраняем текущий функционал
@@ -131,6 +133,13 @@ export function useNativeFileEditing(options: {
   enabled: boolean;
   /** 测试用防抖钉子（缺省 500，同 U-18）。 */
   autosaveDelayMs?: number;
+  /**
+   * MPS11 (2026-11-07): markdown selection target for the edit-overlay
+   * toolbar. The caller (FileManagerPane) applies the same workspaceKey match
+   * guard as the preview toolbar; undefined = no toolbar. sessionId may be
+   * null — the MPS10 workspace opener / draftScopeKey routing applies.
+   */
+  selectionTarget?: MarkdownSelectionTarget | null;
 }): {
   documentActions: ReactNode;
   sourceEditor: ReactNode;
@@ -139,9 +148,12 @@ export function useNativeFileEditing(options: {
   requestMarkdownViewMode: "code" | null;
 } {
   const { specDocumentService } = useServices();
-  const { path, enabled, autosaveDelayMs = 500 } = options;
+  const { path, enabled, autosaveDelayMs = 500, selectionTarget } = options;
   const applicable =
     enabled && Boolean(specDocumentService) && path !== null && isTextCompatibleDocumentPath(path);
+  // MPS11: the toolbar tracks this textarea's selection; the ref stays null
+  // whenever the editor surface is not mounted.
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [editing, setEditing] = useState(false);
   const [document, setDocument] = useState<SpecDocumentSnapshot | null>(null);
@@ -273,19 +285,34 @@ export function useNativeFileEditing(options: {
     </>
   );
 
+  const editorPath = path;
   const editor = editing && document ? (
-    <textarea
-      aria-label="Document source editor"
-      data-native-document-editor
-      value={draft}
-      disabled={saveInFlight}
-      onChange={(event) => {
-        draftRef.current = event.target.value;
-        setDraft(event.target.value);
-      }}
-      spellCheck={false}
-      className="h-full min-h-0 w-full resize-none bg-background p-4 font-mono text-ui-base leading-relaxed whitespace-pre-wrap break-words text-foreground outline-none"
-    />
+    // Relative wrapper hosts the MPS11 selection menu anchors; the textarea
+    // keeps its exact previous classes inside it.
+    <div className="relative h-full min-h-0 w-full">
+      <textarea
+        ref={textareaRef}
+        aria-label="Document source editor"
+        data-native-document-editor
+        value={draft}
+        disabled={saveInFlight}
+        onChange={(event) => {
+          draftRef.current = event.target.value;
+          setDraft(event.target.value);
+        }}
+        spellCheck={false}
+        className="h-full min-h-0 w-full resize-none bg-background p-4 font-mono text-ui-base leading-relaxed whitespace-pre-wrap break-words text-foreground outline-none"
+      />
+      {selectionTarget && editorPath ? (
+        <EditorSelectionToolbar
+          textareaRef={textareaRef}
+          sourceKey={editorPath}
+          sourceTitle={editorPath}
+          sourcePath={editorPath}
+          target={selectionTarget}
+        />
+      ) : null}
+    </div>
   ) : null;
 
   return {

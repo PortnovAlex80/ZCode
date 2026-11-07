@@ -103,3 +103,14 @@ MPS09 发送证据加强：E2E 从真实 provider 请求的 user 文本提取 us
 用户确认转正后，已通过 promote dry run/apply 与覆盖率准入审计，正式路径为 `packages/desktop/test/e2e/conversation-session/conversation-session-markdown-preview-selection.test.ts`。独立 common + case-local 回放通过（`desktop-e2e-20260904042625480-p37746-25eba58058f16338`），默认回放通过（`desktop-e2e-20260904042658298-p39023-d345d8e8f357eb39`）。fixture check、E2E typecheck、typecheck、lint 通过，lint 为既有 40 条 warning。
 
 准入审计发现既有 assistant-preview-cards 与 hooks-lifecycle 的 manifest 顺序/说明和 provider fixture 不一致，已按 provider fixture 机械同步，未改响应或测试行为。按用户要求不加入 Docker 验证集，未执行 Docker 准入；此前 pending 记录为历史状态，以本节为准。
+
+### 编辑态选区浮层（MPS11，accepted，2026-11-07 用户裁决）
+
+用户报告：fork 编辑覆盖层（nativeFileEditing 的 sourceEditor textarea，进入 Edit 后 markdown 被强制到 Source 视图；txt/json 等任何可编辑文本）里选中文字没有选区浮层——此前浮层只挂在 Markdown Preview 正文（DOM Range 路径，`previewPaneContent` 只在 MarkdownPreviewContent 渲染）。裁决：编辑态同样提供「添加到当前任务 / 在辅助对话中提问」，选区在任何可编辑文档视图中都要可靠可用。
+
+- 复用不变：同一个 SelectionActionMenu、同一个 MarkdownSelectionTarget 路由（sessionId 可为 null：按 MPS10 走 workspace opener 与 draftScopeKey draft scope）、同一个引用构造（contentType markdown + sourceKey/sourceTitle + 真实 path + 选段 text）、同一个单条 8,000 字符上限展示与限额、跨 workspace 来源不匹配 workspaceKey 时不提供入口（remote 标签本就不启用编辑覆盖层）。
+- 技术边界：textarea 内部选区没有 DOM Range（`window.getSelection()` 不反映），不能复用 MarkdownSelectionTooltip 的 inspect；改用 `selectionStart/End` + 镜像 div（复制字体/行高/换行等计算样式与内容宽度，在起止点插入标记 span）计算选区矩形，镜像不可用时回退 textarea 自身矩形。监听 mouseup/keyup/selectionchange（document 级须 textarea 持焦）与 input；折叠、失焦、Escape、滚动、resize、内容变更后关闭浮层。菜单共用视口钳制，不新增 i18n 文案。
+- 只读 Source/代码视图（CodeViewer 为 @pierre/diffs Shadow DOM，且已有行选区/评论机制占用 mouseup 语义）不提供浮层，沿用原交互；containment/closest 守卫不穿 shadow 边界，属正确性边界而非放宽范围。
+- 独立文档窗口（SpecDocumentPane）的编辑面沿用其自身编辑引擎，不在本条范围内。
+
+验证（2026-11-07）：新增 `editorSelectionToolbar` 单测钉住 textarea 选区出浮层、选中文字进入 add-to-chat 引用（含 path）、折叠/失焦/Escape 关闭、8,000 字符上限展示、无 session 时 workspace opener 路由与未就绪禁用；既有 `markdownPreviewSelection`、`selectionSideChatRuntime` 与 `nativeFileEditing` 套件回归。

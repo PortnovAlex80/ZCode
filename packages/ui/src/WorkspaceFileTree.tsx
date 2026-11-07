@@ -80,11 +80,23 @@ export function FileManagerPane({
 }: FileManagerPaneProps) {
   const { intl } = useZCodeIntl();
   const editableTextDocumentPath = getNativeEditableTextDocumentPath(source);
+  const workspaceKey = target.workspaceIdentity?.trim() || target.workspacePath;
+  // MPS11 (2026-11-07): the edit-overlay textarea carries the same selection
+  // toolbar as the markdown preview. Same workspace match guard the preview
+  // applies (PreviewPane drops targets whose workspaceKey differs from the
+  // source): cross-workspace sources get no entry. Remote tabs never gain the
+  // edit overlay, so they stay native read-only by construction.
+  const editorSelectionTarget =
+    previewProps.markdownSelectionTarget &&
+    workspaceKey === previewProps.markdownSelectionTarget.workspaceKey
+      ? previewProps.markdownSelectionTarget
+      : undefined;
   const nativeEditing = useNativeFileEditing({
     workspacePath: target.workspacePath,
     workspaceIdentity: target.workspaceIdentity,
     enabled: !target.workspaceRemoteSessionId && editableTextDocumentPath !== null,
     path: editableTextDocumentPath,
+    selectionTarget: editorSelectionTarget,
   });
   // CORR-1 (2026-11-07 #3): surface the context-menu document entry points on
   // the open native tab header too — editing/discussion controls must be visible
@@ -147,7 +159,6 @@ export function FileManagerPane({
     observer.observe(container);
     return () => observer.disconnect();
   }, []);
-  const workspaceKey = target.workspaceIdentity?.trim() || target.workspacePath;
   const storedNavigationPreferenceOpen = useZCodeStore(
     (state) => state.fileManagerNavigationOpenByWorkspace[workspaceKey],
   );
