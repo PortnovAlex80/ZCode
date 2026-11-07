@@ -360,8 +360,6 @@ export function AnimatedSidePanePanel({
   isMacDesktop,
   isVisible,
   generalChatCollapsed = false,
-  documentCenter = false,
-  onToggleShellLayoutSwap,
   sidePaneRoleToggle,
   onSpecDocumentActiveChange,
   sidePaneState,
@@ -460,15 +458,12 @@ export function AnimatedSidePanePanel({
   isMacDesktop?: boolean;
   isVisible: boolean;
   generalChatCollapsed?: boolean;
-  /** U-01 «Документ в центре»：当前排列是否已把 tabs 容器换到中心（聊天在右）。 */
-  documentCenter?: boolean;
   /**
    * U-04 角色开关（«Скрыть/Показать боковую панель»）：由宿主按 workspacePanelRoles
    * 解析后下发；隐藏/恢复当前 AUXILIARY 区域，有区域被隐藏时优先恢复（U-05）。
    * 旧的 onCloseSidePane 固定面板开关与「恢复聊天」方向箭头均已并入此入口。
    */
   sidePaneRoleToggle?: WorkspaceBodyRoleTogglePresentation | null;
-  onToggleShellLayoutSwap?: () => void;
   onSpecDocumentActiveChange?: (active: boolean) => void;
   sidePaneState: WorkspaceSidePaneState | null;
   recentClosedSidePaneTabs: RecentClosedSidePaneTab[];
@@ -1023,20 +1018,15 @@ export function AnimatedSidePanePanel({
   const isWindowResizeSettling = useWindowResizeSettling(hasRenderedSidePane);
   const widthUnlockTimerRef = useRef<number | null>(null);
   const previousIsVisibleRef = useRef(isVisible);
-  const panelLayout = resolveAnimatedSidePanePanelLayout({
-    documentCenter,
-    mobileOverlay,
-  });
-  // U-01 «Документ в центре»：RRP Panel 的 style prop 落在内层包装 div 上，外层 flex item
-  // 的 order 只能在挂载时经 elementRef 写入（运行期切换由宿主在渲染期同步，见
-  // WorkspaceShellLayout 的 applySpecShellLayoutSwapOrders）。排列恒为
-  // 聊天列=1 / 分隔条=2 / tabs 容器=3，交换排列把两端对调，分隔条始终在文档与聊天之间。
+  const panelLayout = resolveAnimatedSidePanePanelLayout({ mobileOverlay });
+  // 2026-11-07（用户裁决）：swap 排列移除——tabs 容器恒为 order 3（聊天列=1 /
+  // 分隔条=2 / tabs 容器=3），不再有运行期对调。
   const handleBrowserPanelElementRef = useCallback(
     (element: HTMLDivElement | null) => {
       panelElementRef.current = element;
-      if (element) element.style.order = documentCenter ? "1" : "3";
+      if (element) element.style.order = "3";
     },
-    [documentCenter, panelElementRef],
+    [panelElementRef],
   );
   const hasReviewTab = visibleTabs.some((tab) => tab.type === "git");
   const canOpenSelectionSideConversation = shouldOfferSelectionSideConversation(
@@ -1388,15 +1378,13 @@ export function AnimatedSidePanePanel({
       : []),
     ...nativeOpenTabLauncherItems,
   ];
-  // U-04：caption 控制簇收敛为「角色开关 + swap + 窗控」，统一由
-  // WorkspaceSidePaneCaptionControls 渲染；「恢复聊天」方向箭头与固定右侧的
-  // 面板开关已并入角色开关（见 workspacePanelRoles.ts 与该组件头注释）。
+  // U-04：caption 控制簇统一由 WorkspaceSidePaneCaptionControls 渲染；
+  // 「恢复聊天」方向箭头与固定右侧的面板开关已并入角色开关（见
+  // workspacePanelRoles.ts 与该组件头注释）。2026-11-07：swap 移除（用户裁决）。
   const sidePaneCaptionControls =
     isVisible && !mobileOverlay ? (
       <WorkspaceSidePaneCaptionControls
         roleToggle={sidePaneRoleToggle}
-        documentCenter={documentCenter}
-        onToggleShellLayoutSwap={onToggleShellLayoutSwap}
         showWindowControls={showWindowControls}
         fullViewToggle={fullViewToggle ?? undefined}
       />

@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } fro
 import { FolderOpenIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { PreviewPane } from "@/PreviewPane.js";
 import { WorkspaceFileTree } from "@/workspace-file-tree/WorkspaceFileTree.js";
+import { useNativeFileEditing } from "@/spec-document/nativeFileEditing.js";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -38,6 +39,15 @@ export function FileManagerPane({
   ...previewProps
 }: FileManagerPaneProps) {
   const { intl } = useZCodeIntl();
+  const nativeEditing = useNativeFileEditing({
+    workspacePath: target.workspacePath,
+    workspaceIdentity: target.workspaceIdentity,
+    enabled:
+      !target.workspaceRemoteSessionId &&
+      source?.type === "text" &&
+      typeof source.path === "string",
+    path: source?.type === "text" && typeof source.path === "string" ? source.path : null,
+  });
   const [headerContainer, setHeaderContainer] = useState<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isNarrow, setIsNarrow] = useState(mobileOverlay);
@@ -182,7 +192,20 @@ export function FileManagerPane({
           className="min-h-0 min-w-0"
         >
           {source ? (
-            <PreviewPane {...previewProps} source={source} headerContainer={headerContainer} />
+            <PreviewPane
+              {...previewProps}
+              source={source}
+              headerContainer={headerContainer}
+              // 2026-11-07（用户裁决）：原生文件预览叠加 fork 的 U-18 编辑引擎
+              // （Edit → textarea + 500ms 自动落盘 + Save + CAS）。原生行为不动，
+              // 仅本地工作区的文本文档（.md/.txt/…）获得编辑入口；remote 与代码
+              // 文件保持原生只读。
+              documentActions={
+                nativeEditing.documentActions ?? previewProps.documentActions
+              }
+              sourceEditor={nativeEditing.sourceEditor ?? previewProps.sourceEditor}
+              requestMarkdownViewMode={nativeEditing.requestMarkdownViewMode}
+            />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-ui-base text-foreground-subtle">
               <FolderOpenIcon className="size-6" />

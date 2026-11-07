@@ -1,8 +1,3 @@
-import {
-  SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE,
-  SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_MAX_SIZE,
-} from "@/spec-document/specShellLayoutSwap.js";
-
 export const MIN_PREVIEW_PANE_HEAVY_CONTENT_VISIBLE_INLINE_SIZE_PX = 96;
 
 /** 「打开标签页」里内置的 Sites 入口打开的官方插件（只有一个 surface）。 */
@@ -71,13 +66,12 @@ export function shouldOfferSelectionSideConversation({
 }
 
 export function resolveAnimatedSidePanePanelLayout({
-  documentCenter = false,
   mobileOverlay,
 }: {
-  /** U-01 «Документ в центре」：tabs 容器移到中心，初始占工作区大头、可继续加宽。 */
-  documentCenter?: boolean;
   mobileOverlay: boolean;
 }) {
+  // 2026-11-07（用户裁决）：swap 排列（«Документ в центре»）整体移除，
+  // 恒为默认排列（聊天列=1 / tabs 容器=3）；documentCenter 分支随之删除。
   if (mobileOverlay) {
     return {
       collapsedSize: "0px",
@@ -85,16 +79,6 @@ export function resolveAnimatedSidePanePanelLayout({
       maxSize: "100%",
       minSize: "0px",
       useResizablePanel: false,
-    };
-  }
-
-  if (documentCenter) {
-    return {
-      collapsedSize: "0px",
-      defaultSize: SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_DEFAULT_SIZE,
-      maxSize: SPEC_SHELL_DOCUMENT_CENTER_SIDE_PANE_MAX_SIZE,
-      minSize: "240px",
-      useResizablePanel: true,
     };
   }
 

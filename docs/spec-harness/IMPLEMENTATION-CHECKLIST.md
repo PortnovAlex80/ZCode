@@ -1361,3 +1361,25 @@ Remove           : the U-04/U-05 side-swap arrangement («Чат в центре
                    Документ в центре», specShellLayoutSwap) — the movable chat
                    widget makes it redundant.
 ```
+
+2026-11-07 implementation (branch u20-document-search, per the ruling above):
+
+```text
+Swap removal     : specShellLayoutSwap reduced to the render-time order restatement
+                   (U-03 drag-direction guard); mode storage, toggle, layoutId
+                   namespaces, document-center sizing and the caption swap button
+                   are gone. Layout is fixed: chat column=1 / tabs container=3.
+                   Legacy localStorage keys become unread dead data (harmless).
+Native editing   : useNativeFileEditing overlays the U-18 engine (read on Edit,
+                   500 ms debounced autosave, Save button, expectedSha256 CAS with
+                   visible conflict, edit/view toggle) onto native file tabs via
+                   FileManagerPane → PreviewPane documentActions/sourceEditor;
+                   markdown sources request the Source view while editing (new
+                   requestMarkdownViewMode prop). Local workspaces + text
+                   documents (.md/.markdown/.txt/.rst) only; remote tabs and code
+                   files stay native read-only. In-memory buffer per tab (no second
+                   draft-slot truth; cross-reopen draft restore stays with U-18
+                   document tabs).
+Checks           : spec-document suites 30 files / 207 tests green (incl. 4 new
+                   nativeFileEditing cases); typecheck 0; lint 0 errors.
+```

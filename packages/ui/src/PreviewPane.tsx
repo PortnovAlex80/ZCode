@@ -510,6 +510,7 @@ export function PreviewPane({
   markdownSelectionTarget,
   sourceEditor,
   documentActions,
+  requestMarkdownViewMode,
   onDocumentComment,
   onDiscussFragment,
   preserveDocumentViewState = false,
@@ -526,6 +527,13 @@ export function PreviewPane({
   markdownSelectionTarget?: MarkdownSelectionTarget;
   sourceEditor?: ReactNode;
   documentActions?: ReactNode;
+  /**
+   * 2026-11-07（用户裁决，fork 叠加）：编辑叠加层要求把 markdown 视图切到
+   * Source（sourceEditor 只在 code 视图渲染）。null = 不干预（原生单选按钮
+   * 仍是唯一控制面）；提供值时在每次变化时同步内部状态，用户手动切回
+   * Preview 也照常生效（下一次 editing 变化才会再干预）。
+   */
+  requestMarkdownViewMode?: "preview" | "code" | null;
   onDocumentComment?: (params: {
     range: CodeCommentRange;
     selectedText: string;
@@ -591,6 +599,12 @@ export function PreviewPane({
     useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [markdownViewMode, setMarkdownViewMode] = useState<"preview" | "code">("preview");
+  // fork 编辑叠加（2026-11-07）：要求 Source 视图时同步内部状态；null 不干预。
+  useEffect(() => {
+    if (requestMarkdownViewMode && requestMarkdownViewMode !== markdownViewMode) {
+      setMarkdownViewMode(requestMarkdownViewMode);
+    }
+  }, [requestMarkdownViewMode, markdownViewMode]);
   const [svgViewMode, setSvgViewMode] = useState<"preview" | "code">("preview");
   const [wrapLongLinesOverride, setWrapLongLinesOverride] = useState<boolean | null>(null);
   const [breadcrumbMaskState, setBreadcrumbMaskState] = useState<BreadcrumbMaskState>("none");
