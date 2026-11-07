@@ -1447,3 +1447,30 @@ Fork revision    : 6d7d8458. Includes since 72552639: About fork-build line
 Prior kept       : -a9327d42, -d3457c0b, -588e99c3, -72552639
 Install          : scheduled silent install (/S) via schtasks; user relaunches.
 ```
+
+2026-11-07 branch build #5 → merged to dev: full fork experience round (source at
+08ae77f2, pushed to origin/dev a7cac49f..08ae77f2):
+
+```text
+Command          : Build-Installer.cmd (full; 23:17–23:36 local, exit 0)
+Artifact         : packages/desktop/dist/ZCode-3.17.2-win-x64.exe
+Size / SHA-256   : 215,725,852 bytes /
+                   f0427de856202fa2364df031cd94ce31cf81923ac567d36c1c7c030fc0bf2a3b
+                   (re-verified against the file on disk)
+Fork revision    : 08ae77f2. Since 6d7d8458: About fork-build line, visible
+                   Edit/Save/Discuss/Open-in-window controls on native tabs
+                   (incl. file-source gate + sourceEditor fix), text-compatible
+                   editing (any non-binary), markdown add-to-chat toolbar
+                   without an active session (f8597d82), discussion & side-chat
+                   detach into OS windows — nested popouts from child windows
+                   (8227cc90) + roster detach with owner handoff and side-chat
+                   window button (08ae77f2). Delegated agents; root re-verified:
+                   279 spec-document+detach tests green, typecheck 0, lint 0.
+Prior kept       : -a9327d42, -d3457c0b, -588e99c3, -72552639, -6d7d8458
+Push note        : branch-name push of u20-document-search is blocked by the
+                   pre-push gate base fallback to origin/master on non-dev
+                   branches (70 legacy unmanaged findings); all content is on
+                   origin/dev — known quirk, master promotion will clear it.
+Install          : scheduled silent install via GUI wrapper (wscript VBS:
+                   staged popups, no console) — user relaunches the app.
+```
