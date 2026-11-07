@@ -20,7 +20,7 @@ export interface NativeFileEditingApi {
 }
 
 /** Editable predicate: any path except the binary denylist; dotfiles count as text. */
-export function isTextCompatibleDocumentPath(path: string): boolean;
+export type IsTextCompatibleDocumentPath = (path: string) => boolean;
 
 /** Context-menu entry points: Discuss / open in a separate OS window / side conversation. */
 export type WorkspaceFileEntryAction =
