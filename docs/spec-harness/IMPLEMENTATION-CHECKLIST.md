@@ -1399,3 +1399,30 @@ Checks           : spec-document 30 files / 207 tests; typecheck 0; lint 0 error
 Notes            : build-only; installed-EXE live acceptance (Edit in a tree-opened
                    text document, autosave, swap button gone) stays with the user.
 ```
+
+2026-11-07 branch build #3: CORR-1/CORR-2 native-first corrections (source at
+72552639 on branch u20-document-search; NOT merged to dev; prior artifacts kept):
+
+```text
+Command          : Build-Installer.cmd (full; 20:21–20:41 local, exit 0)
+Artifact         : packages/desktop/dist/ZCode-3.17.2-win-x64.exe
+Size / SHA-256   : 215,724,506 bytes /
+                   06f0c17255ef68bdd98cb1a57f9a7fc777140e656e022b4a5ccca504fcbeffab
+                   (re-verified against the file on disk)
+Fork revision    : 72552639 (implementation a8315bba by delegated agent,
+                   reviewed by root: typecheck 0, lint 0 errors, spec-document
+                   207/207 re-run, no CJK in added code comments, toggle
+                   byte-identical to upstream, interception fully removed)
+Scope            : CORR-1 native file opening (fork tab interception and Open
+                   doc launcher item dismantled; right-click on text documents
+                   in the tree keeps Discuss / Open in window / Side
+                   conversation via spec-document/workspaceFileEntryPoints.ts)
+                   + CORR-2 original side-pane toggle (PanelRightClose/Open,
+                   upstream order). Conversation popout windows preserved
+                   (user live-confirmed; only their internal Open-doc button
+                   removed). Code comments in English per user instruction.
+Prior kept       : -a9327d42.exe (official), -d3457c0b.exe (U-20 trial),
+                   -588e99c3.exe (native-editing+swap-removal trial)
+Install          : scheduled silent install (/S) via schtasks after this
+                   commit; user relaunches the app manually.
+```
