@@ -362,3 +362,13 @@ export function useZCodeIntl(): IntlContextValue {
   }
   return ctx;
 }
+
+/**
+ * Optional intl access for surfaces that can render outside a provider host
+ * (embedded panes, integration fakes). Same pattern as useOptionalPlatform /
+ * useOptionalServices: callers supply an en-US fallback string instead of
+ * crashing when no provider is mounted.
+ */
+export function useOptionalZCodeIntl(): IntlContextValue | null {
+  return useContext(IntlContext);
+}

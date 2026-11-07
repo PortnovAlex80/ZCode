@@ -91,6 +91,21 @@ workspace, текстовое расширение, path-строка).
   (бинарные байты) → видимый отказ по UTF-8/NUL/2 МиБ, не «Unsupported text
   document»; list/search без изменений.
 
+### 2026-11-07 #5: discussion & side-chat detach lifted (A+B+C)
+
+Формулировка пользователя: снять ограничение «обсуждение заперто внутри окна»
+для плавающих обсуждений и мини-бокового диалога. Реализовано три опции:
+
+| Опция | Что сделано | Файлы |
+|---|---|---|
+| A | Вложенные conversation-popout'ы разрешены из дочерних окон: blanket-deny заменён тем же allowlist-полиси (`about:blank` + `zcode-conversation-*`), рекурсивное adopt-ядро даёт вложенным поверхностям те же guard'ы (меню, навигация, геометрия) | `desktop/src/main/nativeConversationPopouts.ts` (`adoptConversationPopoutSurface`), тесты `desktop/test/nativeConversationPopouts.test.ts` |
+| B | «Detach to window» в шапке обсуждения: `openConversationWindow(scope, thread.sessionId)`; владелец в документе отпускает токен (`releaseNativeDiscussionOwner`), пока окно открыто документ показывает read-only зеркало; закрытие окна ростера возвращает владение через тот же claim-путь; floating-панель ростера хостит освобождённую managed-дискуссию | `ui/src/spec-document/SpecDiscussionPane.tsx`, `ui/src/v4/WorkbenchPane.tsx` (SpecManagedSessionGuard), тесты `ui/src/spec-document/specDiscussionDetach.test.tsx` |
+| C | «Open in window» у бокового диалога выделения: плавающая иконка в tab-поверхности вызывает `openConversationWindow(scope, childSessionId)` с дедупликацией; пока окно открыто, tab показывает guard «already open» вместо второго composer'а, закрытие окна возвращает живую панель | `ui/src/app-shell/SelectionSideChatPane.tsx`, тесты `ui/src/app-shell/selectionSideChatWindow.test.tsx` |
+
+i18n: `specDiscussion.detachToWindow`, `specDiscussion.windowTitle`,
+`sideChat.openInWindow` (en-US + zh-CN). In-window float-режим обсуждений
+сохранён как есть (полезен внутри окна документа).
+
 ### CORR-2. Иконка/поведение тогла боковой панели — от ОРИГИНАЛА
 
 Сейчас: форк-компонент `WorkspaceSidePaneCaptionControls` + роль-тоггл с иконкой
@@ -197,6 +212,7 @@ controls], без `workspacePanelRoles`.
 | 2026-11-07 | **CORR-1/CORR-2 зарегистрированы** (этот документ): открытие файлов и тогл — вернуть к оригиналу |
 | 2026-11-07 | **CORR-1/CORR-2 реализованы** (ветка `u20-document-search`): нативный first-open, правый клик = форк-входы (обсуждение/окно/боковой диалог), caption = upstream-кластер; SpecDocumentPane — только документные окна/беседы |
 | 2026-11-07 | **UC-2 реализован** (ruling 2026-11-07 #4): правка любого не-бинарного текста (json/yaml/env/dotfiles/…), бинарный denylist + контент-guard'ы; whitelist — только для list/search; поверхность редактора заведена для `type: "file"`-источников |
+| 2026-11-07 | **Detach lifted (2026-11-07 #5, A+B+C)**: вложенные popout'ы из дочерних окон (A), «Detach to window» для обсуждений документов с handoff владения (B), «Open in window» для бокового диалога выделения (C) |
 
 ## 4. Открытая приёмка (сводно)
 

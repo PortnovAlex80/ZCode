@@ -166,7 +166,12 @@ function SpecManagedSessionGuard({
     <p>{intl.formatMessage({ id: "conversation.window.detached" })}</p>
     <Button variant="outline" onClick={() => focusConversationWindow(detached.id)}>{intl.formatMessage({ id: "conversation.window.show" })}</Button>
   </div>;
-  if (!owner) return children;
+  // A floating roster pane is an explicitly addressed host. When a document
+  // discussion was detached into it, the document side released its owner token
+  // (identity only remains), so the roster pane must host the session instead of
+  // bouncing it back to the document. An actively owned discussion still yields
+  // to its document surface.
+  if (!owner || (floating && !owner.ownerToken)) return children;
   return (
     <div
       className="flex min-h-0 flex-1 flex-col items-start gap-3 p-4"

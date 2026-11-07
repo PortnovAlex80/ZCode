@@ -1,8 +1,11 @@
-import { Trash2 } from "lucide-react";
+import { AppWindow, Trash2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button.js";
+import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { useOptionalServices } from "@/hooks/useServices.js";
+import { useOptionalZCodeIntl } from "@/i18n/IntlProvider.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
+import { getPathLeaf } from "@/lib/path.js";
 import { SessionPane } from "@/v4/SessionPane.js";
 import { V4PaneConversationProvider } from "@/v4/V4ConversationContext.js";
 import { useCombinedPresentationVisibility } from "@/v4/usePresentationVisibility.js";
@@ -10,6 +13,11 @@ import { useSpecDiscussion } from "./useSpecDiscussion.js";
 import { documentQuestion, type SpecThread } from "./specThread.js";
 import { ArtifactMetadataControls } from "./ArtifactMetadataControls.js";
 import { prepareArtifactText } from "./artifactContextSend.js";
+import {
+  findConversationWindow,
+  openConversationWindow,
+  useConversationWindows,
+} from "./conversationWindows.js";
 import {
   activateNativeDiscussionOwner,
   claimNativeDiscussionOwner,
@@ -45,6 +53,12 @@ export function SpecDiscussionPane({
 }) {
   const question = thread.questionDraft || "";
   const metadataService = useOptionalServices()?.projectMetadataService;
+  const platform = useOptionalPlatform();
+  // Embedded pane: it also renders in hosts without an intl provider, so i18n
+  // keys fall back to the same en-US strings used by the surrounding hardcoded UI.
+  const intl = useOptionalZCodeIntl()?.intl;
+  const message = (id: string, fallback: string) =>
+    intl ? intl.formatMessage({ id }) : fallback;
   // 复核 #2 发现 2/3：讨论可见性 = 宿主（本组件所在文档；popout realm 里即 popout
   // 文档）∧ 宿主侧 visible 判定。下方所有可见期消费（原生准备、telemetry、
   // presentation、interactionDialogs）统一使用该值；非激活保留线程由宿主传
@@ -119,6 +133,32 @@ export function SpecDiscussionPane({
     () => ({ workspacePath, ...(workspaceIdentity ? { workspaceIdentity } : {}) }),
     [workspacePath, workspaceIdentity],
   );
+  // Detach-to-window: the roster (zcode-conversation-windows) hosts this native
+  // session in its own OS window. While an entry exists the document side stays
+  // a read-only mirror; when that window closes the re-claim effect below takes
+  // ownership back through the same handoff path as the first claim.
+  const rosterEntries = useConversationWindows();
+  const detachedToWindow = useMemo(
+    () => Boolean(thread.sessionId && findConversationWindow(scope, thread.sessionId)),
+    [rosterEntries, scope, thread.sessionId],
+  );
+  const nativeDiscussionWindows = Boolean(platform?.openConversationPopout);
+  useEffect(() => {
+    if (!nativeOwnerSessionId || !ownerScope || detachedToWindow) return;
+    if (currentOwner !== null) return;
+    claimNativeDiscussionOwner(ownerScope, ownerToken, () => activateRef.current?.());
+  }, [currentOwner, detachedToWindow, nativeOwnerSessionId, ownerScope, ownerToken]);
+  const detachToWindow = () => {
+    if (!nativeDiscussionWindows || !thread.sessionId || !ownerScope) return;
+    // Release the document-side claim first so the roster window becomes the
+    // single interactive host instead of a second composer on this session.
+    releaseNativeDiscussionOwner(ownerScope, ownerToken);
+    openConversationWindow(
+      scope,
+      thread.sessionId,
+      `${getPathLeaf(thread.documentPath)} — ${message("specDiscussion.windowTitle", "Discussion")}`,
+    );
+  };
   const nativeInteractive =
     !unavailable &&
     !thread.pending &&
@@ -162,20 +202,37 @@ export function SpecDiscussionPane({
               </>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Delete discussion"
-            title={
-              native.removeBlockedReason
-                ? `Delete discussion: ${native.removeBlockedReason}`
-                : "Delete discussion"
-            }
-            disabled={ownedElsewhere || !native.canRemove}
-            onClick={() => setConfirmDelete(true)}
-          >
-            <Trash2 />
-          </Button>
+          <div className="flex items-center gap-1">
+            {nativeDiscussionWindows ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={message("specDiscussion.detachToWindow", "Open discussion in window")}
+                title={message("specDiscussion.detachToWindow", "Open discussion in window")}
+                data-discussion-detach-control={thread.sessionId ?? undefined}
+                /* Only the interactive owner may detach: a read-only mirror or a
+                   pending command must not move a session it does not own. */
+                disabled={!nativeInteractive}
+                onClick={detachToWindow}
+              >
+                <AppWindow />
+              </Button>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Delete discussion"
+              title={
+                native.removeBlockedReason
+                  ? `Delete discussion: ${native.removeBlockedReason}`
+                  : "Delete discussion"
+              }
+              disabled={ownedElsewhere || !native.canRemove}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 />
+            </Button>
+          </div>
         </div>
         <blockquote className="max-h-24 overflow-auto border-l-2 border-border pl-2 text-ui-sm">
           {thread.anchor.quote}
@@ -232,6 +289,14 @@ export function SpecDiscussionPane({
           {unavailable || nativeOwnerSessionId !== thread.sessionId ? (
             <p role="alert" className="p-3 text-ui-sm text-destructive">
               This native discussion is unavailable. Its saved binding is retained.
+            </p>
+          ) : null}
+          {detachedToWindow ? (
+            <p role="status" className="px-3 pt-2 text-ui-xs text-foreground-subtle">
+              {message(
+                "conversation.window.detached",
+                "This conversation is open in a separate window.",
+              )}
             </p>
           ) : null}
           <V4PaneConversationProvider scope={scope}>
