@@ -2,7 +2,9 @@ import { SelectionActionMenu } from "@/v4/SelectionActionMenu.js";
 import {
   buildSelectionSideChatKey,
   getSelectionSideChatOpenState,
+  getSelectionSideChatOpenStateForWorkspace,
   requestSelectionSideChatOpen,
+  requestSelectionSideChatOpenForWorkspace,
   subscribeSelectionSideChatRuntime,
 } from "@/lib/selectionSideChatRuntime.js";
 import { useCallback, useSyncExternalStore, type RefObject } from "react";
@@ -61,12 +63,25 @@ export function MarkdownSelectionTooltip({
     scopeKey,
     observeSelectionChange: true,
   });
+  // Side-chat availability (2026-11-07, user report): the preview selection
+  // target carries sessionId: null when no main conversation is active. The
+  // action used to be disabled unconditionally in that state, but the draft
+  // SessionPane registers a workspace opener under its prewarmed session id —
+  // an id the preview can never know. So with no explicit session we resolve
+  // by workspaceKey instead: the side conversation is created as a child of
+  // whatever parent session the workspace's registered opener owns. Without
+  // any opener the action stays disabled with its explanatory title; the
+  // toolbar itself never hides. With an active session the exact
+  // (workspace, sessionId) key is used exactly as before.
   const sideKey = target.sessionId
     ? buildSelectionSideChatKey(target.workspaceKey, target.sessionId)
     : null;
   const sideState = useSyncExternalStore(
     subscribeSelectionSideChatRuntime,
-    () => (sideKey ? getSelectionSideChatOpenState(sideKey) : "unavailable"),
+    () =>
+      sideKey
+        ? getSelectionSideChatOpenState(sideKey)
+        : getSelectionSideChatOpenStateForWorkspace(target.workspaceKey),
     () => "unavailable",
   );
   if (!state) return null;
@@ -103,6 +118,10 @@ export function MarkdownSelectionTooltip({
             }
           : undefined
       }
+      // "Add to chat" without an active conversation routes to the workspace
+      // draft scope (targetSessionId: null + draftScopeKey); the mounted draft
+      // composer subscribes with the same scope key, so the reference lands in
+      // the workspace draft composer input — matching composer behavior.
       onAddToCurrentTask={() => {
         dispatchConversationSelectionAdd({
           targetSessionId: target.sessionId,
@@ -113,7 +132,10 @@ export function MarkdownSelectionTooltip({
         close();
       }}
       onAskInSideChat={() => {
-        if (sideKey && requestSelectionSideChatOpen(sideKey, createReference())) close();
+        const opened = sideKey
+          ? requestSelectionSideChatOpen(sideKey, createReference())
+          : requestSelectionSideChatOpenForWorkspace(target.workspaceKey, createReference());
+        if (opened) close();
       }}
     />
   );

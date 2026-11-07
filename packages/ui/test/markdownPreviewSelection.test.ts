@@ -20,6 +20,7 @@ vi.mock("@/components/ai-elements/message.js", () => ({
   MessageResponse: ({ children }: { children: string }) => createElement("p", null, children),
 }));
 const target = { sessionId: null, workspaceKey: "ssh:first:/workspace" };
+const draftScopeKey = JSON.stringify(["ns", "host:first", null]);
 const reference: ConversationSelectionReference = {
   id: "md-1",
   contentType: "markdown",
@@ -28,7 +29,11 @@ const reference: ConversationSelectionReference = {
   path: "/workspace/a.md",
   text: "Selected paragraph",
 };
-function preview(content = "Selected paragraph", sessionId: string | null = null) {
+function preview(
+  content = "Selected paragraph",
+  sessionId: string | null = null,
+  scopeKey?: string,
+) {
   return createElement(
     ZCodeIntlProvider,
     { initialLocale: "en-US" },
@@ -37,7 +42,11 @@ function preview(content = "Selected paragraph", sessionId: string | null = null
       sourceKey: "/workspace/a.md",
       sourceTitle: "a.md",
       sourcePath: "/workspace/a.md",
-      selectionTarget: { ...target, sessionId },
+      selectionTarget: {
+        ...target,
+        sessionId,
+        ...(scopeKey ? { draftScopeKey: scopeKey } : {}),
+      },
     }),
   );
 }
@@ -62,6 +71,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   window.getSelection()?.removeAllRanges();
   setConversationSelectionReferenceScope(null, target.workspaceKey, []);
+  setConversationSelectionReferenceScope(null, target.workspaceKey, [], draftScopeKey);
 });
 describe("Markdown preview selections", () => {
   it("区分 Markdown 来源，去重并发送路径与选中文字", () => {
@@ -162,5 +172,87 @@ describe("Markdown preview selections", () => {
     } finally {
       unregister();
     }
+  });
+
+  // 2026-11-07 user report: the preview toolbar must stay usable with no active
+  // conversation. The workspace-scoped opener fallback routes the side chat to
+  // the draft pane's prewarm parent instead of disabling the action outright.
+  it("no active session: toolbar renders and side chat uses the workspace opener (draft prewarm parent)", async () => {
+    const open = vi.fn(async () => {});
+    const unregister = registerSelectionSideChatOpener(
+      buildSelectionSideChatKey(target.workspaceKey, "unpromoted-prewarm"),
+      open,
+      true,
+    );
+    const view = render(preview());
+    try {
+      await selectText();
+      // Toolbar stays available without an active session (Add to chat present).
+      expect(screen.getByRole("button", { name: "Add to chat" })).toBeTruthy();
+      const sideButton = screen.getByRole("button", {
+        name: "Add in side chat",
+      }) as HTMLButtonElement;
+      expect(sideButton.disabled).toBe(false);
+      fireEvent.click(sideButton);
+      await waitFor(() =>
+        expect(open).toHaveBeenCalledWith(
+          expect.objectContaining({ contentType: "markdown", text: reference.text }),
+        ),
+      );
+    } finally {
+      unregister();
+      view.unmount();
+    }
+  });
+  it("no active session: a foreign workspace opener and a blocked opener keep the side action disabled with a title", async () => {
+    const foreign = registerSelectionSideChatOpener(
+      buildSelectionSideChatKey("ssh:second:/workspace", "other-parent"),
+      vi.fn(async () => {}),
+      true,
+    );
+    const view = render(preview());
+    await selectText();
+    const unavailable = screen.getByRole("button", { name: "Add in side chat" }) as HTMLButtonElement;
+    expect(unavailable.disabled).toBe(true);
+    expect(unavailable.title).toBe(
+      "Use an editable main task that supports side conversations.",
+    );
+    foreign();
+    view.rerender(preview());
+    await selectText();
+    // Blocked opener of the same workspace: still disabled, but with the
+    // blocking reason instead of the unavailable reason.
+    const blocked = registerSelectionSideChatOpener(
+      buildSelectionSideChatKey(target.workspaceKey, "blocked-parent"),
+      vi.fn(async () => {}),
+      true,
+      true,
+    );
+    try {
+      view.rerender(preview());
+      await selectText();
+      const blockedButton = screen.getByRole("button", {
+        name: "Add in side chat",
+      }) as HTMLButtonElement;
+      expect(blockedButton.disabled).toBe(true);
+      expect(blockedButton.title).toBe(
+        "Resolve pending requests in the main task or side conversation first.",
+      );
+    } finally {
+      blocked();
+      view.unmount();
+    }
+  });
+  it("no active session: Add to chat routes to the workspace draft scope via draftScopeKey", async () => {
+    const view = render(preview("Selected paragraph", null, draftScopeKey));
+    await selectText();
+    fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+    // The draft composer subscribes with (sessionId: null, workspaceKey,
+    // draftScopeKey); the reference must land in exactly that scope.
+    expect(
+      getConversationSelectionReferenceScope(null, target.workspaceKey, draftScopeKey),
+    ).toMatchObject([{ text: reference.text, contentType: "markdown" }]);
+    expect(getConversationSelectionReferenceScope(null, target.workspaceKey)).toEqual([]);
+    view.unmount();
   });
 });

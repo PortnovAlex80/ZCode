@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   getSelectionSideChatOpenState,
+  getSelectionSideChatOpenStateForWorkspace,
   buildSelectionSideChatKey,
   clearSelectionSideChat,
   createSelectionSideChat,
   isSelectionSideChatBlocked,
   registerSelectionSideChatOpener,
   requestSelectionSideChatOpen,
+  requestSelectionSideChatOpenForWorkspace,
   setSelectionSideChatBlocked,
 } from "../src/lib/selectionSideChatRuntime.js";
 
@@ -105,5 +107,62 @@ describe("selection side chat renderer runtime", () => {
     expect(requestSelectionSideChatOpen(key)).toBe(true);
     unregisterBlocked();
     expect(getSelectionSideChatOpenState(key)).toBe("unavailable");
+  });
+
+  // Workspace-scoped fallback: a null-session markdown selection target cannot
+  // build the exact (workspace, parent) key; it resolves any opener of the
+  // workspace instead (the draft pane registers under its prewarm parent).
+  it("workspace fallback routes sessionId-less targets to the workspace opener, focused first", () => {
+    const reference = {
+      id: "md-ws",
+      contentType: "markdown" as const,
+      sourceKey: "/ws/a.md",
+      sourceTitle: "a.md",
+      text: "quote",
+    };
+    const background = vi.fn(async () => {});
+    const focused = vi.fn(async () => {});
+    const foreign = vi.fn(async () => {});
+    const unregisterBackground = registerSelectionSideChatOpener(
+      buildSelectionSideChatKey("ssh:first:/ws", "prewarm-parent"),
+      background,
+      false,
+    );
+    const unregisterForeign = registerSelectionSideChatOpener(
+      buildSelectionSideChatKey("ssh:second:/ws", "other-parent"),
+      foreign,
+      true,
+    );
+    expect(getSelectionSideChatOpenStateForWorkspace("ssh:first:/ws")).toBe("ready");
+    expect(requestSelectionSideChatOpenForWorkspace("ssh:first:/ws", reference)).toBe(true);
+    expect(background).toHaveBeenCalledWith(reference);
+    expect(foreign).not.toHaveBeenCalled();
+
+    const unregisterFocused = registerSelectionSideChatOpener(
+      buildSelectionSideChatKey("ssh:first:/ws", "live-parent"),
+      focused,
+      true,
+    );
+    expect(requestSelectionSideChatOpenForWorkspace("ssh:first:/ws")).toBe(true);
+    expect(focused).toHaveBeenCalledWith();
+    expect(background).toHaveBeenCalledTimes(1);
+
+    unregisterFocused();
+    unregisterBackground();
+    expect(getSelectionSideChatOpenStateForWorkspace("ssh:first:/ws")).toBe("unavailable");
+    expect(requestSelectionSideChatOpenForWorkspace("ssh:first:/ws", reference)).toBe(false);
+    // The foreign workspace opener must never be routed to.
+    expect(foreign).not.toHaveBeenCalled();
+    unregisterForeign();
+  });
+  it("workspace fallback reports blocked when the only workspace opener is reference-blocked", () => {
+    const unregister = registerSelectionSideChatOpener(
+      buildSelectionSideChatKey("ssh:blocked:/ws", "parent"),
+      vi.fn(async () => {}),
+      true,
+      true,
+    );
+    expect(getSelectionSideChatOpenStateForWorkspace("ssh:blocked:/ws")).toBe("blocked");
+    unregister();
   });
 });

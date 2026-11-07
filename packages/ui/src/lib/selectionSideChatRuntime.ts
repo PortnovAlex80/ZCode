@@ -85,15 +85,49 @@ export function registerSelectionSideChatOpener(
   };
 }
 
+function pickPreferredOpener(candidates: SelectionSideChatOpenerEntry[]) {
+  return candidates.find((candidate) => candidate.focused) ?? candidates[0];
+}
+
 function getSelectionSideChatOpener(key: string): SelectionSideChatOpenerEntry | undefined {
   const scoped = openers.get(key);
   if (!scoped?.size) return undefined;
-  const candidates = Array.from(scoped.values());
-  return candidates.find((candidate) => candidate.focused) ?? candidates[0];
+  return pickPreferredOpener(Array.from(scoped.values()));
+}
+
+function getSelectionSideChatOpenerForWorkspace(
+  workspaceKey: string,
+): SelectionSideChatOpenerEntry | undefined {
+  // Workspace-scoped fallback: a markdown preview selection target carries
+  // sessionId: null when no main conversation is active, so it cannot build the
+  // exact (workspace, parentSessionId) key. The draft SessionPane still registers
+  // an opener under its prewarmed session id in that state; route to it instead
+  // of disabling the side-chat action outright. Focused entry wins, mirroring
+  // the exact-key lookup.
+  const prefix = `${workspaceKey}\0`;
+  const candidates: SelectionSideChatOpenerEntry[] = [];
+  for (const [key, scoped] of openers) {
+    if (!key.startsWith(prefix)) continue;
+    candidates.push(...scoped.values());
+  }
+  if (!candidates.length) return undefined;
+  return pickPreferredOpener(candidates);
 }
 
 export function getSelectionSideChatOpenState(key: string): "ready" | "blocked" | "unavailable" {
   const target = getSelectionSideChatOpener(key);
+  return !target ? "unavailable" : target.referenceBlocked ? "blocked" : "ready";
+}
+
+/**
+ * Same state contract as getSelectionSideChatOpenState, but resolves any opener
+ * registered under the workspace (any parent session id). Used by markdown
+ * preview selections whose target has no active session id.
+ */
+export function getSelectionSideChatOpenStateForWorkspace(
+  workspaceKey: string,
+): "ready" | "blocked" | "unavailable" {
+  const target = getSelectionSideChatOpenerForWorkspace(workspaceKey);
   return !target ? "unavailable" : target.referenceBlocked ? "blocked" : "ready";
 }
 
@@ -102,6 +136,17 @@ export function requestSelectionSideChatOpen(
   reference?: ConversationSelectionReference,
 ): boolean {
   const target = getSelectionSideChatOpener(key);
+  if (!target || (reference && target.referenceBlocked)) return false;
+  if (reference) void target.open(reference);
+  else void target.open();
+  return true;
+}
+
+export function requestSelectionSideChatOpenForWorkspace(
+  workspaceKey: string,
+  reference?: ConversationSelectionReference,
+): boolean {
+  const target = getSelectionSideChatOpenerForWorkspace(workspaceKey);
   if (!target || (reference && target.referenceBlocked)) return false;
   if (reference) void target.open(reference);
   else void target.open();

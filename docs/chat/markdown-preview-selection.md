@@ -46,6 +46,10 @@ MPS06（accepted）：Markdown 选区通过 workspaceKey + 当前主任务 sessi
 
 MPS07（accepted）：尚无主 session、只读/手机 viewport 或主控制器未就绪时禁用辅助动作并显示本地化说明；主任务或目标辅助对话存在阻塞交互时禁用引用动作。原「添加到当前任务」保持可用。既有无引用 launcher 仍强制新建，不受引用动作的阻塞状态影响。
 
+MPS10（accepted，2026-11-07 用户裁决：选区浮层必须可靠可用）：无 active task（目标 sessionId 为 null）时不再无条件禁用辅助动作，改为按 workspaceKey 解析任意已注册 opener（草稿 SessionPane 以 prewarm 父会话 id 注册，预览无法得知该 id）；无任何 opener 时维持禁用加说明，浮层本身永不隐藏。有主任务时仍按 (workspaceKey, sessionId) 精确路由，行为不变；跨 workspace opener 不解析。「添加到当前任务」无 active task 时继续路由到工作区 draft scope（draftScopeKey），由已挂载的草稿 composer 承接，与输入框行为一致。预览侧仍然只在 Preview 视图提供（Source/代码视图与非 Markdown 文件沿用原交互），且 workspaceKey 不匹配（跨 workspace 来源）时不提供入口，这两条为正确性边界，不属于本条放宽范围。
+
+验证（2026-11-07）：`markdownPreviewSelection` 新增无 active task 的 workspace opener 路由、跨 workspace/阻塞禁用与 draftScopeKey draft scope 落点共 3 条用例；`selectionSideChatRuntime` 新增 workspace fallback 路由（focused 优先、跨 workspace 不解析、blocked 上报）2 条用例。相关 4 个套件 37 条与 `packages/ui/src/spec-document` 全量 32 文件 219 条通过；`pnpm typecheck`、`pnpm lint`（0 error）、`pnpm architecture:check --changed`（0 新增）通过。手机真机与真实远程 attachment 链路未补测。
+
 2026-09-07 合并复审：`0ed79bae571` 人工适配 SessionPane 时漏接了注册回调的引用参数及阻塞标记。恢复上述 MPS06/MPS07，不恢复旧 Provider Store、发送前 Registry 同步或账号批量切模。必须验证真实 SessionPane 注册的回调，而不只测试 Runtime helper；沿用正式 Markdown E2E 验证辅助输入框实际得到引用。Workspace Hook 的软审核不计入阻塞交互。
 
 ```text
