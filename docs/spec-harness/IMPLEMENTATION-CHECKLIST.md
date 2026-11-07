@@ -1426,3 +1426,24 @@ Prior kept       : -a9327d42.exe (official), -d3457c0b.exe (U-20 trial),
 Install          : scheduled silent install (/S) via schtasks after this
                    commit; user relaunches the app manually.
 ```
+
+2026-11-07 branch build #4: full native-first fork experience (source at 6d7d8458
+on branch u20-document-search; NOT merged to dev; prior artifacts kept):
+
+```text
+Command          : Build-Installer.cmd (full; 21:41–21:55 local, exit 0)
+Artifact         : packages/desktop/dist/ZCode-3.17.2-win-x64.exe
+Size / SHA-256   : 215,724,237 bytes /
+                   2586bde8125985816fe730b0db4aae72d0e3f91ee7e814a82ae893c7749d66a5
+                   (re-verified against the file on disk)
+Fork revision    : 6d7d8458. Includes since 72552639: About fork-build line
+                   (98a4768d), visible Edit/Save/Discuss/Open-in-window controls
+                   on native file tabs + file-source gate fix + sourceEditor for
+                   file-type sources (309b9b07), text-compatible editing for any
+                   non-binary document with binary denylist + content guards,
+                   listing scope unchanged (6d7d8458). Implementation by
+                   delegated agents; root re-verified: typecheck 0, lint 0
+                   errors, spec-document suites 236/236 green.
+Prior kept       : -a9327d42, -d3457c0b, -588e99c3, -72552639
+Install          : scheduled silent install (/S) via schtasks; user relaunches.
+```
