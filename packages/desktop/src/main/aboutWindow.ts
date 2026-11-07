@@ -5,6 +5,12 @@ interface CustomAboutDialogHtmlInput {
   optimizationLine: string;
   versionLabel: string;
   okButtonLabel: string;
+  /**
+   * Fork addition (2026-11-07, user request): identifies the exact fork build
+   * (short commit + build date). Empty string hides the line (dev builds where
+   * the compile-time commit constant is "unknown").
+   */
+  forkBuildLine?: string;
 }
 
 function escapeHtml(value: string): string {
@@ -127,6 +133,13 @@ export function createCustomAboutDialogHtml(input: CustomAboutDialogHtmlInput): 
         color: #303033;
       }
 
+      /* Fork build identifier: smaller and muted so the upstream layout keeps
+         its hierarchy while the exact build stays identifiable at a glance. */
+      .fork-build {
+        font-size: 11.5px;
+        color: color-mix(in oklab, currentColor 62%, transparent);
+      }
+
 
       .ok-button {
         width: 100%;
@@ -196,6 +209,7 @@ export function createCustomAboutDialogHtml(input: CustomAboutDialogHtmlInput): 
             ${escapeHtml(input.versionLabel)} ${escapeHtml(input.appVersion)}
           </h1>
           <div class="meta">
+            ${input.forkBuildLine ? `<div class="fork-build">${escapeHtml(input.forkBuildLine)}</div>` : ""}
             ${input.optimizationLine ? `<div>${escapeHtml(input.optimizationLine)}</div>` : ""}
             <div>${escapeHtml(input.copyright)}</div>
           </div>

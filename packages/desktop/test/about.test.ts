@@ -5,7 +5,9 @@ import {
   formatAboutCopyright,
   formatAboutDetail,
   formatAboutOptimizationLine,
+  formatForkBuildLine,
 } from "../src/main/about.js";
+import { createCustomAboutDialogHtml } from "../src/main/aboutWindow.js";
 
 describe("about", () => {
   const appleSiliconSnapshot = createAboutSnapshot({
@@ -79,5 +81,55 @@ describe("about", () => {
   it("版权年份可按调用方传入覆盖", () => {
     expect(formatAboutCopyright(2027, "en-US")).toBe("Copyright © 2027 ZCode.");
     expect(formatAboutCopyright(2027, "zh-CN")).toBe("版权所有 © 2027 ZCode。");
+  });
+});
+
+// Fork addition (2026-11-07, user request): exact build identification.
+describe("formatForkBuildLine", () => {
+  it("formats commit id with the date part of an ISO build time", () => {
+    expect(formatForkBuildLine({ buildCommitId: "abc1234", buildTime: "2026-11-07T17:28:09Z" })).toBe(
+      "fork build abc1234 · 2026-11-07",
+    );
+  });
+
+  it("truncates space-separated build times to the date part", () => {
+    expect(formatForkBuildLine({ buildCommitId: "72552639", buildTime: "2026-11-07 17:28:09" })).toBe(
+      "fork build 72552639 · 2026-11-07",
+    );
+  });
+
+  it("returns an empty string for dev builds without an embedded commit", () => {
+    expect(formatForkBuildLine({ buildCommitId: "unknown", buildTime: "2026-11-07T17:28:09Z" })).toBe(
+      "",
+    );
+  });
+});
+
+describe("createCustomAboutDialogHtml fork build line", () => {
+  const baseInput = {
+    applicationName: "ZCode Desktop App",
+    appVersion: "3.17.2",
+    copyright: "Copyright © 2026 ZCode.",
+    optimizationLine: "",
+    versionLabel: "version",
+    okButtonLabel: "OK",
+  };
+
+  it("renders forkBuildLine escaped inside the fork-build element", () => {
+    const html = createCustomAboutDialogHtml({
+      ...baseInput,
+      forkBuildLine: 'fork build <b>"abc"</b> · 2026-11-07',
+    });
+
+    expect(html).toContain(
+      '<div class="fork-build">fork build &lt;b&gt;&quot;abc&quot;&lt;/b&gt; · 2026-11-07</div>',
+    );
+    expect(html).not.toContain('fork build <b>"abc"</b>');
+  });
+
+  it("omits the fork-build element when forkBuildLine is empty", () => {
+    const html = createCustomAboutDialogHtml({ ...baseInput, forkBuildLine: "" });
+
+    expect(html).not.toContain('<div class="fork-build">');
   });
 });

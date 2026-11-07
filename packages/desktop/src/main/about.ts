@@ -212,6 +212,24 @@ export function formatAboutOptimizationLine(
   return "";
 }
 
+/**
+ * Fork addition (2026-11-07, user request): exact build identification.
+ * Formats the fork build line shown in the About dialog, e.g.
+ * "fork build 72552639 · 2026-11-07". Returns "" for dev builds where the
+ * embedded commit constant is "unknown" so the line stays hidden.
+ */
+export function formatForkBuildLine(
+  snapshot: Pick<AboutSnapshot, "buildCommitId" | "buildTime">,
+): string {
+  if (snapshot.buildCommitId === "unknown") {
+    return "";
+  }
+
+  // buildTime is ISO-like ("2026-11-07T17:28:09Z"); keep only the date part.
+  const [buildDate] = snapshot.buildTime.split(/[T ]/, 1);
+  return `fork build ${snapshot.buildCommitId} · ${buildDate ?? snapshot.buildTime}`;
+}
+
 export function createSystemAboutPanelOptions(
   snapshot: AboutSnapshot,
   year = new Date().getFullYear(),
@@ -282,6 +300,7 @@ export async function showAboutDialog(
         optimizationLine: formatAboutOptimizationLine(snapshot, locale),
         versionLabel: aboutMessages.versionLabel,
         okButtonLabel: aboutMessages.okButtonLabel,
+        forkBuildLine: formatForkBuildLine(snapshot),
       }),
     )}`,
   );
