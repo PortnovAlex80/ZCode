@@ -1383,3 +1383,19 @@ Native editing   : useNativeFileEditing overlays the U-18 engine (read on Edit,
 Checks           : spec-document suites 30 files / 207 tests green (incl. 4 new
                    nativeFileEditing cases); typecheck 0; lint 0 errors.
 ```
+
+2026-11-07 branch build #2: native editing overlay + swap removal (source at
+588e99c3 on branch u20-document-search; NOT merged to dev; prior artifacts kept):
+
+```text
+Command          : Build-Installer.cmd (full; 18:08–18:24 local, exit 0)
+Artifact         : packages/desktop/dist/ZCode-3.17.2-win-x64.exe
+Size / SHA-256   : 215,725,371 bytes /
+                   9d1b66cc4099105cd5f104363fa8de0a8d4ccc19f0d8c7745604ee52d7ce55b9
+Fork revision    : 588e99c3; packaged version 3.17.2
+Prior kept       : ZCode-3.17.2-win-x64-a9327d42.exe (official 3.17.2) and
+                   ZCode-3.17.2-win-x64-d3457c0b.exe (U-20 picker-search trial)
+Checks           : spec-document 30 files / 207 tests; typecheck 0; lint 0 errors
+Notes            : build-only; installed-EXE live acceptance (Edit in a tree-opened
+                   text document, autosave, swap button gone) stays with the user.
+```
