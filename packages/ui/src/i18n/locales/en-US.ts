@@ -1651,6 +1651,7 @@ const enUS: Record<string, string> = {
   "sidePane.fullView.minimize": "Minimize editor",
   "sidePane.fullView.restore": "Restore editor",
   "sidePane.fullView.openConversation": "Open in full view",
+  "sidePane.fullView.openWindow": "Open in separate window",
   "sidePane.fullView.handle": "Drag to move · Click for options",
   "sidePane.fullView.expandMessages": "Expand messages",
   "sidePane.fullView.collapseMessages": "Collapse messages",

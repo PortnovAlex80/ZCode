@@ -1511,6 +1511,7 @@ const zhCN: Record<string, string> = {
   "sidePane.fullView.minimize": "最小化编辑器",
   "sidePane.fullView.restore": "展开编辑器",
   "sidePane.fullView.openConversation": "在完整视图中打开",
+  "sidePane.fullView.openWindow": "在独立窗口中打开",
   "sidePane.fullView.handle": "拖动以移动 · 点击查看选项",
   "sidePane.fullView.expandMessages": "展开消息",
   "sidePane.fullView.collapseMessages": "收起消息",

@@ -23,6 +23,7 @@ import {
   Maximize2Icon,
   MessageCircleIcon,
   MinusIcon,
+  PictureInPicture2Icon,
   XIcon,
 } from "lucide-react";
 import {
@@ -36,6 +37,7 @@ import {
   TID_SIDE_PANE_FULL_VIEW_HOST,
   TID_SIDE_PANE_FULL_VIEW_MENU_MINIMIZE,
   TID_SIDE_PANE_FULL_VIEW_MENU_OPEN_CONVERSATION,
+  TID_SIDE_PANE_FULL_VIEW_MENU_OPEN_WINDOW,
   TID_SIDE_PANE_FULL_VIEW_MINIMIZE,
   TID_SIDE_PANE_FULL_VIEW_RUNNING,
   TID_V4_COMPOSER_INPUT,
@@ -108,6 +110,7 @@ export function SidePaneFullViewConversationHost({
   onFloatingChange,
   onAnchorChange,
   onOpenConversation,
+  onOpenInWindow,
   children,
 }: {
   mode: SidePaneFullViewHostMode;
@@ -117,6 +120,13 @@ export function SidePaneFullViewConversationHost({
   onFloatingChange: (floating: SidePaneFullViewFloating) => void;
   onAnchorChange: (anchor: FloatingAnchor) => void;
   onOpenConversation: () => void;
+  /**
+   * Detach the current task conversation into a native popout window (2026-11-08,
+   * user request: float across all screens, not just inside the app window).
+   * Optional: the menu item renders only when provided — web remote shells and
+   * draft conversations (no taskId) have no detach path.
+   */
+  onOpenInWindow?: () => void;
   children: ReactNode;
 }) {
   const { intl } = useZCodeIntl();
@@ -543,6 +553,15 @@ export function SidePaneFullViewConversationHost({
                       <Maximize2Icon className="size-4" />
                       {intl.formatMessage({ id: "sidePane.fullView.openConversation" })}
                     </DropdownMenuItem>
+                    {onOpenInWindow ? (
+                      <DropdownMenuItem
+                        data-testid={TID_SIDE_PANE_FULL_VIEW_MENU_OPEN_WINDOW}
+                        onSelect={onOpenInWindow}
+                      >
+                        <PictureInPicture2Icon className="size-4" />
+                        {intl.formatMessage({ id: "sidePane.fullView.openWindow" })}
+                      </DropdownMenuItem>
+                    ) : null}
                     <DropdownMenuItem
                       data-testid={TID_SIDE_PANE_FULL_VIEW_MENU_MINIMIZE}
                       onSelect={handleMinimize}

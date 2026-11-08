@@ -934,6 +934,49 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
     () => fullViewController?.setSurface("conversation"),
     [fullViewController],
   );
+  // Detach the active task conversation into a native popout window (2026-11-08,
+  // user request: let the full-view floating widget float across all screens).
+  // Shared by the chat column popout icon and the floating widget menu. The
+  // managed discussion owner guard runs first so an existing window hosting the
+  // same session is focused instead of opening a duplicate roster entry.
+  const canOpenConversationInWindow =
+    Boolean(isDesktop) &&
+    !isWebRemoteControlShell &&
+    Boolean(activeTaskId) &&
+    Boolean(platform.openConversationPopout);
+  const handleOpenConversationInWindow = useCallback(() => {
+    if (!activeTaskId || !platform.openConversationPopout) return;
+    if (
+      activateManagedNativeDiscussionOwner(
+        workspaceAbsPath,
+        workspaceIdentity,
+        activeTaskId,
+      )
+    )
+      return;
+    openConversationWindow(
+      {
+        workspacePath: workspaceAbsPath,
+        ...(workspaceIdentity ? { workspaceIdentity } : {}),
+        ...(workspaceRemoteSessionId
+          ? {
+              remoteSessionId: workspaceRemoteSessionId,
+            }
+          : {}),
+      },
+      activeTaskId,
+      `${getPathLeaf(workspaceAbsPath)} — ${activeTaskTitle || "Чат"}`,
+      Boolean(workspaceReadOnlyReason),
+    );
+  }, [
+    activeTaskId,
+    platform,
+    workspaceAbsPath,
+    workspaceIdentity,
+    workspaceRemoteSessionId,
+    activeTaskTitle,
+    workspaceReadOnlyReason,
+  ]);
   const fullViewConversationTitle =
     activeTaskTitle?.trim() || intl.formatMessage({ id: "taskList.untitled" });
   // 完整视图保留左侧任务列表与左上角按钮组，侧栏显隐只由用户开关决定。
@@ -3019,6 +3062,9 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                 onFloatingChange={handleFullViewFloatingChange}
                 onAnchorChange={handleFloatingAnchorChange}
                 onOpenConversation={handleOpenFullViewConversation}
+                onOpenInWindow={
+                  canOpenConversationInWindow ? handleOpenConversationInWindow : undefined
+                }
               >
                 <ResizablePanelGroup
                   orientation="vertical"
@@ -3130,30 +3176,10 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                               activeTaskId && platform.openConversationPopout
                                 ? {
                                     ...chatPopout,
-                                    toggle: () => {
-                                      if (
-                                        activateManagedNativeDiscussionOwner(
-                                          workspaceAbsPath,
-                                          workspaceIdentity,
-                                          activeTaskId,
-                                        )
-                                      )
-                                        return;
-                                      openConversationWindow(
-                                        {
-                                          workspacePath: workspaceAbsPath,
-                                          ...(workspaceIdentity ? { workspaceIdentity } : {}),
-                                          ...(workspaceRemoteSessionId
-                                            ? {
-                                                remoteSessionId: workspaceRemoteSessionId,
-                                              }
-                                            : {}),
-                                        },
-                                        activeTaskId,
-                                        `${getPathLeaf(workspaceAbsPath)} — ${activeTaskTitle || "Чат"}`,
-                                        Boolean(workspaceReadOnlyReason),
-                                      );
-                                    },
+                                    // Same detach entry as the floating widget menu
+                                    // (handleOpenConversationInWindow): owner guard,
+                                    // roster dedupe, identical title/readOnly rules.
+                                    toggle: handleOpenConversationInWindow,
                                   }
                                 : chatPopout
                             }

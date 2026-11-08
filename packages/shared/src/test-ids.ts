@@ -62,6 +62,8 @@ export const TID_SIDE_PANE_FULL_VIEW_ANSWER_BUBBLE_CLOSE =
   "side-pane-full-view-answer-bubble-close";
 export const TID_SIDE_PANE_FULL_VIEW_MENU_OPEN_CONVERSATION =
   "side-pane-full-view-menu-open-conversation";
+export const TID_SIDE_PANE_FULL_VIEW_MENU_OPEN_WINDOW =
+  "side-pane-full-view-menu-open-window";
 export const TID_SIDE_PANE_FULL_VIEW_MENU_MINIMIZE = "side-pane-full-view-menu-minimize";
 /** 终端面板关闭按钮 */
 export const TID_TERMINAL_CLOSE_BUTTON = "terminal-close-button";

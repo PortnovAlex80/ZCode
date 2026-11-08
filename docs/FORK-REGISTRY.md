@@ -111,6 +111,27 @@ markdown-превью внутри нативных файловых вклад�
 уже существовала в `SelectionActionMenu`). Решение — MPS12 в
 [docs/chat/markdown-preview-selection.md](chat/markdown-preview-selection.md).
 
+### 2026-11-08 #8: «Open in separate window» в меню плавающего виджета full view
+
+Формулировка пользователя: плавающий блок беседы (full view floating widget)
+должен уметь парить по всем экранам, а не только внутри окна приложения.
+Ресерч (см. хронику detach-работ): in-window DOM-блок физически не может
+пересечь границу BrowserWindow; `documentPictureInPicture` сломан в Electron
+(0×0, electron#39633). Решение — третий пункт в меню ⠿-ручки, переиспользующий
+готовый conversation-roster detach (тот же вход, что у кнопки «вынести чат
+в окно» в колонке чата). Статус: **IMPLEMENTED 2026-11-08**.
+
+| Слой | Механика | Файлы |
+|---|---|---|
+| Пункт меню | опциональный `onOpenInWindow` в `SidePaneFullViewConversationHost`; пункт с иконкой PiP (`sidePane.fullView.openWindow`, en+zh) рендерится только при переданном обработчике (web remote / черновик без taskId — пункта нет); test-id `TID_SIDE_PANE_FULL_VIEW_MENU_OPEN_WINDOW` | `ui/src/side-pane-full-view/ConversationHost.tsx`, `shared/src/test-ids.ts`, `i18n/locales/{en-US,zh-CN}.ts` |
+| Общий detach-вход | `handleOpenConversationInWindow` в shell layout: guard `activateManagedNativeDiscussionOwner` (существующее окно — фокус, не дубль) → `openConversationWindow(scope, activeTaskId, title, readOnly)`; инлайн-замыкание кнопки «вынести чат в окно» заменено этим же обработчиком; доступность = desktop ∧ ¬web-remote ∧ activeTaskId ∧ `platform.openConversationPopout` | `ui/src/app-shell/WorkspaceShellLayout.tsx` |
+
+Границы: roster/geometry/attachment не тронуты; портал-механика `chatPopout`
+(U-07, черновики без сессии) не изменена — пункт появляется только для
+реальных задач; спека `docs/ui/side-pane-full-view.md` (меню ⠿) обновлена.
+Тесты: `ui/src/app-shell/sidePaneFullViewOpenWindowMenu.test.tsx` (форвард
+действия; пункт отсутствует без обработчика, соседние действия целы).
+
 ### 2026-11-08 #7: субагент-транскрипт открывается рядом с беседой внутри detached-окна
 
 Формулировка пользователя: клик по субагенту (строка агента в таймлайне /
