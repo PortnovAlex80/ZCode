@@ -736,9 +736,29 @@ export function PreviewPane({
     setWrapLongLinesOverride(null);
   }, [source, preserveDocumentViewState]);
 
+  // Root fix (fork UC-2, 2026-11-08): the editing overlay forces markdownViewMode
+  // to "code" while its editor surface is mounted, but nothing restored the
+  // source-native default when editing ended — the pane stayed stuck in source
+  // view until the tab was reopened. SpecDocumentPane worked around this by
+  // keying PreviewPane on the editing mode (U-10 regression fix 2026-10-14);
+  // the file-tree path has no such workaround, so fix it here at the root:
+  // remember that we forced "code", and on editor unmount restore the same
+  // source-appropriate default the source-change reset uses (markdown → preview).
+  const editingForcedCodeViewRef = useRef(false);
   useEffect(() => {
     // 切换文件也会重置 markdown 模式；编辑器仍在场时必须继续显示同一个编辑表面。
-    if (sourceEditor) setMarkdownViewMode("code");
+    if (sourceEditor) {
+      editingForcedCodeViewRef.current = true;
+      setMarkdownViewMode("code");
+      return;
+    }
+    if (!editingForcedCodeViewRef.current) return;
+    editingForcedCodeViewRef.current = false;
+    setMarkdownViewMode(
+      source.type !== "code-review" && (isMarkdownSource(source) || isMarkdownFilePath(source.path))
+        ? "preview"
+        : "code",
+    );
   }, [Boolean(sourceEditor), source]);
 
   const handleSubmitCodeComment = useCallback(
