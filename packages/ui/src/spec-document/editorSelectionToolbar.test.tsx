@@ -300,7 +300,8 @@ describe("edit-overlay selection toolbar (MPS11)", () => {
       document.dispatchEvent(new Event("selectionchange"));
       await nextFrame();
     });
-    expect(screen.getByText("A selection can contain at most 8,000 characters.")).toBeTruthy();
+    // Upstream v3.18 reworded chat.selections.limit.single (selections -> annotations).
+    expect(screen.getByText("An annotation can quote at most 8,000 characters.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add to chat" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add in side chat" })).toBeNull();
   });

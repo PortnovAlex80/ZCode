@@ -301,9 +301,16 @@ describe("U-18 document tab autosaves manual edits to disk", () => {
       target: { value: `${BASE_CONTENT}first save + more typing` },
     });
     releaseGate!();
-    await waitFor(() =>
-      expect(documents.disk.get(DOC_PATH)!.content).toBe(`${BASE_CONTENT}first save`),
-    );
+    // The first save's payload is recorded at call time (deterministic): it must
+    // carry exactly the pre-gate buffer - keystrokes typed during the flight do
+    // not retroactively rewrite the in-flight request. Sampling the transient
+    // disk state instead races the 25ms debounce against waitFor's 50ms poll and
+    // flakes on fast machines (seen after the v3.18.1 merge).
+    expect(documents.saveCalls[0]).toMatchObject({
+      path: DOC_PATH,
+      content: `${BASE_CONTENT}first save`,
+    });
+    // Completing the save must not roll back the keystrokes typed during flight.
     await waitFor(() => expect(editor.value).toBe(`${BASE_CONTENT}first save + more typing`));
 
     // 完成后基于新 hash 重新防抖保存第二份缓冲。
