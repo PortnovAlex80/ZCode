@@ -754,6 +754,9 @@ export function PreviewPane({
     }
     if (!editingForcedCodeViewRef.current) return;
     editingForcedCodeViewRef.current = false;
+    // Null source (pane closing): nothing to restore; the next source mounts
+    // with its own native default via the source-change reset.
+    if (!source) return;
     setMarkdownViewMode(
       source.type !== "code-review" && (isMarkdownSource(source) || isMarkdownFilePath(source.path))
         ? "preview"

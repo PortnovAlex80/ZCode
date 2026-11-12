@@ -25,7 +25,10 @@
         "**/packages/ui/src/hooks/useZCodeAgentService.ts",
         "**/packages/ui/src/hooks/useZCodeSessionService.ts",
         "**/packages/ui/src/hooks/useZCodeTaskService.ts",
-        "**/packages/ui/src/project-sidebar/grouped/task-row.tsx"
+        "**/packages/ui/src/project-sidebar/grouped/task-row.tsx",
+        // Fork test invokes the mention provider hook through a plain factory
+        // outside React rendering on purpose (direct provider unit checks).
+        "**/packages/ui/test/projectMentionProviders.test.ts"
       ],
       "plugins": ["unicorn", "typescript", "oxc", "react"],
       "rules": {

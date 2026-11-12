@@ -7,7 +7,6 @@ export {
 export { createRemoteWorkspaceDisconnectedError } from "./lib/remoteWorkspaceServiceError.js";
 export { ZCodeIntlProvider } from "./i18n/index.js";
 export { playTaskNotificationSound } from "./lib/taskNotificationSound.js";
-export { installDocumentHiddenMotionPause } from "./lib/documentHiddenMotionPause.js";
 export { RendererUserActionTelemetry, setUserActionTelemetry } from "./lib/userActionTelemetry.js";
 export { setReactErrorArmsReporter } from "./lib/reactErrorArmsTelemetry.js";
 export { recordArmsCustomEventForE2E } from "./lib/armsCustomEventObservability.js";
