@@ -32,14 +32,12 @@ it.each([false, true])(
     });
   `,
     );
-    // 修复原因：Node 的 --import 在 Windows 上必须是 file:// URL——直接传盘符绝对路径
-    //（D:\...）会被 ESM loader 当成 "d:" 协议并抛 ERR_UNSUPPORTED_ESM_URL_SCHEME，
-    // 本用例自导入（aac47556）起在 Windows 上确定性失败。保持 file:// URL 形式传入。
-    const proxy = new URL("./e2e/helpers/subagent-config-proxy.mjs", import.meta.url);
+    // 与 WDIO 注入方式一致：Windows 的 ESM loader 不接受裸绝对路径，预加载必须是 file:// URL。
+    const proxy = new URL("./e2e/helpers/subagent-config-proxy.mjs", import.meta.url).href;
     const child = spawn(process.execPath, [entry, "app-server", "--stdio"], {
       env: {
         ...process.env,
-        NODE_OPTIONS: `--import=${JSON.stringify(proxy.href)}`,
+        NODE_OPTIONS: `--import=${JSON.stringify(proxy)}`,
         ZCODE_E2E_ARTIFACT_DIR: root,
       },
       stdio: ["pipe", "pipe", "pipe"],
