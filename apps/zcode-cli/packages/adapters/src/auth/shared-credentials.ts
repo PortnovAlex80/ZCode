@@ -361,18 +361,24 @@ export function createSharedZCodeCredentialStore(
     ): Promise<boolean> {
       const validatedKey = validateCredentialKey(key);
       const validatedGuardKey = validateCredentialKey(guardKey);
-      const validatedValue = cipher.encrypt(validateCredentialValue(value));
       const validatedExpectedValue =
         expectedValue === null ? null : validateCredentialValue(expectedValue);
       let saved = false;
-      await mutateRawCredentialRecord(filePath, (rawCredentials) => {
+      // Upstream v3.18 made the credential cipher async (OS keyring); the fork's
+      // CAS was written against the old sync contract and lost both awaits in
+      // the merge auto-resolution: the missing encrypt await broke the CLI
+      // build (TS2322), and the missing decrypt await silently compared a
+      // Promise against the expected string, so every refresh rotation CAS
+      // would mismatch. Both cipher calls now run awaited inside the same file
+      // lock, mirroring deleteIfValue above.
+      await mutateRawCredentialRecord(filePath, async (rawCredentials) => {
         const encryptedCurrent = rawCredentials[validatedGuardKey];
         const currentValue =
-          encryptedCurrent === undefined ? null : cipher.decrypt(encryptedCurrent);
+          encryptedCurrent === undefined ? null : await cipher.decrypt(encryptedCurrent);
         // 与 deleteIfValue 相同的单锁 compare-and-set：expected 为 null 表示「guardKey 不存在」
         // （合法 value 永远非空，null 不会与任何真实值混淆）。
         if (currentValue !== validatedExpectedValue) return;
-        rawCredentials[validatedKey] = validatedValue;
+        rawCredentials[validatedKey] = await cipher.encrypt(validateCredentialValue(value));
         saved = true;
       });
       return saved;

@@ -1,8 +1,10 @@
 /** Public renderer bootstrap surface: excludes business roots and editor screens. */
 export { AppErrorBoundary } from "./ErrorBoundary.js";
 export {
+  getRemoteWorkspaceSession,
   registerBaseWorkspaceServices,
   registerRemoteWorkspaceSession,
+  unregisterRemoteWorkspaceSession,
 } from "./store/remoteWorkspaceSessionStore.js";
 export { createRemoteWorkspaceDisconnectedError } from "./lib/remoteWorkspaceServiceError.js";
 export { ZCodeIntlProvider } from "./i18n/index.js";
