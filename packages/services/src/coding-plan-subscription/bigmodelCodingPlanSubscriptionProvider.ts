@@ -342,9 +342,7 @@ export class BigModelCodingPlanSubscriptionProvider {
     if (!token) {
       return { success: false, code: 401, message: "" };
     }
-    const payload = await readCodingPlanApiJson<
-      Omit<RemoteEnvelope<ManualClaimPlanClaimPayload>, "code"> & { code?: number | string }
-    >(
+    const payload = await readCodingPlanClaimEnvelope(
       this.apiClient,
       new URL(buildRuntimeZCodeApiUrl(process.env, "/api/v1/zcode-plan/billing/claim")),
       {
@@ -1526,6 +1524,89 @@ function normalizeRemoteErrorMessage(
   }
   const providerName = resolveCodingPlanProviderName(providerId);
   return message || `${providerName} request failed${code ? `: ${code}` : ""}`;
+}
+
+/**
+ * Claim-specific tolerant reader (fork fix, 2026-11-13).
+ *
+ * Upstream defect: the claim endpoint delivers its coded rejections
+ * (already-claimed 1001..1005, campaign inactive, eligibility, ...) with a
+ * NON-2xx HTTP status and a valid JSON envelope. readApiJson throws on any
+ * !ok response before claimManualPlan's `code !== 0` branch can run, so every
+ * coded server rejection surfaced as the generic "uncertain" dialog
+ * ("The result could not be confirmed...") and hid the real server answer -
+ * verified live: the endpoint answers 400 + {"code":3007} JSON.
+ *
+ * This reader keeps the existing behavior for success (2xx) and for
+ * unparseable bodies (rethrows ApiError with the extracted message), but for
+ * !ok responses whose body still parses as JSON it returns the envelope so the
+ * caller's existing coded-error handling (including terminal classification
+ * and server-provided message copy) works as designed.
+ */
+async function readCodingPlanClaimEnvelope(
+  apiClient: ApiClient,
+  input: string | URL,
+  init?: ApiRequestInit,
+): Promise<Omit<RemoteEnvelope<ManualClaimPlanClaimPayload>, "code"> & { code?: number | string }> {
+  let response: Response;
+  try {
+    response = await apiClient.request(input, init);
+  } catch (error) {
+    // Transport failures (timeout, DNS, proxy) keep the throw semantics; the
+    // claim catch in the UI maps them to "uncertain" as before.
+    throw error;
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (parsed !== null && typeof parsed === "object" && "code" in parsed) {
+        return parsed as Omit<RemoteEnvelope<ManualClaimPlanClaimPayload>, "code"> & {
+          code?: number | string;
+        };
+      }
+    } catch {
+      // Non-JSON body (WAF page, HTML): fall through to the ApiError below.
+    }
+    throw new ApiError({
+      message: readClaimTransportMessage(text, response.status),
+      url: String(input),
+      method: init?.method ?? "POST",
+      status: response.status,
+    });
+  }
+  return (await response.json()) as Omit<
+    RemoteEnvelope<ManualClaimPlanClaimPayload>,
+    "code"
+  > & { code?: number | string };
+}
+
+function readClaimTransportMessage(body: string, status: number): string {
+  const trimmed = body.trim();
+  if (!trimmed) return `HTTP ${status}`;
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: unknown;
+      message?: unknown;
+      msg?: unknown;
+      detail?: unknown;
+    };
+    const message =
+      typeof parsed.error === "string"
+        ? parsed.error
+        : typeof parsed.message === "string"
+          ? parsed.message
+          : typeof parsed.msg === "string"
+            ? parsed.msg
+            : typeof parsed.detail === "string"
+              ? parsed.detail
+              : "";
+    return message.trim() || `HTTP ${status}`;
+  } catch {
+    // Unrenderable bodies (HTML/WAF) collapse to the stable busy copy used by
+    // readCodingPlanApiJson so they never render into dialogs.
+    return CODING_PLAN_SYSTEM_BUSY;
+  }
 }
 
 async function readCodingPlanApiJson<T>(

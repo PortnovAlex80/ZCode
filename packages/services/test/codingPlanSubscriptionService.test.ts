@@ -6,6 +6,7 @@ import {
 } from "../src/coding-plan-subscription/bigmodelCodingPlanSubscriptionProvider.js";
 import { ZaiCodingPlanSubscriptionProvider } from "../src/coding-plan-subscription/zaiCodingPlanSubscriptionProvider.js";
 import { createCodingPlanSubscriptionService } from "../src/coding-plan-subscription/codingPlanSubscriptionService.js";
+import type { OAuthAccountMaterial } from "../src/oauth/repo/oauthCredentialRepo.js";
 
 function createJsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -48,6 +49,43 @@ function createBigModelCredentialService(token = "oauth-token") {
   };
 }
 
+// v3.18 contract adaptation: business auth no longer reads raw "oauth:*" keys
+// from credentialService; providers resolve OAuthAccountMaterial through the
+// injected loadOAuthAccountMaterial(family) callback and use account.accessToken
+// as the raw Authorization header (no Bearer prefix).
+function accountMaterial(overrides: Partial<OAuthAccountMaterial> = {}): OAuthAccountMaterial {
+  return {
+    family: "bigmodel",
+    loginProvider: "bigmodel",
+    zcodeUserId: "u-test",
+    sessionRevision: null,
+    accountIdentity: "u-test",
+    accessToken: "oauth-token",
+    zcodeJwtToken: null,
+    ...overrides,
+  };
+}
+
+// Family-aware loader. family "zai" resolves the persisted business JWT
+// ("zai-business-jwt", the legacy oauth:zai:access_token fixture value);
+// per-family overrides or `null` (no material) keep special cases explicit.
+function createFamilyAccountMaterialLoader(
+  perFamily: Partial<Record<"zai" | "bigmodel", Partial<OAuthAccountMaterial> | null>> = {},
+) {
+  return vi.fn(async (family: "zai" | "bigmodel") => {
+    const override = perFamily[family];
+    if (override === null) return null;
+    return family === "zai"
+      ? accountMaterial({
+          family: "zai",
+          loginProvider: "zai",
+          accessToken: "zai-business-jwt",
+          ...override,
+        })
+      : accountMaterial({ ...override });
+  });
+}
+
 describe("BigModelCodingPlanSubscriptionProvider", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -62,6 +100,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       }),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: { load: vi.fn() },
       resolveOffPeakModelSelectionView: async () =>
@@ -127,6 +174,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(async (key: string) => (key === "zcodejwttoken" ? "zcode-jwt" : null)),
@@ -172,6 +228,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: { load: vi.fn(async () => null) },
     });
@@ -185,8 +250,80 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
     );
   });
 
+  it.each([400, 403, 409, 422])(
+    "fork: HTTP %s + JSON 编码拒绝返回编码失败而不是抛出（uncertain 根因）",
+    async (status) => {
+      // Live-verified server behavior (2026-11-13): the claim endpoint sends
+      // its coded rejections (already-claimed / campaign inactive / eligibility)
+      // with a non-2xx status and a valid JSON envelope. readApiJson used to
+      // throw on !ok before the code branch ran, so every coded rejection
+      // surfaced as the generic "uncertain" dialog hiding the real answer.
+      const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
+        apiClient: {
+          request: vi.fn(async () =>
+            new Response(JSON.stringify({ code: 1002, msg: "already claimed", data: null }), {
+              status,
+              headers: { "Content-Type": "application/json" },
+            }),
+          ),
+        },
+        credentialService: { load: vi.fn(async () => "zcode-jwt") },
+      });
+      await expect(provider.claimManualPlan({ planId: "weekend-plan" })).resolves.toEqual({
+        success: false,
+        code: 1002,
+        message: "",
+      });
+    },
+  );
+
+  it("fork: HTTP 502 + WAF/HTML 正文仍抛 ApiError 且文案收敛为 system busy", async () => {
+    const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
+      apiClient: {
+        request: vi.fn(
+          async () =>
+            new Response("<html><body>WAF blocked</body></html>", {
+              status: 502,
+              headers: { "Content-Type": "text/html" },
+            }),
+        ),
+      },
+      credentialService: { load: vi.fn(async () => "zcode-jwt") },
+    });
+    await expect(provider.claimManualPlan({ planId: "weekend-plan" })).rejects.toMatchObject({
+      name: "ApiError",
+    });
+  });
+
   it("保留手动领取失败 code 但忽略顶层 msg", async () => {
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient: {
         request: vi.fn(async () =>
           createJsonResponse({
@@ -208,6 +345,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
 
   it("保留领取额度耗尽响应中的 plan 结束时间供 UI 生成日期提示", async () => {
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient: {
         request: vi.fn(async () =>
           createJsonResponse({
@@ -239,6 +385,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
   it.each([1005, "1005"])("领取失败 %s 原样传递 data.message 并忽略 msg", async (code) => {
     const message = "今日额度已领完。\n<b>请下次再来</b>";
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient: {
         request: vi.fn(async () =>
           createJsonResponse({
@@ -266,6 +421,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
     "领取失败不使用 msg 兜底：message=%s",
     async (message) => {
       const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
         apiClient: {
           request: vi.fn(async () =>
             createJsonResponse({
@@ -294,6 +458,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
         }),
       );
       const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
         apiClient: { request },
         credentialService: { load: vi.fn() },
       });
@@ -309,6 +482,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
     vi.useFakeTimers();
     const request = vi.fn(() => new Promise<Response>(() => {}));
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient: { request },
       credentialService: { load: vi.fn() },
     });
@@ -342,6 +524,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(async (key) => (key === "oauth:bigmodel:access_token" ? "oauth-token" : null)),
@@ -378,6 +569,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService(),
     });
@@ -396,15 +596,22 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
     const apiClient: ApiClient = {
       request: vi.fn(),
     };
+    const credentialService = { load: vi.fn(async () => null) };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      // v3.18: the business token comes from the account material; an account
+      // without accessToken must surface bigmodel_oauth_required instead of
+      // falling back to any other credential source.
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader({
+        bigmodel: { accessToken: "" },
+      }),
       apiClient,
-      credentialService: {
-        load: vi.fn(async () => null),
-      },
+      credentialService,
     });
 
     await expect(provider.batchPreview()).rejects.toThrow("bigmodel_oauth_required");
     expect(apiClient.request).not.toHaveBeenCalled();
+    // No fallback: business auth must not scrape any credentialService key.
+    expect(credentialService.load).not.toHaveBeenCalled();
   });
 
   it("BigModel OAuth token 被旧版 zcode JWT 污染时不请求套餐接口", async () => {
@@ -412,6 +619,11 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       request: vi.fn(),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      // v3.18: stale pollution is detected on the account material itself
+      // (accessToken === zcodeJwtToken), not via credentialService keys.
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader({
+        bigmodel: { accessToken: "stale-zcode-jwt", zcodeJwtToken: "stale-zcode-jwt" },
+      }),
       apiClient,
       credentialService: {
         load: vi.fn(async (key) =>
@@ -431,6 +643,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       request: vi.fn(async () => createHtmlErrorResponse()),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService(),
     });
@@ -448,6 +669,9 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       request: vi.fn(async () => createZaiBatchPreviewResponse()),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      // v3.18: the persisted zai business JWT is now surfaced through the
+      // account material (family "zai") instead of oauth:zai:access_token.
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader(),
       apiClient,
       credentialService: {
         load: vi.fn(async (key) => (key === "oauth:zai:access_token" ? "zai-business-jwt" : null)),
@@ -509,6 +733,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       }),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(async (key) => (key === "oauth:zai:access_token" ? "zai-business-jwt" : null)),
@@ -567,6 +800,9 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       request: vi.fn(),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      // v3.18: a missing zai login state means the zai family account material
+      // resolves to null (no credentialService fallback exists anymore).
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader({ zai: null }),
       apiClient,
       credentialService: {
         load: vi.fn(async () => null),
@@ -611,6 +847,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
         };
         const load = vi.fn();
         const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
           apiClient: {
             request: vi.fn(async () =>
               createJsonResponse({
@@ -639,7 +884,12 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
           );
           expect(Object.hasOwn(result, legacyId)).toBe(false);
         }
-        expect(load).not.toHaveBeenCalled();
+        // v3.18 adaptation: client-config reads resolve the optional zcode JWT
+        // for the request Authorization key, so credentialService.load("zcodejwttoken")
+        // is expected. The catalog itself must stay OAuth-free: no other
+        // credential key may be read.
+        expect(load.mock.calls.length).toBeGreaterThan(0);
+        expect(load.mock.calls.every((call) => call[0] === "zcodejwttoken")).toBe(true);
       },
     );
   });
@@ -671,6 +921,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(),
@@ -727,6 +986,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: { load: vi.fn() },
     });
@@ -756,6 +1024,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: { load: vi.fn() },
     });
@@ -791,6 +1068,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: { load: vi.fn() },
     });
@@ -827,6 +1113,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: { load: vi.fn() },
     });
@@ -867,6 +1162,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(),
@@ -897,6 +1201,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(),
@@ -923,6 +1236,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(),
@@ -959,6 +1281,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(),
@@ -1014,6 +1345,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(),
@@ -1047,6 +1387,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(),
@@ -1067,6 +1416,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(),
@@ -1076,6 +1434,10 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
     const previewPromise = provider.getStartPlanPreview();
     const productsPromise = provider.getStaticProducts();
     const discountPromise = provider.getBillingDiscount();
+    // v3.18: getClientConfigs awaits credentialService.load before issuing the
+    // shared HTTP request; flush microtasks until the request is in flight
+    // before resolving it.
+    await vi.waitFor(() => expect(apiClient.request).toHaveBeenCalledTimes(1));
     resolveRequest?.(
       createJsonResponse({
         code: 0,
@@ -1182,6 +1544,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
         ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(),
@@ -1229,6 +1600,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
     };
     const credentialService = { load: vi.fn() };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService,
     });
@@ -1257,6 +1637,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService("oauth-token"),
     });
@@ -1323,6 +1712,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
         ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService("oauth-token"),
     });
@@ -1402,6 +1800,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
         ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService("oauth-token"),
     });
@@ -1483,6 +1890,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
         ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService("oauth-token"),
     });
@@ -1589,6 +2005,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       }),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService("oauth-token"),
     });
@@ -1687,6 +2112,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       }),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService("oauth-token"),
     });
@@ -1773,6 +2207,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       }),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService("oauth-token"),
     });
@@ -1829,6 +2272,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
         ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService("oauth-token"),
     });
@@ -1885,6 +2337,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
         ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService("oauth-token"),
     });
@@ -1968,6 +2429,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService("oauth-token"),
     });
@@ -2003,6 +2473,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService(),
     });
@@ -2033,6 +2512,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService(),
     });
@@ -2062,6 +2550,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService(),
     });
@@ -2096,6 +2593,9 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       }),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      // v3.18: the persisted zai business JWT is now surfaced through the
+      // account material (family "zai") instead of oauth:zai:access_token.
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader(),
       apiClient,
       credentialService: {
         load: vi.fn(async (key) => (key === "oauth:zai:access_token" ? "zai-business-jwt" : null)),
@@ -2134,6 +2634,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       request: vi.fn(),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(async () => "zai-business-jwt"),
@@ -2163,6 +2672,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       }),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(async () => "zai-business-jwt"),
@@ -2224,6 +2742,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       }),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(async () => "zai-business-jwt"),
@@ -2276,6 +2803,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       }),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: {
         load: vi.fn(async () => "zai-business-jwt"),
@@ -2325,6 +2861,15 @@ describe("BigModelCodingPlanSubscriptionProvider", () => {
       ),
     };
     const provider = new BigModelCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createBigModelCredentialService(),
     });
@@ -2383,6 +2928,15 @@ describe("ZaiCodingPlanSubscriptionProvider (family-aware Team Plan)", () => {
       ),
     };
     const provider = new ZaiCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: { load: vi.fn() },
     });
@@ -2404,6 +2958,9 @@ describe("ZaiCodingPlanSubscriptionProvider (family-aware Team Plan)", () => {
       request: vi.fn(async () => createJsonResponse({ code: 200, data: { productList: [] } })),
     };
     const provider = new ZaiCodingPlanSubscriptionProvider({
+      // v3.18: family routing resolves the zai business JWT via the account
+      // material, not the credentialService oauth:* keys.
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader(),
       apiClient,
       credentialService: createZaiCredentialService("zai-business-jwt"),
     });
@@ -2433,6 +2990,15 @@ describe("ZaiCodingPlanSubscriptionProvider (family-aware Team Plan)", () => {
       request: vi.fn(async () => createJsonResponse({ code: 200, data: { productList: [] } })),
     };
     const provider = new ZaiCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createZaiCredentialService(),
     });
@@ -2448,6 +3014,9 @@ describe("ZaiCodingPlanSubscriptionProvider (family-aware Team Plan)", () => {
   it("getEnterprisePricing 缺少 zai OAuth token 时抛 zai_oauth_required 且不请求", async () => {
     const apiClient: ApiClient = { request: vi.fn() };
     const provider = new ZaiCodingPlanSubscriptionProvider({
+      // v3.18: a missing zai login state means the zai family account material
+      // resolves to null (no credentialService fallback exists anymore).
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader({ zai: null }),
       apiClient,
       credentialService: { load: vi.fn(async () => null) },
     });
@@ -2512,6 +3081,15 @@ describe("ZaiCodingPlanSubscriptionProvider (family-aware Team Plan)", () => {
       }),
     };
     const provider = new ZaiCodingPlanSubscriptionProvider({
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "bigmodel",
+        loginProvider: "bigmodel",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "u-test",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       apiClient,
       credentialService: createZaiCredentialService("zai-token"),
     });
@@ -2558,6 +3136,12 @@ describe("createCodingPlanSubscriptionService (family routing)", () => {
     };
     const service = createCodingPlanSubscriptionService({
       apiClient,
+      // v3.18: the service factory requires an account-material loader; token
+      // values mirror the legacy credentialService fixtures asserted below.
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader({
+        bigmodel: { accessToken: "bigmodel-token" },
+        zai: { accessToken: "zai-token" },
+      }),
       credentialService: createCredentialService(),
     });
 
@@ -2572,6 +3156,10 @@ describe("createCodingPlanSubscriptionService (family routing)", () => {
     };
     const service = createCodingPlanSubscriptionService({
       apiClient,
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader({
+        bigmodel: { accessToken: "bigmodel-token" },
+        zai: { accessToken: "zai-token" },
+      }),
       credentialService: createCredentialService(),
     });
 
@@ -2595,6 +3183,10 @@ describe("createCodingPlanSubscriptionService (family routing)", () => {
     };
     const service = createCodingPlanSubscriptionService({
       apiClient,
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader({
+        bigmodel: { accessToken: "bigmodel-token" },
+        zai: { accessToken: "zai-token" },
+      }),
       credentialService: createCredentialService(),
     });
 
@@ -2620,6 +3212,10 @@ describe("createCodingPlanSubscriptionService (family routing)", () => {
     };
     const service = createCodingPlanSubscriptionService({
       apiClient,
+      loadOAuthAccountMaterial: createFamilyAccountMaterialLoader({
+        bigmodel: { accessToken: "bigmodel-token" },
+        zai: { accessToken: "zai-token" },
+      }),
       credentialService: createCredentialService(),
     });
 
