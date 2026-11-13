@@ -368,6 +368,17 @@ export class BigModelCodingPlanSubscriptionProvider {
           : -1;
     const serverTime = readServerTimeMilliseconds(payload.data?.server_time);
     if (code !== 0 || !payload.data?.plan) {
+      // Observability (fork, 2026-11-14): the localized dialog collapses every
+      // rejection to a small set of copies (generic hides the raw code), and the
+      // renderer logger is a no-op in production builds - the user's failing
+      // WEEKEND BUILD claim could only be diagnosed as "some unmapped code".
+      // Service logs reach the host log sink in production, so record the exact
+      // rejection here.
+      log.warn(undefined, "manual plan claim rejected", {
+        code,
+        planId: request.planId,
+        hasPlan: Boolean(payload.data?.plan),
+      });
       const failureEndsAt = payload.data?.plan?.ends_at;
       return {
         success: false,
