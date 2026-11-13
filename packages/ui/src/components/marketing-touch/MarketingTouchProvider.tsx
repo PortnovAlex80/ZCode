@@ -288,7 +288,17 @@ export function MarketingTouchProvider({
           });
           // 领取结果由 Controller 的结果弹窗承载，避免成功 toast 与弹窗重复提示。
           return { status: "success" };
-        } catch {
+        } catch (error) {
+          // Observability (fork, 2026-11-13): the "uncertain" copy tells the user
+          // the claim result is unknown, but the swallowed error left no trace
+          // anywhere - the user's failing token giveaway could not be diagnosed
+          // from logs at all. Log the thrown cause (HTTP status / timeout /
+          // transport) with the claim plan id so the next occurrence is readable.
+          logger.warn("[marketing-touch] manual claim threw after submission", {
+            planId: action.args.plan_id,
+            submitted,
+            reason: error instanceof Error ? error.message : String(error),
+          });
           if (signal.aborted) return { status: "cancelled" };
           return {
             status: submitted ? "uncertain" : "failure",
