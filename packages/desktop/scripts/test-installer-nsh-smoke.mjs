@@ -78,6 +78,11 @@ function readShortcutProperty(shortcutPath, propertyName) {
   }).trim();
 }
 
+function shortcutHasAppUserModelId(shortcutPath, appUserModelId) {
+  // WinShell::SetLnkAUMI stores the id as a UTF-16 string inside the shell link ExtraData.
+  return readFileSync(shortcutPath).toString("utf16le").includes(appUserModelId);
+}
+
 function compileFixture({
   makensisPath,
   nsisDir,
@@ -208,6 +213,10 @@ async function main() {
           const expectedArguments = scenario === "preserved" ? "--preserved" : "";
           if (shortcutArguments !== expectedArguments) {
             throw new Error(`${scenario}: shortcut arguments mismatch: ${shortcutArguments}`);
+          }
+          // Preserved links skip CreateShortCut, so the repair path must still re-apply the AUMID.
+          if (!shortcutHasAppUserModelId(shortcutPath, "dev.zcode.installer-nsh-smoke")) {
+            throw new Error(`${scenario}: shortcut is missing the AppUserModelID: ${shortcutPath}`);
           }
         }
       } else if (existsSync(startMenuLink) || existsSync(desktopLink)) {

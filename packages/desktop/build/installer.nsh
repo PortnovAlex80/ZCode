@@ -652,21 +652,27 @@
     Push "${SHORTCUT_PATH}"
     Call ZCodeReadShortcutTarget
     Pop $R0
-    StrCmp $R0 "$appExe" ${LABEL_PREFIX}Done 0
+    StrCmp $R0 "$appExe" ${LABEL_PREFIX}RefreshAumid 0
 
     ; 修复原因：历史版本可能留下指向已移动 exe 的 .lnk，但无条件覆盖正确快捷方式会让
     ; 部分 Windows 11 丢失“所有应用”索引或用户固定关系，因此只修复目标不一致的项。
     ClearErrors
     CreateShortCut "${SHORTCUT_PATH}" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
-    IfErrors ${LABEL_PREFIX}Failed ${LABEL_PREFIX}Succeeded
-    ${LABEL_PREFIX}Failed:
-      DetailPrint "Unable to repair shortcut: ${SHORTCUT_PATH}"
-      ClearErrors
-      Goto ${LABEL_PREFIX}Done
-    ${LABEL_PREFIX}Succeeded:
+    IfErrors ${LABEL_PREFIX}Failed
+
+    ${LABEL_PREFIX}RefreshAumid:
+      ; Bugfix: overwrite installs keep the existing .lnk, so a link that lost its
+      ; AppUserModelID (renamed by an older build or created by hand) stayed wrong
+      ; forever and taskbar pins/notifications fell back to a path-based identity.
+      ; Re-applying the AUMID is idempotent and does not recreate deleted shortcuts.
       WinShell::SetLnkAUMI "${SHORTCUT_PATH}" "${APP_ID}"
       ; 修复后的 .lnk 必须在最后一次写入后通知 Shell，避免开始菜单继续使用旧索引。
       System::Call 'Shell32::SHChangeNotify(i 0x00002000, i 0x0005, w "${SHORTCUT_PATH}", p 0)'
+      Goto ${LABEL_PREFIX}Done
+
+    ${LABEL_PREFIX}Failed:
+      DetailPrint "Unable to repair shortcut: ${SHORTCUT_PATH}"
+      ClearErrors
     ${LABEL_PREFIX}Done:
   ${endIf}
 !macroend

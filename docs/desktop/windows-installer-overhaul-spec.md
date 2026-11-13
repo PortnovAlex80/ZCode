@@ -88,7 +88,7 @@ installer-completed (日志可查，完成页直接启动 `$INSTDIR\\ZCode.exe`)
 
 ## 快捷方式与 AUMID
 
-- 开始菜单/桌面 `.lnk` 目标正确时原样保留（包括参数）。
+- 开始菜单/桌面 `.lnk` 目标正确时保留目标与参数，但覆盖安装仍需幂等重贴 AUMID 并通知 Shell：旧链接可能由历史版本重命名或用户手工创建而缺少 AUMID。
 - 目标错误但 `.lnk` 存在时原位修复，随后设置稳定 AUMID 并发送 `SHChangeNotify(SHCNE_UPDATEITEM)`。
 - 用户删除的 `.lnk` 不重建；完成页直接启动新安装目录的 exe。
 - `app.setAppUserModelId()` 在打包态使用生产/Preview 对应 `appId`，开发态使用 `cn.aminer.zcode`。
@@ -109,7 +109,7 @@ installer-completed (日志可查，完成页直接启动 `$INSTDIR\\ZCode.exe`)
 | WIN-INSTALL-PROCESS-002   | 旧安装目录候选进程不能查询或结束       | 备份和卸载未开始；日志含阶段及 PID，旧版文件未改动                     |
 | WIN-INSTALL-DIAG-003      | 旧版本无 manifest 或解压阶段失败       | 非本轮细粒度诊断保证；保留原生安装器结果，后续按真实问题逐步收敛       |
 | WIN-INSTALL-DIAG-002      | 静默 `/S` 更新                         | 无 UI 但有阶段日志，日志 PID 为数字且无原始命令行                      |
-| WIN-INSTALL-SHORTCUT-001  | 正确/失效/被删除的快捷方式             | 正确项保留参数，失效项修复，删除项不重建                               |
+| WIN-INSTALL-SHORTCUT-001  | 正确/失效/被删除的快捷方式             | 正确项保留参数并重贴 AUMID，失效项修复，删除项不重建                   |
 | WIN-INSTALL-AUMID-001     | 生产与 Preview 打包运行                | 主进程 AUMID 与 NSIS `appId` 相等，可被 Shell 正确索引/固定            |
 
 ## 本轮实现边界
