@@ -10,6 +10,10 @@ import { loadBuiltinProviderConfig } from "../../scripts/builtin-provider-config
 import { noticesFileName, stageElectronNotices } from "../../scripts/third-party-notices.mjs";
 import { resolveNativeSearchReleasePlan } from "../../scripts/native-search-tools-config.mjs";
 import { getBuildMetadata } from "./scripts/build-metadata.mjs";
+import {
+  resolveAgentBundleExtraResources,
+  verifyPackagedAgentKeyring,
+} from "./scripts/agent-bundle-assets.mjs";
 import { collectRuntimeModuleClosureEntries } from "./scripts/runtime-dependency-closure.mjs";
 import {
   resolvePackagedNodePtyPrebuildPath,
@@ -555,6 +559,21 @@ function assertPackagedCuaKoffi(context) {
   }
 }
 
+function assertPackagedAgentKeyring(context) {
+  const problems = verifyPackagedAgentKeyring({
+    resourcesDir: resolvePackagedResourcesDir(context),
+    platformKey: targetPlatform.key,
+  });
+  if (problems.length > 0) {
+    // The agent decrypts enc:v2:os: credentials through @napi-rs/keyring. A packaged
+    // bundle without node_modules starts fine but every account read fails with
+    // "System credential storage is unavailable", so fail the build instead.
+    throw new Error(
+      `Bundled agent credential keyring is incomplete in the packaged app:\n- ${problems.join("\n- ")}`,
+    );
+  }
+}
+
 function assertSignedWindowsHelper(context, relativeHelperPath) {
   if (context.electronPlatformName !== "win32" || !shouldEnableWindowsVsign) return;
   const helperPath = resolve(context.appOutDir, "resources", relativeHelperPath);
@@ -768,6 +787,7 @@ export default {
     );
     runTimedSync("afterPack:assertPackagedCuaSharp", () => assertPackagedCuaSharp(context));
     runTimedSync("afterPack:assertPackagedCuaKoffi", () => assertPackagedCuaKoffi(context));
+    runTimedSync("afterPack:assertPackagedAgentKeyring", () => assertPackagedAgentKeyring(context));
     runTimedSync("afterPack:assertPackagedCuaHelper", () => assertPackagedCuaHelper(context));
     runTimedSync("afterPack:assertPackagedMacElectronLocales", () =>
       assertPackagedMacElectronLocales(context),
@@ -916,15 +936,12 @@ export default {
           },
         ]
       : []),
-    {
-      // agent 运行时资产，打包到 resources/glm。
-      // 桌面端内置的是 agent 的 JS bundle（glm/zcode.cjs，由 prepare:agent-bundle 生成），
-      // Host 进程用 app 自带的 Electron Node runtime（ELECTRON_RUN_AS_NODE）执行 `zcode.cjs app-server --stdio`，
-      // 不再随包内置独立 Node 二进制。远端 SSH/WSL 仍走原生二进制（无 Electron）。
-      from: `bundled-agents/${targetPlatform.key}/glm`,
-      to: "glm",
-      filter: ["**/*", "!**/*.map"],
-    },
+    // agent 运行时资产，打包到 resources/glm。
+    // 桌面端内置的是 agent 的 JS bundle（glm/zcode.cjs，由 prepare:agent-bundle 生成），
+    // Host 进程用 app 自带的 Electron Node runtime（ELECTRON_RUN_AS_NODE）执行 `zcode.cjs app-server --stdio`，
+    // 不再随包内置独立 Node 二进制。远端 SSH/WSL 仍走原生二进制（无 Electron）。
+    // 目录与 node_modules 必须分开映射，原因见 resolveAgentBundleExtraResources。
+    ...resolveAgentBundleExtraResources(targetPlatform.key),
     {
       // agent shell 之前完全依赖宿主系统 PATH，GUI 启动时经常拿不到用户自己装的 rg。
       // 这里把 ripgrep 作为桌面端内置 runtime tool 打进 resources/tools，
