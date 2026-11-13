@@ -88,6 +88,9 @@ function setup() {
     offPeakRunSubscriptionKey: (taskId: string, traceId: string) => `${taskId}:${traceId}`,
     trackOffPeakRunOutcome: track,
     disposeOffPeakRunSubscription: dispose,
+    // v3.18 dispatch reports the host client language inside the init session_create
+    // payload; the extracted function body calls this host helper directly.
+    resolveHostClientLanguage: () => "en-US",
   });
   const modelSelection = {
     providerId: OFF_PEAK_PROVIDER_IDS.bigmodel,
@@ -243,6 +246,8 @@ describe("Host OffPeak dispatch current execution contract", () => {
     expect(state.report).toHaveBeenCalledExactlyOnceWith(
       {},
       {
+        // v3.18 forwards the resolved host client language in the session_create report.
+        clientLanguage: "en-US",
         sessionId: "new",
         messageId: "trace-new",
         source: "automation_idle",

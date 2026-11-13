@@ -1,9 +1,13 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { EventEmitter } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { terminateProcessTree } from "@zcode/services/process/processTreeTerminator";
+import {
+  terminateProcessTree,
+  terminateProcessTreeAndWait,
+} from "@zcode/services/process/processTreeTerminator";
 import { ZCodeStdioTransport } from "@zcode/services/node";
+import type { WindowsRuntimeHost } from "#src/windows-runtime-host/contract.js";
 
 const activeChildren = new Set<ChildProcessWithoutNullStreams>();
 
@@ -34,6 +38,69 @@ function isPidRunning(pid: number): boolean {
   return status.length > 0 && !status.startsWith("Z");
 }
 
+// Upstream v3.18 ownership contract: on Windows, CLI process-tree cleanup is
+// owned by a runtime Job owner (WindowsRuntimeHost). The transport no longer
+// terminates the tree itself when a Job owner is wired; disposeAndWaitOnce
+// delegates the whole shutdown to close(deadline) and rejects disposeAndWait
+// with "Windows CLI cleanup requires a runtime Job owner" when a transport is
+// constructed without one. Production wiring (zcodeAgentProcessManager) always
+// spawns the native owner via spawnWindowsRuntimeHost on win32, so tests here
+// construct a structurally identical fake owner:
+//   - onRootExit only publishes the root child's lifecycle, like the native
+//     helper's control-pipe "root" event;
+//   - close() first requests the CLI's natural stdin-EOF shutdown boundary,
+//     then waits until the root process is fully torn down (exit plus stdio
+//     close), mirroring "close() succeeds only once the Job is empty".
+// With `reclamation` supplied, close() additionally reclaims task-tree
+// descendants orphaned by an abnormal root exit, using the same
+// ParentProcessId + CreationDate window (spawn timestamp / exit timestamp)
+// semantics the transport used before the ownership split. This keeps
+// abnormal-exit tests exercising real descendant reclamation at the new owner
+// boundary instead of inside the transport.
+function createTestRuntimeJobOwner(
+  child: ChildProcessWithoutNullStreams,
+  reclamation?: { startedAtMs: number; forceAfterMs: number },
+): WindowsRuntimeHost {
+  const exitListeners: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
+  let exitedAtMs: number | undefined;
+  // Capture exit/close eagerly so a root that already exited before close()
+  // still lets close() resolve instead of waiting for a next event.
+  const rootExited = once(child, "exit");
+  const rootClosed = once(child, "close");
+  child.on("exit", (code, signal) => {
+    exitedAtMs ??= Date.now();
+    for (const listener of exitListeners) listener(code, signal);
+  });
+  return {
+    child,
+    runtimePid: child.pid,
+    ready: () => Promise.resolve(child.pid ?? 0),
+    start: async () => undefined,
+    onRootExit(listener) {
+      exitListeners.push(listener);
+    },
+    async close(_deadlineAtMs) {
+      if (child.stdin.writable && !child.stdin.destroyed) {
+        child.stdin.once("error", () => undefined);
+        child.stdin.end();
+      }
+      await rootExited;
+      await rootClosed;
+      if (!reclamation) return;
+      const result = await terminateProcessTreeAndWait(child, {
+        ownedProcessStartedAtMs: reclamation.startedAtMs,
+        ownedProcessExitedAtMs: exitedAtMs ?? Date.now(),
+        forceAfterMs: reclamation.forceAfterMs,
+      });
+      if (result.remainingPids.length > 0) {
+        throw new Error(
+          `runtime Job cleanup incomplete; remaining pid=${[...new Set(result.remainingPids)].join(",")}`,
+        );
+      }
+    },
+  };
+}
+
 afterEach(() => {
   for (const child of activeChildren) {
     terminateProcessTree(child);
@@ -56,7 +123,9 @@ describe("ZCodeStdioTransport", () => {
       { stdio: ["pipe", "pipe", "pipe"] },
     );
     activeChildren.add(child);
-    const transport = new ZCodeStdioTransport(child);
+    const transport = new ZCodeStdioTransport(child, {
+      windowsRuntime: createTestRuntimeJobOwner(child),
+    });
     await new Promise<void>((resolve) => transport.onMessage(() => resolve()));
     let closed = false;
     transport.onClose(() => {
@@ -86,7 +155,10 @@ describe("ZCodeStdioTransport", () => {
     );
     activeChildren.add(child);
     const lines: string[] = [];
-    const transport = new ZCodeStdioTransport(child, { onStderrLine: (line) => lines.push(line) });
+    const transport = new ZCodeStdioTransport(child, {
+      onStderrLine: (line) => lines.push(line),
+      windowsRuntime: createTestRuntimeJobOwner(child),
+    });
     await new Promise<void>((resolve) => transport.onMessage(() => resolve()));
     // 修复原因：退出后的进程身份复核可能阻塞事件循环，让 250ms drain timer
     // 先于 stderr EOF 投递。本用例只验证尾行收集，真实退出时限由后续用例验证。
@@ -119,7 +191,9 @@ setInterval(() => {}, 1000);
       },
     );
     activeChildren.add(child);
-    const transport = new ZCodeStdioTransport(child);
+    const transport = new ZCodeStdioTransport(child, {
+      windowsRuntime: createTestRuntimeJobOwner(child),
+    });
     // 子进程启动可能超过 50ms；先收到已注册 EOF 处理器的 ready 帧，
     // 再计时关闭，避免把启动排队误判为优雅退出失败并触发强杀。
     await new Promise<void>((resolve) => transport.onMessage(() => resolve()));
@@ -277,7 +351,10 @@ descendant.once("message", () => {
       );
       activeChildren.add(child);
       const transport = new ZCodeStdioTransport(child, {
-        ownedProcessStartedAtMs: spawnRequestedAt,
+        windowsRuntime: createTestRuntimeJobOwner(child, {
+          startedAtMs: spawnRequestedAt,
+          forceAfterMs: 2_000,
+        }),
       });
       const descendantPidPromise = new Promise<number>((resolve) => {
         transport.onMessage((message) => {
@@ -290,9 +367,14 @@ descendant.once("message", () => {
       await waitForExit(child);
 
       try {
-        // 修复原因：Windows 没有 POSIX PGID；root 先退出时不能重新 taskkill 裸 root。
-        // cleanup 只沿 Win32_Process 保留的 ParentProcessId 找回成员，并用 CreationDate
-        // 固定 descendant 身份，确保 app quit 仍能回收原 task tree。
+        // Windows has no POSIX PGID; a root that exited first must never be
+        // re-killed as a bare root PID. Since v3.18 the transport delegates
+        // Windows cleanup to the runtime Job owner: disposeAndWait only calls
+        // owner.close(), and the owner must reclaim the whole task tree before
+        // close() succeeds. The fake owner here still walks the ParentProcessId
+        // chain kept by Win32_Process and pins descendant identity via
+        // CreationDate (bounded by the spawn timestamp and the observed root
+        // exit), so app quit still reclaims the original task tree.
         await transport.disposeAndWait();
         expect(isPidRunning(descendantPid)).toBe(false);
       } finally {
@@ -322,7 +404,9 @@ setInterval(() => {}, 1000);
       { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
     );
     activeChildren.add(child);
-    const transport = new ZCodeStdioTransport(child);
+    const transport = new ZCodeStdioTransport(child, {
+      windowsRuntime: createTestRuntimeJobOwner(child),
+    });
     let firstFrameAt = 0;
     let receivedFrameCount = 0;
     let agentPid = 0;

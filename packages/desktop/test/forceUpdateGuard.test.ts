@@ -224,7 +224,12 @@ function mockNetResponse(options: {
   const request = new EventEmitter() as EventEmitter & {
     abort: ReturnType<typeof vi.fn>;
     end: ReturnType<typeof vi.fn>;
+    setHeader: ReturnType<typeof vi.fn>;
   };
+  // v3.18 guard sends Cache-Control/Authorization headers before wiring listeners;
+  // without setHeader the request setup throws before the "error" listener exists,
+  // so fail() would never reach request.abort().
+  request.setHeader = vi.fn();
   request.abort = vi.fn(() => {
     request.emit("error", new Error("aborted"));
   });

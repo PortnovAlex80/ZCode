@@ -3,7 +3,18 @@ import { createAccountProviderCredentialService } from "../src/model-provider/ac
 
 describe("AccountProviderCredentialService", () => {
   it("使用当前登录态取得 Token，不写入私有凭据键", async () => {
-    const loadOAuthAccessToken = vi.fn(async () => "oauth-token");
+    // Upstream v3.18 replaced loadOAuthAccessToken(family) with
+    // loadOAuthAccountMaterial(family); the service matches accountIdentity and
+    // forwards account.accessToken to resolveProviderMaterial.
+    const loadOAuthAccountMaterial = vi.fn(async () => ({
+      family: "bigmodel",
+      loginProvider: "bigmodel",
+      zcodeUserId: "u-test",
+      sessionRevision: null,
+      accountIdentity: "account/b",
+      accessToken: "oauth-token",
+      zcodeJwtToken: null,
+    }));
     const resolveProviderMaterial = vi.fn(async () => ({
       token: "remote-key",
       apiKeyId: "id-remote-key",
@@ -11,7 +22,7 @@ describe("AccountProviderCredentialService", () => {
       projectId: "proj",
     }));
     const service = createAccountProviderCredentialService({
-      loadOAuthAccessToken,
+      loadOAuthAccountMaterial,
       resolveProviderMaterial,
     });
 
@@ -23,7 +34,7 @@ describe("AccountProviderCredentialService", () => {
       }),
     ).resolves.toBe("remote-key");
 
-    expect(loadOAuthAccessToken).toHaveBeenCalledWith("bigmodel");
+    expect(loadOAuthAccountMaterial).toHaveBeenCalledWith("bigmodel");
     expect(resolveProviderMaterial).toHaveBeenCalledWith(
       "bigmodel",
       "oauth-token",
@@ -44,7 +55,15 @@ describe("AccountProviderCredentialService", () => {
       projectId: "proj",
     }));
     const service = createAccountProviderCredentialService({
-      loadOAuthAccessToken: vi.fn(async () => "oauth-token"),
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "zai",
+        loginProvider: "zai",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "account-a",
+        accessToken: "oauth-token",
+        zcodeJwtToken: null,
+      })),
       resolveProviderMaterial,
     });
     const input = {
@@ -69,7 +88,16 @@ describe("AccountProviderCredentialService", () => {
       projectId: "proj",
     }));
     const service = createAccountProviderCredentialService({
-      loadOAuthAccessToken: vi.fn(async () => "new-oauth-token"),
+      // Same v3.18 contract swap: material instead of a bare access token.
+      loadOAuthAccountMaterial: vi.fn(async () => ({
+        family: "zai",
+        loginProvider: "zai",
+        zcodeUserId: "u-test",
+        sessionRevision: null,
+        accountIdentity: "account-a",
+        accessToken: "new-oauth-token",
+        zcodeJwtToken: null,
+      })),
       resolveProviderMaterial,
     });
 

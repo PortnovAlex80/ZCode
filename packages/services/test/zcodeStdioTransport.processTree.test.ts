@@ -16,6 +16,10 @@ vi.mock("#src/process/processTreeTerminator.js", async (importOriginal) => ({
 }));
 
 import { ZCodeStdioTransport } from "../src/zcode-agent/zcodeStdioTransport.js";
+import type { WindowsRuntimeHost } from "../src/windows-runtime-host/contract.js";
+// Mocked module export (see vi.mock above) — the owner fake calls this so the
+// shared mock records the reclamation contract.
+import { terminateProcessTreeAndWait } from "#src/process/processTreeTerminator.js";
 
 const activeChildren = new Set<ReturnType<typeof spawn>>();
 
@@ -47,18 +51,38 @@ describe("ZCodeStdioTransport process tree result", () => {
       windowsHide: true,
     });
     activeChildren.add(child);
-    const transport = new ZCodeStdioTransport(child);
+    // Upstream v3.18 moved Windows cleanup behind the runtime Job owner
+    // (ownerless win32 dispose now throws). Mirror the production owner shape:
+    // close() treats the mocked OS terminator result as ground truth and
+    // resolves without waiting for Node's lagging exit/close events.
+    const owner: WindowsRuntimeHost = {
+      child,
+      runtimePid: child.pid ?? 0,
+      ready: () => Promise.resolve(child.pid ?? 0),
+      start: async () => undefined,
+      onRootExit: () => {},
+      async close() {
+        await terminateProcessTreeAndWait(child, {
+          ownedProcessStartedAtMs: 10_000,
+          ownedProcessExitedAtMs: 10_000,
+          forceAfterMs: 2_000,
+        });
+      },
+    };
+    const transport = new ZCodeStdioTransport(child, { windowsRuntime: owner });
     const startedAt = performance.now();
 
-    // Bug 回归：Windows taskkill 已完成且 waiter 根据 OS 存活事实返回成功时，
-    // Node 的 exit 事件仍可能晚一轮投递，child.exitCode 此刻合法地保持 null。
+    // Bug regression (moved to the owner boundary): the OS waiter has confirmed
+    // the tree is gone while Node's exit event can still lag a tick, leaving
+    // child.exitCode legitimately null. dispose resolves on the OS fact.
     await expect(transport.disposeAndWait()).resolves.toBeUndefined();
-    // stderr drain 只能使用 250ms，不能重新借到整个 Windows 进程树窗口。
+    // stderr drain only borrows 250ms; it must not re-borrow the whole
+    // Windows process-tree window.
     expect(performance.now() - startedAt).toBeLessThan(3_500);
     expect(terminateProcessTreeAndWaitMock).toHaveBeenCalledOnce();
     expect(terminateProcessTreeAndWaitMock).toHaveBeenCalledWith(
       child,
-      expect.objectContaining({ windowsCleanupDeadlineAtMs: 13_250 }),
+      expect.objectContaining({ forceAfterMs: 2_000 }),
     );
     expect(child.exitCode).toBeNull();
   });

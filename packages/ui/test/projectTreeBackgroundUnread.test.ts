@@ -128,10 +128,15 @@ async function fixture(
       taskService: service,
     }),
   });
+  // readProjectSidebarTree contract: { tree, availability, onlineHostIds, directory, errors }.
+  // onlineHostIds is the per-read "hosts with an authoritative snapshot" set ("local" always
+  // included); errors is a per-host failure Map the hook iterates and compares by content.
   mocks.readTree.mockImplementation(async () => ({
     tree: { projects: [], tasks: [{ ...task }] },
     availability: new Map(),
+    onlineHostIds: new Set(["local"]),
     directory: { hosts: [], entries: [] },
+    errors: new Map(),
   }));
   mocks.services = {
     projectService: {},

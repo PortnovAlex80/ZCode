@@ -54,6 +54,9 @@ function makeView(
           ],
           domTruncated: false,
         })),
+      // v3.18: guest-local key dispatch (no focused OOPIF) goes through
+      // sendInputEvent instead of CDP Input.dispatchKeyEvent.
+      sendInputEvent: vi.fn(),
     },
     cdp: {
       send: overrides.cdpSend ?? vi.fn(async () => ({ data: "iVBORw0KGgo=" })),
@@ -73,6 +76,33 @@ function pngHeaderData(width: number, height: number, marker = 0): string {
   header.writeUInt32BE(height, 20);
   header[24] = marker;
   return header.toString("base64");
+}
+
+// v3.18: key dispatch (press/cuaKeypress/playwright press) first resolves the
+// focused frame; only a focused OOPIF keeps keys on the CDP Input.dispatchKeyEvent
+// path where the windowsVirtualKeyCode mapping lives (guest-local keys now use
+// webContents.sendInputEvent). This wrapper makes the focused-frame probe report
+// a focused OOPIF exactly once so the CDP key assertions stay meaningful.
+function withFocusedOopifFrame(
+  base: (method: string, params?: unknown, sessionId?: string) => Promise<unknown>,
+) {
+  let focusedFrameProbes = 0;
+  return vi.fn(async (method: string, params?: unknown, sessionId?: string) => {
+    if (method === "Runtime.evaluate") {
+      const expression = String(
+        (params as { expression?: unknown } | undefined)?.expression ?? "",
+      );
+      if (expression.includes("focusedFrameElementInRoot")) {
+        focusedFrameProbes += 1;
+        return focusedFrameProbes === 1
+          ? { result: { objectId: "focused-frame" } }
+          : { result: { value: null } };
+      }
+    }
+    if (method === "DOM.describeNode") return { node: { frameId: "oopif-frame" } };
+    if (method === "Target.attachToTarget") return { sessionId: "oopif-session" };
+    return base(method, params, sessionId);
+  });
 }
 
 describe("isAllowedBrowserUrl", () => {
@@ -799,22 +829,24 @@ describe("executeBrowserCommandOnView", () => {
 
   it("playwright press 在下发 CDP key 前校验 locator input token", async () => {
     const expressions: string[] = [];
-    const cdpSend = vi.fn(async (method: string, params?: unknown) => {
-      if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "main" } } };
-      if (method === "Page.createIsolatedWorld") return { executionContextId: 1 };
-      if (method === "Runtime.evaluate") {
-        const expression = String((params as { expression?: unknown }).expression ?? "");
-        expressions.push(expression);
-        if (expression.startsWith("Boolean(globalThis.")) return { result: { value: true } };
-        if (expression.includes("const checkStates"))
-          return { result: { value: { count: 1, actionable: true } } };
-        if (expression.includes("Object.defineProperty(element"))
-          return { result: { value: "done" } };
-        if (expression.includes("deepestActiveElement(document)"))
-          return { result: { value: true } };
-      }
-      return {};
-    });
+    const cdpSend = withFocusedOopifFrame(
+      vi.fn(async (method: string, params?: unknown) => {
+        if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "main" } } };
+        if (method === "Page.createIsolatedWorld") return { executionContextId: 1 };
+        if (method === "Runtime.evaluate") {
+          const expression = String((params as { expression?: unknown }).expression ?? "");
+          expressions.push(expression);
+          if (expression.startsWith("Boolean(globalThis.")) return { result: { value: true } };
+          if (expression.includes("const checkStates"))
+            return { result: { value: { count: 1, actionable: true } } };
+          if (expression.includes("Object.defineProperty(element"))
+            return { result: { value: "done" } };
+          if (expression.includes("deepestActiveElement(document)"))
+            return { result: { value: true } };
+        }
+        return {};
+      }),
+    );
 
     const result = await executeBrowserCommandOnView(makeView({ cdpSend }), {
       method: "playwright",
@@ -825,12 +857,19 @@ describe("executeBrowserCommandOnView", () => {
     expect(
       expressions.some((expression) => expression.includes("__zcodeIabInputTargetToken")),
     ).toBe(true);
-    expect(cdpSend).toHaveBeenCalledWith("Input.dispatchKeyEvent", {
-      type: "keyDown",
-      key: "Enter",
-      code: "Enter",
-      windowsVirtualKeyCode: 13,
-    });
+    // v3.18: CDP keyDown carries the typed text for Enter and rides the focused
+    // OOPIF session resolved before dispatch.
+    expect(cdpSend).toHaveBeenCalledWith(
+      "Input.dispatchKeyEvent",
+      {
+        type: "keyDown",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+        text: "\r",
+      },
+      "oopif-session",
+    );
   });
 
   it("playwright 单元素 action 在多匹配时选择唯一 visible 元素", async () => {
@@ -1619,25 +1658,35 @@ describe("executeBrowserCommandOnView", () => {
   });
 
   it("press Enter 映射为 windowsVirtualKeyCode:13 的 keyDown+keyUp", async () => {
-    const send = vi.fn(async () => ({}));
+    // v3.18: the vk mapping applies on the focused-OOPIF CDP session path.
+    const send = withFocusedOopifFrame(vi.fn(async () => ({})));
     const view = makeView({ cdpSend: send });
     const r = await executeBrowserCommandOnView(view, {
       method: "press",
       key: "Enter",
     });
     expect(r.ok).toBe(true);
-    expect(send).toHaveBeenCalledWith("Input.dispatchKeyEvent", {
-      type: "keyDown",
-      key: "Enter",
-      code: "Enter",
-      windowsVirtualKeyCode: 13,
-    });
-    expect(send).toHaveBeenCalledWith("Input.dispatchKeyEvent", {
-      type: "keyUp",
-      key: "Enter",
-      code: "Enter",
-      windowsVirtualKeyCode: 13,
-    });
+    expect(send).toHaveBeenCalledWith(
+      "Input.dispatchKeyEvent",
+      {
+        type: "keyDown",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+        text: "\r",
+      },
+      "oopif-session",
+    );
+    expect(send).toHaveBeenCalledWith(
+      "Input.dispatchKeyEvent",
+      {
+        type: "keyUp",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+      },
+      "oopif-session",
+    );
   });
 
   it("scroll {y:300} 发 CDP mouseWheel deltaY:300", async () => {
@@ -1708,7 +1757,8 @@ describe("executeBrowserCommandOnView", () => {
   });
 
   it("press 带 modifiers(Meta) 映射位掩码 4 传给 dispatchKeyEvent", async () => {
-    const send = vi.fn(async () => ({}));
+    // v3.18: the vk mapping applies on the focused-OOPIF CDP session path.
+    const send = withFocusedOopifFrame(vi.fn(async () => ({})));
     const view = makeView({ cdpSend: send });
     const r = await executeBrowserCommandOnView(view, {
       method: "press",
@@ -1716,17 +1766,22 @@ describe("executeBrowserCommandOnView", () => {
       modifiers: ["Meta"],
     });
     expect(r.ok).toBe(true);
-    expect(send).toHaveBeenCalledWith("Input.dispatchKeyEvent", {
-      type: "keyDown",
-      key: "Enter",
-      code: "Enter",
-      windowsVirtualKeyCode: 13,
-      modifiers: 4,
-    });
+    expect(send).toHaveBeenCalledWith(
+      "Input.dispatchKeyEvent",
+      {
+        type: "keyDown",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+        modifiers: 4,
+      },
+      "oopif-session",
+    );
   });
 
   it("CUA keypress 按顺序按下组合键并逆序释放", async () => {
-    const send = vi.fn(async () => ({}));
+    // v3.18: keypress events ride the focused-OOPIF CDP session path.
+    const send = withFocusedOopifFrame(vi.fn(async () => ({})));
     const result = await executeBrowserCommandOnView(makeView({ cdpSend: send }), {
       method: "cuaKeypress",
       keys: ["Control", "Shift", "A"],

@@ -102,6 +102,24 @@ vi.mock("@zcode/shared", () => ({
   get ZCODE_PRODUCT_FLAVOR() {
     return envMock.value === "production" ? "production" : "preview";
   },
+  // v3.18 menu locale resolution calls the shared language-tag mapper; mirror its
+  // mapping inline (zh*→zh-CN, ja*→ja-JP, ru*→ru-RU, ko*→ko-KR, else en-US) because
+  // this suite intentionally avoids importActual of the full @zcode/shared barrel.
+  resolveLocaleFromLanguageTag: (tag: string | null | undefined) => {
+    const primary = tag?.trim().toLowerCase().replaceAll("_", "-").split("-")[0] ?? "";
+    switch (primary) {
+      case "zh":
+        return "zh-CN";
+      case "ja":
+        return "ja-JP";
+      case "ru":
+        return "ru-RU";
+      case "ko":
+        return "ko-KR";
+      default:
+        return "en-US";
+    }
+  },
   getDesktopMenuMessage: (_locale: string, id: string) => {
     const enLabels: Record<string, string> = {
       "titleBar.menu.help.zcodeEndpoint": "ZCode Endpoint",

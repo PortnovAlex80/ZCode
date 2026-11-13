@@ -19,6 +19,29 @@ import {
 } from "../src/model-provider/accountProviderConnectionResolver.js";
 import { createAccountProviderConfig } from "./providerConfigFixtures.js";
 
+/**
+ * Upstream 3.18.1/3.18.2 contract: the connection resolver now requires an
+ * OAuth session snapshot revision reader, which it polls before and after each
+ * resolution round to discard stale results.
+ */
+const stableSessionRevision = async () => "rev-1";
+
+/**
+ * Upstream 3.18.1/3.18.2 contract: Start plan identity no longer comes from the
+ * paid-plan family identity; the resolver reads a dedicated Start plan material
+ * (login channel + shared ZCode JWT + account identity) per family.
+ */
+function createStartPlanMaterial(family: ProviderFamilyDomain, accountIdentity: string) {
+  return {
+    family,
+    loginProvider: family,
+    zcodeUserId: "user-1",
+    sessionRevision: "rev-1",
+    accountIdentity,
+    zcodeJwtToken: "start-jwt",
+  };
+}
+
 function configuredProviders(options: { bigmodelTeam?: boolean } = {}): ProviderConfigMap {
   return new ProviderConfigMap([
     [
@@ -77,6 +100,10 @@ describe("createAccountProviderConnectionResolver", () => {
     const resolve = createAccountProviderConnectionResolver({
       readSettings: async () => ({ providerFamilyDomain: "bigmodel", selections }),
       loadAccountIdentity: async (family) => (family === "bigmodel" ? identity : null),
+      // Start identity shares the paid-plan login lifecycle here: logout clears both.
+      loadStartPlanMaterial: async (family) =>
+        family === "bigmodel" && identity ? createStartPlanMaterial(family, identity) : null,
+      loadSessionRevision: stableSessionRevision,
       loadCodingPlanApiKey: async () => null,
       resolveFamilyAvailability: async () => ({
         [BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan]: { kind: "available", models: [] },
@@ -133,14 +160,18 @@ describe("createAccountProviderConnectionResolver", () => {
         selections: selection ? { bigmodel: selection } : {},
       }),
       loadAccountIdentity: async () => "account-a",
+      // Upstream 3.18.2: the Start request identity comes from the dedicated
+      // Start plan material instead of the paid-plan family identity.
+      loadStartPlanMaterial: async () => createStartPlanMaterial("bigmodel", "account-a"),
     };
     await expect(resolveCurrentAccountAccess(input)).resolves.toEqual({
       type: "zhipu-account",
       family: "bigmodel",
       planKind: "start-plan",
     });
+    // Logout on the Start path means the Start plan material is gone.
     await expect(
-      resolveCurrentAccountAccess({ ...input, loadAccountIdentity: async () => null }),
+      resolveCurrentAccountAccess({ ...input, loadStartPlanMaterial: async () => null }),
     ).resolves.toBeNull();
     await expect(
       resolveCurrentAccountAccess({
@@ -159,9 +190,16 @@ describe("createAccountProviderConnectionResolver", () => {
           selections: { bigmodel: { kind: "individual-coding-plan" } },
         }),
         loadAccountIdentity: async () => "account",
+        // Both families count Start as logged in so its entitlement is queried.
+        loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account"),
+        loadSessionRevision: stableSessionRevision,
         loadCodingPlanApiKey: async () => null,
         resolveFamilyAvailability: createCodingPlanFamilyAvailabilityResolver({
           credentialService: { load: async () => "local-login-info" },
+          // Upstream 3.18.1: the availability port now reads account and Start
+          // materials directly; Start authorization uses the shared ZCode JWT.
+          loadOAuthAccountMaterial: async () => null,
+          loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account"),
           apiClient: {
             request: async () =>
               new Response(
@@ -221,6 +259,11 @@ describe("createAccountProviderConnectionResolver", () => {
       const resolve = createAccountProviderConnectionResolver({
         readSettings: async () => settings,
         loadAccountIdentity: async (family) => (family === "bigmodel" ? identity : null),
+        // Start material follows the same login variable so the identity guard
+        // also watches it, mirroring the shared OAuth session store.
+        loadStartPlanMaterial: async (family) =>
+          family === "bigmodel" && identity ? createStartPlanMaterial(family, identity) : null,
+        loadSessionRevision: stableSessionRevision,
         loadCodingPlanApiKey: async () => null,
         resolveFamilyAvailability: async () => {
           if (wait) {
@@ -278,6 +321,8 @@ describe("createAccountProviderConnectionResolver", () => {
         unresolvedFamilies: ["bigmodel"],
       }),
       loadAccountIdentity: async () => "account",
+      loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account"),
+      loadSessionRevision: stableSessionRevision,
       loadCodingPlanApiKey: async () => "key",
       resolveFamilyAvailability: availability,
     });
@@ -310,6 +355,10 @@ describe("createAccountProviderConnectionResolver", () => {
         selections: {},
       }),
       loadAccountIdentity: async (family) => (family === "bigmodel" ? identity : null),
+      // Start material switches with the account so its scope reset is observable.
+      loadStartPlanMaterial: async (family) =>
+        family === "bigmodel" && identity ? createStartPlanMaterial(family, identity) : null,
+      loadSessionRevision: stableSessionRevision,
       loadCodingPlanApiKey: async () => null,
       resolveFamilyAvailability: async () => ({}),
     });
@@ -335,6 +384,10 @@ describe("createAccountProviderConnectionResolver", () => {
         selections: {},
       }),
       loadAccountIdentity: async (family) => (family === "bigmodel" ? "account" : null),
+      // Only bigmodel is logged in; zai Start stays disconnected.
+      loadStartPlanMaterial: async (family) =>
+        family === "bigmodel" ? createStartPlanMaterial(family, "account") : null,
+      loadSessionRevision: stableSessionRevision,
       loadCodingPlanApiKey: async () => null,
       resolveFamilyAvailability: async () => ({
         [BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan]: {
@@ -376,6 +429,10 @@ describe("createAccountProviderConnectionResolver", () => {
         selections: {},
       }),
       loadAccountIdentity: async (family) => (family === "bigmodel" ? "account" : null),
+      // Only bigmodel is logged in; zai Start stays disconnected.
+      loadStartPlanMaterial: async (family) =>
+        family === "bigmodel" ? createStartPlanMaterial(family, "account") : null,
+      loadSessionRevision: stableSessionRevision,
       loadCodingPlanApiKey: async () => null,
       resolveFamilyAvailability: async () => ({
         [BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan]: {
@@ -409,6 +466,10 @@ describe("createAccountProviderConnectionResolver", () => {
         selections: {},
       }),
       loadAccountIdentity: async (family) => (family === "bigmodel" ? "account" : null),
+      // Only bigmodel is logged in; zai Start stays disconnected.
+      loadStartPlanMaterial: async (family) =>
+        family === "bigmodel" ? createStartPlanMaterial(family, "account") : null,
+      loadSessionRevision: stableSessionRevision,
       loadCodingPlanApiKey: async () => null,
       resolveFamilyAvailability,
     });
@@ -446,6 +507,8 @@ describe("createAccountProviderConnectionResolver", () => {
           mode: "team-coding-plan" as const,
         },
         readSettings: async () => settings,
+        // Required by the upstream 3.18.2 signature; unused for non-Start modes.
+        loadStartPlanMaterial: async () => null,
       };
       const connected = await resolveCurrentAccountAccess({
         ...input,
@@ -483,6 +546,7 @@ describe("createAccountProviderConnectionResolver", () => {
           },
         }),
         loadAccountIdentity: async () => "account-a",
+        loadStartPlanMaterial: async () => null,
       }),
     ).resolves.toEqual({
       type: "zhipu-account",
@@ -507,6 +571,7 @@ describe("createAccountProviderConnectionResolver", () => {
           selections: { zai: { kind: "individual-coding-plan" } },
         }),
         loadAccountIdentity: async () => "account-a",
+        loadStartPlanMaterial: async () => null,
       }),
     ).resolves.toBeNull();
   });
@@ -522,6 +587,9 @@ describe("createAccountProviderConnectionResolver", () => {
       }),
       loadCodingPlanApiKey: async () => "personal-key",
       loadAccountIdentity: async () => "account-a",
+      // Both families are logged in, so Start stays connected in every family.
+      loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account-a"),
+      loadSessionRevision: stableSessionRevision,
       resolveFamilyAvailability: async ({ family }) =>
         family === "zai"
           ? {
@@ -582,6 +650,9 @@ describe("createAccountProviderConnectionResolver", () => {
       }),
       loadCodingPlanApiKey: async () => "personal-key",
       loadAccountIdentity: async () => "account-a",
+      // Both families are logged in, so Start stays connected in every family.
+      loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account-a"),
+      loadSessionRevision: stableSessionRevision,
       resolveFamilyAvailability: async () => ({
         [BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan]: { kind: "unknown" },
       }),
@@ -629,6 +700,9 @@ describe("createAccountProviderConnectionResolver", () => {
       }),
       loadCodingPlanApiKey: async () => null,
       loadAccountIdentity: async () => "account-a",
+      // Both families are logged in, so Start stays connected in every family.
+      loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account-a"),
+      loadSessionRevision: stableSessionRevision,
       resolveFamilyAvailability: async () => ({
         [BUILTIN_MODEL_PROVIDER_IDS.bigmodelTeamCodingPlan]: { kind: "unknown" },
       }),
@@ -682,6 +756,9 @@ describe("createAccountProviderConnectionResolver", () => {
       }),
       loadCodingPlanApiKey: async () => "personal-key",
       loadAccountIdentity: async () => "account-a",
+      // Both families are logged in, so Start stays connected in every family.
+      loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account-a"),
+      loadSessionRevision: stableSessionRevision,
       resolveFamilyAvailability,
     });
 
@@ -735,6 +812,9 @@ describe("createAccountProviderConnectionResolver", () => {
       }),
       loadCodingPlanApiKey: async () => null,
       loadAccountIdentity: async () => "account-a",
+      // Both families are logged in, so Start stays connected in every family.
+      loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account-a"),
+      loadSessionRevision: stableSessionRevision,
       resolveFamilyAvailability: async ({ family }) =>
         family === "bigmodel"
           ? {
@@ -773,6 +853,9 @@ describe("createAccountProviderConnectionResolver", () => {
       }),
       loadCodingPlanApiKey: async () => "personal-key",
       loadAccountIdentity: async () => "account-a",
+      // Both families are logged in, so Start stays connected in every family.
+      loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account-a"),
+      loadSessionRevision: stableSessionRevision,
       resolveFamilyAvailability,
     });
 
@@ -812,6 +895,9 @@ describe("createAccountProviderConnectionResolver", () => {
       }),
       loadCodingPlanApiKey: async () => null,
       loadAccountIdentity: async () => "account-a",
+      // Both families are logged in, so Start stays connected in every family.
+      loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account-a"),
+      loadSessionRevision: stableSessionRevision,
       resolveFamilyAvailability: async ({ family }) => {
         requestedFamilies.push(family);
         return family === "zai"
@@ -843,7 +929,9 @@ describe("createAccountProviderConnectionResolver", () => {
         status: "available",
         models: ["remote-start-model"],
         connectionKey: expect.any(String),
-        current: false,
+        // Upstream 3.18.2: with providerFamilyDomain null, Start currency falls
+        // back to the login channel, which resolves this material to zai.
+        current: true,
       },
       {
         providerId: BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan,
@@ -855,7 +943,8 @@ describe("createAccountProviderConnectionResolver", () => {
         providerId: BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan,
         status: "unknown",
         connectionKey: expect.any(String),
-        current: false,
+        // Same fallback as above; the bigmodel material resolves to bigmodel.
+        current: true,
       },
     ]);
   });
@@ -869,6 +958,9 @@ describe("createAccountProviderConnectionResolver", () => {
       }),
       loadCodingPlanApiKey: async () => "rotating-key",
       loadAccountIdentity: async () => accountIdentity,
+      // Start material rotates with the same account variable.
+      loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, accountIdentity),
+      loadSessionRevision: stableSessionRevision,
       resolveFamilyAvailability: async () => ({
         [BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan]: {
           kind: "available",
@@ -915,6 +1007,10 @@ describe("createAccountProviderConnectionResolver", () => {
       }),
       loadCodingPlanApiKey: async () => "personal-key",
       loadAccountIdentity: async () => null,
+      // No login material at all: Start stays disconnected together with the
+      // paid plan, so no entitlement query may run.
+      loadStartPlanMaterial: async () => null,
+      loadSessionRevision: stableSessionRevision,
       resolveFamilyAvailability,
     });
 

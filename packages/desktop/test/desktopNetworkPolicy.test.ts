@@ -5,14 +5,33 @@ import {
   applyDesktopChromiumNetworkPolicies,
   applyDesktopSessionNetworkPolicy,
   buildElectronProxyConfig,
-  certificateChainMatchesCustomCa,
   createCustomCaCertificateVerifyProc,
-  readCustomCaFingerprintsFromPem,
+  readCustomCaCertificatesFromPem,
 } from "../src/main/desktopNetworkPolicy.js";
 import { EMBEDDED_BROWSER_PARTITION } from "../src/main/browserDataManager.js";
 
+// desktopNetworkPolicy now reads autoUpdater.netSession at module load to include the
+// auto-updater session in the startup policy. Importing the real electron-updater in the
+// bare Node test environment constructs an updater whose app adapter has no electron app,
+// so stub the module with a dedicated net session stub instead.
+const electronUpdaterMocks = vi.hoisted(() => ({
+  netSession: {
+    setProxy: vi.fn(async () => {}),
+    closeAllConnections: vi.fn(async () => {}),
+    setCertificateVerifyProc: vi.fn(),
+  },
+}));
+
+vi.mock("electron-updater", () => ({
+  default: {
+    autoUpdater: {
+      netSession: electronUpdaterMocks.netSession,
+    },
+  },
+}));
+
 describe("desktopNetworkPolicy", () => {
-  it("applies the startup network policy only to the default and embedded Browser sessions", async () => {
+  it("applies the startup network policy only to the default, auto-updater and embedded Browser sessions", async () => {
     const defaultSession = createSessionStub();
     const embeddedBrowserSession = createSessionStub();
     const codingPlanSession = createSessionStub();
@@ -49,6 +68,16 @@ describe("desktopNetworkPolicy", () => {
       expect(target.closeAllConnections).toHaveBeenCalledTimes(1);
       expect(target.setCertificateVerifyProc).toHaveBeenCalledWith(null);
     }
+    // v3.18 routes update downloads through the auto-updater's own net session;
+    // the startup policy must reach it too, otherwise the settings proxy and CA
+    // would not apply to update downloads.
+    expect(electronUpdaterMocks.netSession.setProxy).toHaveBeenCalledWith({
+      mode: "fixed_servers",
+      proxyBypassRules: "localhost,127.0.0.1",
+      proxyRules: "http://127.0.0.1:7890",
+    });
+    expect(electronUpdaterMocks.netSession.closeAllConnections).toHaveBeenCalledTimes(1);
+    expect(electronUpdaterMocks.netSession.setCertificateVerifyProc).toHaveBeenCalledWith(null);
     expect(codingPlanSession.setProxy).not.toHaveBeenCalled();
   });
 
@@ -206,30 +235,41 @@ describe("desktopNetworkPolicy", () => {
     });
   });
 
-  it("accepts only certificate chains that include the configured custom CA", () => {
-    const trustedPem = generateSelfSignedCertPem("Trusted Test CA");
-    const untrustedPem = generateSelfSignedCertPem("Other Test CA");
-    const trustedFingerprints = readCustomCaFingerprintsFromPem(trustedPem);
-    const proc = createCustomCaCertificateVerifyProc(trustedFingerprints);
+  it("accepts only certificate chains that include the configured custom CA", async () => {
+    // v3.18 replaced raw fingerprint matching with full chain validation; drive the
+    // verify proc with a CA-issued leaf and an unrelated self-signed certificate.
+    const caKeys = forge.pki.rsa.generateKeyPair(2048);
+    const caCert = createTestCertificate({
+      commonName: "Trusted Test CA",
+      keys: caKeys,
+      isCa: true,
+    });
+    const caPem = forge.pki.certificateToPem(caCert);
+    const trustedLeafPem = forge.pki.certificateToPem(
+      createTestCertificate({
+        commonName: "intranet.test",
+        keys: forge.pki.rsa.generateKeyPair(2048),
+        issuerCert: caCert,
+        issuerKeys: caKeys,
+        dnsNames: ["intranet.test"],
+      }),
+    );
+    const untrustedPem = generateSelfSignedCertPem("Other Test CA", {
+      dnsNames: ["other.test"],
+    });
+    const trustedCertificates = readCustomCaCertificatesFromPem(caPem);
+    const proc = createCustomCaCertificateVerifyProc(trustedCertificates);
     const acceptedResults: number[] = [];
     const rejectedResults: number[] = [];
 
     expect(proc).not.toBeNull();
-    expect(
-      certificateChainMatchesCustomCa({ data: trustedPem, issuerCert: null }, trustedFingerprints),
-    ).toBe(true);
-    expect(
-      certificateChainMatchesCustomCa(
-        { data: untrustedPem, issuerCert: null },
-        trustedFingerprints,
-      ),
-    ).toBe(false);
-
-    proc?.(buildVerifyRequest(trustedPem), (result) => acceptedResults.push(result));
+    // The v3.18 proc verifies the chain asynchronously; both callbacks are awaited below.
+    proc?.(buildVerifyRequest(trustedLeafPem), (result) => acceptedResults.push(result));
     proc?.(buildVerifyRequest(untrustedPem), (result) => rejectedResults.push(result));
-
-    expect(acceptedResults).toEqual([0]);
-    expect(rejectedResults).toEqual([-3]);
+    await vi.waitFor(() => {
+      expect(acceptedResults).toEqual([0]);
+      expect(rejectedResults).toEqual([-3]);
+    });
   });
 });
 
@@ -265,20 +305,61 @@ function buildVerifyRequest(certPem: string): VerifyRequest {
   } as unknown as VerifyRequest;
 }
 
-function generateSelfSignedCertPem(commonName: string): string {
-  const keys = forge.pki.rsa.generateKeyPair(1024);
+interface TestCertificateOptions {
+  commonName: string;
+  keys: ReturnType<typeof forge.pki.rsa.generateKeyPair>;
+  issuerCert?: forge.pki.Certificate;
+  issuerKeys?: ReturnType<typeof forge.pki.rsa.generateKeyPair>;
+  isCa?: boolean;
+  dnsNames?: string[];
+}
+
+/**
+ * Builds a 2048-bit test certificate. The v3.18 custom CA validator rejects
+ * certificates signed with keys narrower than 2048 bits, so the old 1024-bit
+ * generator would fail even the trusted-chain path.
+ */
+function createTestCertificate(options: TestCertificateOptions): forge.pki.Certificate {
   const cert = forge.pki.createCertificate();
-  cert.publicKey = keys.publicKey;
+  cert.publicKey = options.keys.publicKey;
   cert.serialNumber = "01";
   cert.validity.notBefore = new Date("2026-01-01T00:00:00Z");
   cert.validity.notAfter = new Date("2036-01-01T00:00:00Z");
-  const attrs = [{ name: "commonName", value: commonName }];
-  cert.setSubject(attrs);
-  cert.setIssuer(attrs);
-  cert.setExtensions([
-    { name: "basicConstraints", cA: true, critical: true },
-    { name: "keyUsage", keyCertSign: true, cRLSign: true },
-  ]);
-  cert.sign(keys.privateKey, forge.md.sha256.create());
-  return forge.pki.certificateToPem(cert);
+  const subjectAttrs = [{ name: "commonName", value: options.commonName }];
+  cert.setSubject(subjectAttrs);
+  cert.setIssuer(options.issuerCert ? options.issuerCert.subject.attributes : subjectAttrs);
+  const extensions: Array<Record<string, unknown>> = [
+    { name: "basicConstraints", cA: options.isCa === true, critical: true },
+    {
+      name: "keyUsage",
+      critical: true,
+      digitalSignature: options.isCa !== true,
+      keyCertSign: options.isCa === true,
+    },
+  ];
+  if (options.dnsNames?.length) {
+    extensions.push({
+      name: "subjectAltName",
+      altNames: options.dnsNames.map((dnsName) => ({ type: 2, value: dnsName })),
+    });
+  }
+  cert.setExtensions(extensions as never);
+  cert.sign(
+    (options.issuerKeys ?? options.keys).privateKey,
+    forge.md.sha256.create(),
+  );
+  return cert;
+}
+
+function generateSelfSignedCertPem(
+  commonName: string,
+  options: { dnsNames?: string[] } = {},
+): string {
+  return forge.pki.certificateToPem(
+    createTestCertificate({
+      commonName,
+      keys: forge.pki.rsa.generateKeyPair(2048),
+      dnsNames: options.dnsNames,
+    }),
+  );
 }

@@ -119,6 +119,12 @@ describe("runServerCore startup wiring", () => {
       zcodeBuiltinProviderConfigFilePath: materializedPath,
       sourceServerId: "server-installation-id",
       providerProvisioningTargetEnabled: true,
+      // v3.18 core hands the host services a credential cipher provider so legacy
+      // credential files stay readable before the owner host migrates them.
+      credentialCipherProvider: expect.objectContaining({
+        encrypt: expect.any(Function),
+        decrypt: expect.any(Function),
+      }),
       topicResourceRelayChannel: expect.any(Function),
     });
     expect(createIngressToken).toHaveBeenCalledWith(layout);

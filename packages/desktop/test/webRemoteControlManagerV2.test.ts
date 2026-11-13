@@ -270,6 +270,23 @@ describe("V2 manager public API with real relay", () => {
         delete: async (key) => {
           credentials.delete(key);
         },
+        // v3.18: OAuth session commit goes through the Host-private batch store
+        // (OAuthCredentialRepo.localStore requires loadMany/updateMany/
+        // deleteUnreadable); back them with the same in-memory map.
+        loadMany: async (keys) =>
+          Object.fromEntries(keys.map((key) => [key, credentials.get(key) ?? null])),
+        updateMany: async (changes, options) => {
+          for (const [key, value] of Object.entries(options?.expected ?? {})) {
+            if ((credentials.get(key) ?? null) !== value) return false;
+          }
+          options?.assertCurrent?.();
+          for (const [key, value] of Object.entries(changes)) {
+            if (value === null) credentials.delete(key);
+            else credentials.set(key, value);
+          }
+          return true;
+        },
+        deleteUnreadable: async () => false,
       },
       {
         apiClient: { request: vi.fn<typeof fetch>() },
@@ -566,14 +583,31 @@ describe("V2 manager public API with real relay", () => {
     f.manager.syncAvailableWorkspaces(1, [remote]);
     pending.resolve(local);
     await login;
-    expect(f.manager.getStatus(1).status).toBe("idle");
+    // v3.18: restore consumes the latest full workspace snapshot after the
+    // storage read, so the closed local target must not come back; the live
+    // bridgeable remote target in the window is restored instead.
+    expect(f.manager.getStatus(1)).toMatchObject({
+      status: "running",
+      workspacePath: "/remote",
+    });
   });
   it("远程恢复等待当前remoteSessionId，不为离线占位tab启动relay", async () => {
     const context = { workspacePath: "/remote", workspaceIdentity: "ssh://host/remote" };
     const f = await fixture({}, { webRemoteControlLastEnabledContext: context });
-    expect(await f.manager.restorePreviouslyEnabled(1, [context])).toBe(false);
-    expect(f.relay.httpCalls).toEqual([]);
+    // v3.18: restore no longer gates on a connected remote target (the old gate
+    // left devices offline); it starts the relay for the offline placeholder and
+    // binds the current remoteSessionId later, when the workspace syncs in.
+    expect(await f.manager.restorePreviouslyEnabled(1, [context])).toBe(true);
+    expect(f.manager.getStatus(1)).toMatchObject({ status: "running" });
+    expect(f.manager.getStatus(1).remoteSessionId).toBeUndefined();
     expect(f.attachWorkspaceHost).not.toHaveBeenCalled();
+    f.manager.syncAvailableWorkspaces(1, [
+      { ...context, remoteSessionId: "remote-2", kind: "remote" },
+    ]);
+    expect(f.manager.getStatus(1)).toMatchObject({
+      status: "running",
+      remoteSessionId: "remote-2",
+    });
   });
   it("换账号重注册，旧记录删除无权限仍可启动", async () => {
     const f = await fixture();

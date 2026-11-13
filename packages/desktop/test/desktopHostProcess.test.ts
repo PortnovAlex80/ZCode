@@ -85,6 +85,8 @@ describe("desktopHostProcess CUA operation state routing", () => {
         broadcastHub: { register: vi.fn(), unregister: vi.fn() } as never,
         windowHostProcessMap: new Map(),
         hostRunningTaskCountMap: new Map(),
+        // v3.18: main tracks per-host quit blockers; spawn now requires this map.
+        hostQuitBlockersMap: new Map(),
         onAgentProcessException,
       },
     );
@@ -136,6 +138,8 @@ describe("desktopHostProcess CUA operation state routing", () => {
         broadcastHub: { register: vi.fn(), unregister: vi.fn() } as never,
         windowHostProcessMap: new Map(),
         hostRunningTaskCountMap: new Map(),
+        // v3.18: main tracks per-host quit blockers; spawn now requires this map.
+        hostQuitBlockersMap: new Map(),
         onCuaOperationStateChanged,
         onCuaOperationStateSourceExited,
       },
@@ -188,6 +192,8 @@ describe("desktopHostProcess local media preview authorization", () => {
         broadcastHub: { register: vi.fn(), unregister: vi.fn() } as never,
         windowHostProcessMap: new Map(),
         hostRunningTaskCountMap: new Map(),
+        // v3.18: main tracks per-host quit blockers; spawn now requires this map.
+        hostQuitBlockersMap: new Map(),
         authorizeLocalMediaPreviewPath,
       },
     );
@@ -229,6 +235,8 @@ describe("desktopHostProcess host 自采资源样本", () => {
         broadcastHub: { register: vi.fn(), unregister: vi.fn() } as never,
         windowHostProcessMap: new Map(),
         hostRunningTaskCountMap: new Map(),
+        // v3.18: main tracks per-host quit blockers; spawn now requires this map.
+        hostQuitBlockersMap: new Map(),
       },
     );
 
@@ -344,6 +352,8 @@ describe("desktopHostProcess MCP 资源样本", () => {
         broadcastHub: { register: vi.fn(), unregister: vi.fn() } as never,
         windowHostProcessMap: new Map(),
         hostRunningTaskCountMap: new Map(),
+        // v3.18: main tracks per-host quit blockers; spawn now requires this map.
+        hostQuitBlockersMap: new Map(),
       },
     );
     const sample = {
@@ -416,6 +426,8 @@ it("PRT-010: main 的真实 Host 消息分发即时报告 Bash 完成事实，�
       broadcastHub: { register: vi.fn(), unregister: vi.fn() } as never,
       windowHostProcessMap: new Map(),
       hostRunningTaskCountMap: new Map(),
+      // v3.18: main tracks per-host quit blockers; spawn now requires this map.
+      hostQuitBlockersMap: new Map(),
     },
   );
   const sample = {

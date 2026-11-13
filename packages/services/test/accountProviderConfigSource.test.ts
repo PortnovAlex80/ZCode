@@ -4,11 +4,41 @@ import {
   type ProviderConfigSnapshot,
   type ProviderSource,
 } from "@zcode/provider";
-import { BUILTIN_MODEL_PROVIDER_IDS } from "@zcode/shared";
+import { BUILTIN_MODEL_PROVIDER_IDS, type ProviderFamilyDomain } from "@zcode/shared";
 import { describe, expect, it, vi } from "vitest";
 import { createAccountProviderConfigSource } from "../src/model-provider/accountProviderConnectionResolver.js";
 import { createAccountProviderCredentialService } from "../src/model-provider/accountProviderCredentialService.js";
 import { createAccountProviderConfig } from "./providerConfigFixtures.js";
+
+/**
+ * Upstream 3.18.1/3.18.2 contract: the account config source now requires an
+ * OAuth session snapshot revision reader plus dedicated Start plan material and
+ * full OAuth account material loaders (no bare access-token reader anymore).
+ */
+const stableSessionRevision = async () => "rev-1";
+
+function createStartPlanMaterial(family: ProviderFamilyDomain, accountIdentity: string) {
+  return {
+    family,
+    loginProvider: family,
+    zcodeUserId: "user-1",
+    sessionRevision: "rev-1",
+    accountIdentity,
+    zcodeJwtToken: "start-jwt",
+  };
+}
+
+function createOAuthAccountMaterial(family: ProviderFamilyDomain, accountIdentity: string) {
+  return {
+    family,
+    loginProvider: family,
+    zcodeUserId: "user-1",
+    sessionRevision: "rev-1",
+    accountIdentity,
+    accessToken: "new-login-token",
+    zcodeJwtToken: null,
+  };
+}
 
 class StaticConfigSource implements ProviderSource<ProviderConfigSnapshot> {
   async read(): Promise<ProviderConfigSnapshot> {
@@ -55,7 +85,9 @@ describe("createAccountProviderConfigSource", () => {
       projectId: "proj",
     }));
     const credentials = createAccountProviderCredentialService({
-      loadOAuthAccessToken: async () => "new-login-token",
+      // Upstream 3.18.1: the credential service reads the full OAuth account
+      // material; the access token travels inside it.
+      loadOAuthAccountMaterial: async (family) => createOAuthAccountMaterial(family, "same-account"),
       resolveProviderMaterial,
     });
     const source = createAccountProviderConfigSource({
@@ -64,6 +96,10 @@ describe("createAccountProviderConfigSource", () => {
         providerFamilyDomain: "zai",
         selections: { zai: { kind: "individual-coding-plan" } },
       }),
+      // Start plan stays logged out here; this test only exercises the paid
+      // plan key recovery path.
+      loadStartPlanMaterial: async () => null,
+      loadSessionRevision: stableSessionRevision,
       loadAccountIdentity: async () => "same-account",
       loadCodingPlanApiKey: (id, family, accountIdentity, forceRefresh) =>
         id === providerId
@@ -129,6 +165,10 @@ describe("createAccountProviderConfigSource", () => {
       }),
       loadCodingPlanApiKey,
       loadAccountIdentity: async () => "account-a",
+      // Upstream 3.18.2: Start connections take identity from the dedicated
+      // Start plan material, so zaiStart resolves as connected and current.
+      loadStartPlanMaterial: async (family) => createStartPlanMaterial(family, "account-a"),
+      loadSessionRevision: stableSessionRevision,
       resolveFamilyAvailability,
     });
 

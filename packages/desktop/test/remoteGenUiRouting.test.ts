@@ -50,6 +50,15 @@ describe("remote Gen UI routing", () => {
       const sourceRpc = connect(new ServiceCollection().register(IGenUiService, source));
       const connectionServices = {
         ...Object.fromEntries(REMOTE_WORKSPACE_RPC_CHANNELS.map((key) => [key, {}])),
+        // v3.18: exposeOnChannelServer scopes the credential channel through
+        // scopeCredentialServiceForRpc, which requires load/save/delete.
+        credentialService: {
+          load: vi.fn(async () => null),
+          save: vi.fn(async () => {}),
+          delete: vi.fn(async () => {}),
+          inspectStore: vi.fn(async () => ({ status: "healthy" as const })),
+          recoverStore: vi.fn(async () => ({ status: "changed" as const })),
+        },
         genUiService: sourceRpc.service,
       } as unknown as IServiceAccessor;
       const host = createServerRemoteWorkspaceServiceCollection({

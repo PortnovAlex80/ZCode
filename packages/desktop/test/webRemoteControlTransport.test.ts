@@ -74,6 +74,15 @@ describe("desktop relay V2 transport", () => {
     expect(relay.httpCalls.filter((call) => call.path.endsWith("/token"))).toHaveLength(1);
   });
   it("每轮4~6秒心跳不带SID，15秒无ACK独立重连并重新申请token", async () => {
+    // Retry policy captures its random source at construction (same reason as the
+    // KICKED test below). WebRemoteControlV2RetryPolicy.nextDelay() returns the
+    // post-ack reconnect spread delay from [0, 1500) ms, but this test only
+    // advances the fake clock by 1200ms after scheduling a reconnect; a real
+    // random draw above 1200ms leaves the reconnect untriggered and the final
+    // waitForState aborts. Pin random=0.5 so spread delays are exactly 750ms and
+    // heartbeat delays are exactly 5000ms, keeping every fake-clock boundary
+    // deterministic without changing the asserted behavior.
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     const { relay, transport, states, waitForState } = await fixture({
       users: { jwt: "user" },
       onMessage: ({ message }) =>
@@ -83,8 +92,11 @@ describe("desktop relay V2 transport", () => {
     await vi.waitFor(() => expect(states.at(-1)).toBe("waiting_terminal"));
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     // 当前连接的计时器先通过重连在 fake clock 下建立。
+    console.error("[dbg] before disconnect, states:", states.join(","));
     relay.disconnect({ role: "device" });
+    console.error("[dbg] disconnect issued");
     await waitForState("connecting");
+    console.error("[dbg] reached connecting");
     await vi.advanceTimersByTimeAsync(1200);
     await waitForState("waiting_terminal");
     expect(states.at(-1)).toBe("waiting_terminal");

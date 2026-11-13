@@ -124,15 +124,28 @@ async function createRemoteTarget() {
   const availabilityReleased = new Promise<void>((resolve) => {
     releaseAvailabilityGate = resolve;
   });
+  // Upstream 3.18.1: Provisioning commits the OAuth session group through batch
+  // CAS reads/writes (loadMany/updateMany) instead of per-key save/delete.
   const credentialService = {
-    load: async (key: string) => credentials.get(key) ?? null,
-    save: async (key: string, value: string) => {
+    loadMany: async (keys: string[]) =>
+      Object.fromEntries(keys.map((key) => [key, credentials.get(key) ?? null])),
+    updateMany: async (
+      values: Record<string, string | null>,
+      cas: { expected?: Record<string, string | null> } = {},
+    ) => {
+      if (
+        cas.expected &&
+        !Object.entries(cas.expected).every(
+          ([key, value]) => (credentials.get(key) ?? null) === value,
+        )
+      )
+        return false;
       await delay(2);
-      credentials.set(key, value);
-    },
-    delete: async (key: string) => {
-      await delay(2);
-      credentials.delete(key);
+      for (const [key, value] of Object.entries(values)) {
+        if (value === null) credentials.delete(key);
+        else credentials.set(key, value);
+      }
+      return true;
     },
   };
   const accountSource = createAccountProviderConfigSource({
@@ -146,6 +159,26 @@ async function createRemoteTarget() {
     loadAccountIdentity: async (family) => {
       const raw = credentials.get(`oauth:${family}:user_info`);
       return raw ? ((JSON.parse(raw) as { id?: string }).id ?? null) : null;
+    },
+    // Upstream 3.18.1/3.18.2: the source requires an OAuth session revision
+    // reader and a dedicated Start plan material loader. Start material shares
+    // the same credential facts as loadAccountIdentity so the identity guard
+    // observes login/logout on the Start path too.
+    loadSessionRevision: async () => "rev-1",
+    loadStartPlanMaterial: async (family) => {
+      const raw = credentials.get(`oauth:${family}:user_info`);
+      if (!raw) return null;
+      const id = (JSON.parse(raw) as { id?: string }).id ?? null;
+      return id
+        ? {
+            family,
+            loginProvider: family,
+            zcodeUserId: id,
+            sessionRevision: "rev-1",
+            accountIdentity: id,
+            zcodeJwtToken: credentials.get("zcodejwttoken") ?? "",
+          }
+        : null;
     },
     resolveFamilyAvailability: async ({ providers }) => {
       if (availabilityGateArmed) {
@@ -279,6 +312,9 @@ describe("Provider Provisioning Target 与真实账号刷新链路", () => {
     expect([...credentials.keys()].sort()).toEqual([
       "oauth:active_provider",
       "oauth:bigmodel:user_info",
+      // Upstream 3.18.1: every target commit writes a fresh session revision
+      // key into the OAuth session group to prevent A→B→A replay.
+      "oauth:session_revision",
       "zcodejwttoken",
     ]);
     const snapshot = await accountSource.read();

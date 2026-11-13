@@ -38,11 +38,25 @@ import {
 
 const clientConfigService = { getSnapshot: vi.fn(async () => ({ pluginStoreOrder: null })) };
 
+// v3.18: exposeOnChannelServer now scopes the credential channel through
+// scopeCredentialServiceForRpc, which requires load/save/delete on the instance;
+// connection placeholders must provide the full ICredentialService surface.
+function makeCredentialServiceStub() {
+  return {
+    load: vi.fn(async () => null),
+    save: vi.fn(async () => {}),
+    delete: vi.fn(async () => {}),
+    inspectStore: vi.fn(async () => ({ status: "healthy" as const })),
+    recoverStore: vi.fn(async () => ({ status: "changed" as const })),
+  };
+}
+
 function makeServerRemoteServices(): IServiceAccessor {
   return {
     ...Object.fromEntries(
       REMOTE_WORKSPACE_RPC_CHANNELS.map((channel) => [channel, { remote: channel }]),
     ),
+    credentialService: makeCredentialServiceStub(),
     systemService: { info: vi.fn(async () => ({ platform: "linux", homedir: "/home/remote" })) },
   } as unknown as IServiceAccessor;
 }

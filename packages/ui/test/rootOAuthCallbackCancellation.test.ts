@@ -102,11 +102,29 @@ describe("OAuth 成功后的真实设置 CAS", () => {
     const setUser = vi.fn();
     const setOAuthError = vi.fn();
     const markOAuthSuccess = vi.fn();
+    // v3.18 login refresh guards the CAS write with the OAuth account session revision;
+    // both reads inside one login flow must observe the same identity snapshot.
+    const accountAvailability = {
+      loginProvider: "bigmodel",
+      userId: "user",
+      sessionRevision: "rev-1",
+      families: ["bigmodel"],
+    };
     const providerRefresh = vi.fn(async () => ({
       providers: [
         {
           providerId: "account:bigmodel-individual-coding-plan",
           accountState: { availability: "available", entitled: true, current: false },
+          // The login refresh resolves the registry access from effectiveConfig;
+          // without a parseable zhipu-account entry the flow stops before the CAS write.
+          effectiveConfig: {
+            access: {
+              type: "zhipu-account",
+              accountType: "bigmodel",
+              mode: "individual-coding-plan",
+              entitled: true,
+            },
+          },
         },
       ],
     }));
@@ -133,6 +151,7 @@ describe("OAuth 成功后的真实设置 CAS", () => {
           oauthService: {
             pollPendingOAuth: async () => result,
             handleCallback: async () => result,
+            getAccountAvailability: async () => accountAvailability,
           },
           settingService: {
             get: () => setting.get(),
@@ -189,8 +208,14 @@ describe("OAuth 成功后的真实设置 CAS", () => {
       expect((await setting.get()).providerFamilyConnectionSelections?.bigmodel).toEqual(newer);
       expect((await setting.get()).providerFamilyDomainUpdatedAt).toBe(concurrentVersion);
       expect(admission).toHaveBeenCalledOnce();
-      expect(providerRefresh).toHaveBeenCalledOnce();
-      expect(refreshAppSettings).toHaveBeenCalledOnce();
+      // v3.18 login flow refreshes account providers twice: once for the pre-write
+      // entitlement inspection and once via the post-login refreshProviderState.
+      expect(providerRefresh).toHaveBeenCalledTimes(2);
+      // v3.18 contract: the login's own optimistic CAS write loses the race against the
+      // concurrent writer (the setting service rejects it with "Account connection
+      // settings changed"), so the login path logs the conflict and never reaches the
+      // app-settings refresh; the concurrent selection above stays the persisted fact.
+      expect(refreshAppSettings).not.toHaveBeenCalled();
     } finally {
       vi.stubGlobal("window", previousWindow);
       await rm(root, { recursive: true, force: true });
