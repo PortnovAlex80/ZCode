@@ -247,9 +247,13 @@ export function useComposerVoiceInput(options: {
       return;
     }
     // 先建立 Host 会话再开始采集：started 之前的音频由 Host 按顺序缓存。
+    // Fork (2026-11-15): ru-* maps to ru-RU — the host routes it to the local
+    // GLM transcription engine (no live partials, final text on stop) because
+    // the server realtime ASR rejects non-zh/en languages. See
+    // docs/chat/composer-voice-input.md.
     await voiceInputService.start({
       attemptId: attempt.id,
-      language: locale.startsWith("zh") ? "zh-CN" : "en-US",
+      language: locale.startsWith("zh") ? "zh-CN" : locale.startsWith("ru") ? "ru-RU" : "en-US",
     });
     try {
       const capture = await startPcmCapture({

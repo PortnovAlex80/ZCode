@@ -9195,6 +9195,7 @@ const enUS: Record<string, string> = {
     'Cannot connect to speech recognition through the HTTP proxy. Make sure the proxy supports WebSocket, or add the service address to "No proxy", then restart the app.',
   "voiceInput.error.rate_limited": "Speech recognition is busy. Try again later.",
   "voiceInput.error.unavailable": "Speech recognition is unavailable. Try again later.",
+  "voiceInput.error.glm_key_missing": "Russian dictation needs a Z.ai API key. Add one in Settings → Model Providers to enable it.",
   "voiceInput.error.upstream_timeout": "Speech recognition timed out. Try again.",
   "voiceInput.error.audio_limit_exceeded":
     "The recording reached the maximum length. The recognized text was kept.",

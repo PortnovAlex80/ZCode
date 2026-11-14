@@ -16,7 +16,9 @@ export type VoiceInputErrorCode =
   | "upstream_timeout"
   | "audio_limit_exceeded"
   | "audio_too_short"
-  | "failed";
+  | "failed"
+  /** Fork GLM engine (2026-11-15): no enabled GLM provider API key on this machine */
+  | "glm_key_missing";
 
 export type VoiceInputEvent =
   | { attemptId: string; type: "started" }
@@ -31,8 +33,14 @@ export type VoiceInputEvent =
  */
 export interface IVoiceInputService {
   readonly onEvent: Event<VoiceInputEvent>;
-  /** 立即返回；连接结果通过 onEvent 的 started / error 通知 */
-  start(params: { attemptId: string; language: "zh-CN" | "en-US" }): Promise<void>;
+  /**
+   * 立即返回；连接结果通过 onEvent 的 started / error 通知。
+   * Fork (2026-11-15): "ru-RU" routes to the local GLM transcription engine
+   * (buffer PCM, transcribe on finish; no partial results) because the server
+   * realtime ASR rejects any language beyond zh-CN/en-US with
+   * unsupported_capability. See docs/chat/composer-voice-input.md.
+   */
+  start(params: { attemptId: string; language: "zh-CN" | "en-US" | "ru-RU" }): Promise<void>;
   /** 16kHz 单声道 PCM16LE；started 之前到达的音频按顺序缓存 */
   sendAudio(params: { attemptId: string; chunk: Uint8Array }): Promise<void>;
   /** 结束录音，等待 completed */

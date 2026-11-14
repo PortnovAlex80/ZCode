@@ -7,8 +7,31 @@
 - 第一版只支持桌面端（Electron）。Web 端和手机远控端不显示按钮。
 - 只给已登录用户开放。未登录时不显示按钮；登录态变化后按钮随之出现或消失。
 - 使用 `realtime` 模式，不指定 provider，由服务端 `default_provider` 决定。
-- 识别语言跟随界面语言：`zh-*` 用 `zh-CN`，其他用 `en-US`（火山 realtime 只支持这两种）。
+- 识别语言跟随界面语言：`zh-*` 用 `zh-CN`；`ru-*` 用 `ru-RU`（fork GLM 引擎，见下节）；其他用 `en-US`。
 - 产品内不额外提示录音是否会被服务端留存。
+
+## Fork：非中英文语言走 GLM 转写引擎（2026-11-15）
+
+zcode-server 的 realtime ASR（Volcano bigmodel_async）只接受 `zh-CN | en-US`：
+实测其他语言（`ru-RU`/`ru`/`ja-JP`/`ko-KR`）在 WS `start` 后立即返回
+`unsupported_capability`。因此 fork 为 `ru-RU` 增加第二条引擎路径：
+
+- **引擎选择**：`start` 的 `language === "ru-RU"` 时走 GLM 文件转写；`zh-CN`/`en-US`
+  保持服务端 realtime WS 不变。
+- **凭据与端点**：Host 从本机 provider 配置读取第一个启用的 GLM 预设
+  （`zai-api`、`bigmodel-api`、coding-plan/start-plan 系列）的 API Key；
+  端点按 provider 归属选择 `https://api.z.ai/api/paas/v4/audio/transcriptions`
+  或 `https://open.bigmodel.cn/api/paas/v4/audio/transcriptions`，
+  可用 `ZCODE_VOICE_GLM_ASR_URL` 覆盖。找不到可用 Key 时以
+  `glm_key_missing` 失败，UI 走现有错误提示。
+- **数据流**：麦克风采集不变（16k mono s16le PCM）。GLM 会话不建 WS：
+  `started` 事件立即发出，音频在 Host 内存缓冲；`finish` 后把缓冲按
+  ≤30s 分块加 RIFF 头逐块 `POST`（multipart `file`，`model=glm-asr-2512`），
+  各块 final 文本按序拼接为一次 `completed`。GLM 自动检测语言，无需
+  language 参数；实测真人俄语转写正确（TTS 合成音可能失真）。
+- **语义差异**：GLM 路径没有逐字 partial（`result` 事件）；录音期间 UI 只显示
+  波形 pill，最终文本在 `completed` 一次插入。超时/网络错误沿用现有
+  错误分类（`unavailable`/`failed`）。
 
 ## 入口
 

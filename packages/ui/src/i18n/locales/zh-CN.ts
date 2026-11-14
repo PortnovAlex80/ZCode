@@ -8693,6 +8693,7 @@ const zhCN: Record<string, string> = {
     "无法通过 HTTP 代理连接语音识别服务。请确认代理支持 WebSocket，或把服务地址加入「不使用代理的地址」后重启应用。",
   "voiceInput.error.rate_limited": "语音识别繁忙，请稍后再试。",
   "voiceInput.error.unavailable": "语音识别服务暂不可用，请稍后再试。",
+  "voiceInput.error.glm_key_missing": "俄语听写需要 Z.ai API Key。请在设置 → 模型服务商中添加后再试。",
   "voiceInput.error.upstream_timeout": "语音识别超时，请重试。",
   "voiceInput.error.audio_limit_exceeded": "已达到单次录音时长上限，已保留识别到的文字。",
   "voiceInput.error.failed": "语音识别失败，请重试。",

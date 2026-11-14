@@ -94,6 +94,19 @@ import { IMarketingTouchService } from "#src/marketing-touch/marketingTouch.js";
 import { createMarketingTouchService } from "#src/marketing-touch/marketingTouchService.js";
 import { IVoiceInputService } from "#src/voice-input/contract.js";
 import { createVoiceInputService } from "#src/voice-input/voiceInputService.js";
+import { BUILTIN_MODEL_PROVIDER_IDS } from "@zcode/shared";
+
+// Fork GLM dictation engine (2026-11-15): providers whose API key may back the
+// local ru-RU transcription path; mirrors LEGACY_PRESET_GLM_PROVIDER_IDS from
+// legacyZCodeConfigProviderReader (kept local to avoid exporting internals).
+const glmVoiceProviderIds = new Set<string>([
+  "zai-api",
+  "bigmodel-api",
+  BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan,
+  BUILTIN_MODEL_PROVIDER_IDS.zaiStartPlan,
+  BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan,
+  BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan,
+]);
 import { createMarketingAssetRegistry } from "#src/marketing-touch/marketingAssetRegistry.js";
 import type { IChannel } from "@zcode/rpc";
 import {
@@ -3085,6 +3098,33 @@ export function createLocalServices(options: {
         getToken: () => credentialService.load("zcodejwttoken"),
         resolveOrigin: resolveCurrentZCodeEndpointOrigin,
         createSocket: (url) => hostApiNetworkTransport.createWebSocket(url),
+        // Fork GLM engine (2026-11-15): ru-RU dictation transcribes through the
+        // first enabled GLM provider's API key because the server realtime ASR
+        // rejects non-zh/en languages. Endpoint follows the provider's region;
+        // ZCODE_VOICE_GLM_ASR_URL overrides for exotic setups. See
+        // docs/chat/composer-voice-input.md.
+        resolveGlmTranscription: async () => {
+          const override = process.env.ZCODE_VOICE_GLM_ASR_URL?.trim();
+          const providers = await readLegacyZCodeConfigProviders();
+          const candidate = providers.find(
+            (provider) =>
+              glmVoiceProviderIds.has(provider.id) &&
+              provider.enabled !== false &&
+              provider.apiKey.trim().length > 0,
+          );
+          if (!candidate) return null;
+          const isCn =
+            /bigmodel\.cn/.test(candidate.endpoints.openai ?? "") ||
+            candidate.id.startsWith("bigmodel");
+          return {
+            url:
+              override ||
+              (isCn
+                ? "https://open.bigmodel.cn/api/paas/v4/audio/transcriptions"
+                : "https://api.z.ai/api/paas/v4/audio/transcriptions"),
+            apiKey: candidate.apiKey.trim(),
+          };
+        },
       }),
     )
     .register(IFileService, fileService)

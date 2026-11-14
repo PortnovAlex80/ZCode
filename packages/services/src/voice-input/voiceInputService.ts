@@ -16,7 +16,7 @@ const TICKET_TIMEOUT_MS = 10_000;
 
 interface Session {
   attemptId: string;
-  language: "zh-CN" | "en-US";
+  language: "zh-CN" | "en-US" | "ru-RU";
   startedAt: number;
   socket: WebSocket | null;
   /** 本次连接是否经 HTTP 代理；由 Host 网络 transport 的选路结果决定 */
@@ -32,6 +32,64 @@ interface Session {
   settled: boolean;
   serverSessionId?: string;
   provider?: string;
+}
+
+/** Fork GLM engine session state (no WS; buffers PCM and transcribes on finish). */
+interface GlmSession {
+  kind: "glm";
+  attemptId: string;
+  startedAt: number;
+  /** Total PCM bytes buffered across chunks (for logging). */
+  bufferedBytes: number;
+  chunks: Uint8Array[];
+  finishRequested: boolean;
+  settled: boolean;
+  transcription: Promise<void> | null;
+}
+
+const GLM_SAMPLE_RATE = 16_000;
+/** GLM audio/transcriptions hard limit per request. */
+const GLM_CHUNK_PCM_BYTES = GLM_SAMPLE_RATE * 2 * 30;
+
+/** Minimal RIFF/WAVE header for 16-bit mono PCM at the captured sample rate. */
+function buildWavHeader(pcmBytes: number): Uint8Array {
+  const header = new Uint8Array(44);
+  const view = new DataView(header.buffer);
+  const writeAscii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  writeAscii(0, "RIFF");
+  view.setUint32(4, 36 + pcmBytes, true);
+  writeAscii(8, "WAVE");
+  writeAscii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, GLM_SAMPLE_RATE, true);
+  view.setUint32(28, GLM_SAMPLE_RATE * 2, true); // byte rate
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  writeAscii(36, "data");
+  view.setUint32(40, pcmBytes, true);
+  return header;
+}
+
+export function createGlmWavFromPcm(pcm: Uint8Array): Uint8Array {
+  const out = new Uint8Array(44 + pcm.byteLength);
+  out.set(buildWavHeader(pcm.byteLength), 0);
+  out.set(pcm, 44);
+  return out;
+}
+
+/** Split a PCM buffer into ≤30s WAV-framed requests (identity for short input). */
+export function splitPcmIntoGlmWavChunks(pcm: Uint8Array): Uint8Array[] {
+  if (pcm.byteLength === 0) return [];
+  const parts: Uint8Array[] = [];
+  for (let offset = 0; offset < pcm.byteLength; offset += GLM_CHUNK_PCM_BYTES) {
+    const end = Math.min(offset + GLM_CHUNK_PCM_BYTES, pcm.byteLength);
+    parts.push(createGlmWavFromPcm(pcm.subarray(offset, end)));
+  }
+  return parts;
 }
 
 export function mapAsrErrorCode(code: string | undefined, status?: number): VoiceInputErrorCode {
@@ -76,11 +134,21 @@ export function createVoiceInputService(options: {
   resolveOrigin: () => Promise<string>;
   /** 由 Host 网络 transport 提供，与 HTTP 请求共用代理、No Proxy 与自定义 CA；不提供默认直连实现 */
   createSocket: (url: string) => Promise<{ socket: WebSocket; viaProxy: boolean }>;
+  /**
+   * Fork GLM engine (2026-11-15): resolves the endpoint + API key for the
+   * local transcription path used by languages the server realtime ASR
+   * rejects (ru-RU). Returns null when no GLM provider API key is configured;
+   * the session then fails with glm_key_missing. See
+   * docs/chat/composer-voice-input.md.
+   */
+  resolveGlmTranscription?: () => Promise<{ url: string; apiKey: string } | null>;
 }): IVoiceInputService & { dispose(): void } {
   const emitter = new Emitter<VoiceInputEvent>();
   const createSocket = options.createSocket;
+  const resolveGlmTranscription = options.resolveGlmTranscription;
   // 唯一数据源：当前会话。旧会话的回调通过 `current !== session` 判断后丢弃。
   let current: Session | null = null;
+  let currentGlm: GlmSession | null = null;
 
   function emit(session: Session, event: VoiceInputEvent) {
     if (current !== session || session.settled) return;
@@ -280,6 +348,115 @@ export function createVoiceInputService(options: {
     };
   }
 
+  // ───────── Fork GLM engine (ru-RU): buffer PCM, transcribe on finish ─────────
+
+  function glmEmit(session: GlmSession, event: VoiceInputEvent) {
+    if (currentGlm !== session || session.settled) return;
+    if (event.type === "completed" || event.type === "error") session.settled = true;
+    emitter.fire(event);
+  }
+
+  function glmFail(session: GlmSession, code: VoiceInputErrorCode, detail: Record<string, unknown>) {
+    if (currentGlm !== session || session.settled) return;
+    log.warn(undefined, "voice input (glm) failed", {
+      attemptId: session.attemptId,
+      bufferedBytes: session.bufferedBytes,
+      elapsedMs: Date.now() - session.startedAt,
+      code,
+      ...detail,
+    });
+    glmEmit(session, { attemptId: session.attemptId, type: "error", code });
+  }
+
+  /** POST one WAV chunk to GLM audio/transcriptions; returns its final text. */
+  async function transcribeGlmChunk(
+    session: GlmSession,
+    url: string,
+    apiKey: string,
+    wav: Uint8Array,
+  ): Promise<string> {
+    const form = new FormData();
+    // Copy into a plain ArrayBuffer-backed view: BlobPart requires
+    // Uint8Array<ArrayBuffer>, while the capture pipeline hands us
+    // Uint8Array<ArrayBufferLike>.
+    const wavBytes = new Uint8Array(wav.byteLength);
+    wavBytes.set(wav);
+    form.append("file", new Blob([wavBytes], { type: "audio/wav" }), "dictation.wav");
+    form.append("model", "glm-asr-2512");
+    // apiClient shares the host proxy/CA policy; follow redirects is irrelevant
+    // for multipart POSTs, and errors surface through !ok like the ticket path.
+    const response = await options.apiClient.request(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      timeoutMs: 60_000,
+      redirect: "error",
+    });
+    const body = (await response.json().catch(() => null)) as { text?: unknown } | null;
+    if (!response.ok || !body || typeof body.text !== "string") {
+      throw Object.assign(new Error("glm_transcription_rejected"), {
+        status: response.status,
+      });
+    }
+    return body.text;
+  }
+
+  async function runGlmTranscription(session: GlmSession) {
+    const pcm = new Uint8Array(session.bufferedBytes);
+    let offset = 0;
+    for (const chunk of session.chunks.splice(0)) {
+      pcm.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const chunks = splitPcmIntoGlmWavChunks(pcm);
+    if (chunks.length === 0) {
+      glmFail(session, "audio_too_short", { stage: "glm-empty-buffer" });
+      return;
+    }
+    let credentials: { url: string; apiKey: string } | null = null;
+    try {
+      credentials = resolveGlmTranscription ? await resolveGlmTranscription() : null;
+    } catch (error) {
+      log.warn(undefined, "voice input (glm) credential resolve threw", {
+        attemptId: session.attemptId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (!credentials) {
+      glmFail(session, "glm_key_missing", { stage: "glm-credentials" });
+      return;
+    }
+    const texts: string[] = [];
+    for (const [index, wav] of chunks.entries()) {
+      if (currentGlm !== session || session.settled) return;
+      try {
+        texts.push(
+          (await transcribeGlmChunk(session, credentials.url, credentials.apiKey, wav)).trim(),
+        );
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        glmFail(session, status === 401 ? "unauthorized" : "unavailable", {
+          stage: "glm-transcribe",
+          chunk: index + 1,
+          of: chunks.length,
+          status,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+    }
+    if (currentGlm !== session || session.settled) return;
+    const text = texts.filter(Boolean).join(" ");
+    log.info(undefined, "voice input (glm) completed", {
+      attemptId: session.attemptId,
+      chunks: chunks.length,
+      bufferedBytes: session.bufferedBytes,
+      length: text.length,
+      elapsedMs: Date.now() - session.startedAt,
+    });
+    glmEmit(session, { attemptId: session.attemptId, type: "completed", text });
+  }
+
   return {
     onEvent: emitter.event,
     async start({ attemptId, language }) {
@@ -290,6 +467,30 @@ export function createVoiceInputService(options: {
         if (previous.socket?.readyState === 1)
           previous.socket.send(JSON.stringify({ type: "cancel" }));
         release(previous);
+      }
+      if (currentGlm) {
+        log.info(undefined, "voice input (glm) replaced", {
+          attemptId: currentGlm.attemptId,
+        });
+        currentGlm.settled = true;
+        currentGlm = null;
+      }
+      if (language === "ru-RU") {
+        const session: GlmSession = {
+          kind: "glm",
+          attemptId,
+          startedAt: Date.now(),
+          bufferedBytes: 0,
+          chunks: [],
+          finishRequested: false,
+          settled: false,
+          transcription: null,
+        };
+        currentGlm = session;
+        log.info(undefined, "voice input (glm) start", { attemptId, language });
+        // No connection to establish: the engine is ready the moment it starts.
+        glmEmit(session, { attemptId, type: "started" });
+        return;
       }
       const session: Session = {
         attemptId,
@@ -309,18 +510,42 @@ export function createVoiceInputService(options: {
       void connect(session);
     },
     async sendAudio({ attemptId, chunk }) {
+      const glm = currentGlm;
+      if (glm && glm.attemptId === attemptId) {
+        if (glm.finishRequested || glm.settled) return;
+        glm.chunks.push(chunk);
+        glm.bufferedBytes += chunk.byteLength;
+        return;
+      }
       const session = current;
       if (!session || session.attemptId !== attemptId || session.finishRequested) return;
       if (!session.started) session.pending.push(chunk);
       else sendChunk(session, chunk);
     },
     async finish({ attemptId }) {
+      const glm = currentGlm;
+      if (glm && glm.attemptId === attemptId) {
+        if (glm.finishRequested || glm.settled) return;
+        glm.finishRequested = true;
+        glm.transcription = runGlmTranscription(glm);
+        return;
+      }
       const session = current;
       if (!session || session.attemptId !== attemptId || session.finishRequested) return;
       session.finishRequested = true;
       if (session.started) session.socket?.send(JSON.stringify({ type: "finish" }));
     },
     async cancel({ attemptId }) {
+      const glm = currentGlm;
+      if (glm && glm.attemptId === attemptId) {
+        log.info(undefined, "voice input (glm) cancelled", {
+          attemptId: glm.attemptId,
+          bufferedBytes: glm.bufferedBytes,
+        });
+        glm.settled = true;
+        currentGlm = null;
+        return;
+      }
       const session = current;
       if (!session || session.attemptId !== attemptId) return;
       log.info(undefined, "voice input cancelled", summary(session));
@@ -332,6 +557,10 @@ export function createVoiceInputService(options: {
       if (current) {
         current.settled = true;
         release(current);
+      }
+      if (currentGlm) {
+        currentGlm.settled = true;
+        currentGlm = null;
       }
       emitter.dispose();
     },
