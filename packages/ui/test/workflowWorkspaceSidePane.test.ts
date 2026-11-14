@@ -19,6 +19,13 @@ vi.mock("@/logger.js", () => ({
   logger: { debug: vi.fn(), warn: vi.fn() },
 }));
 
+// ControlHintTooltip depends on the app-root TooltipProvider; tests stub it as a
+// pass-through per the existing convention (createWorkflowToolCallBlock.test.ts).
+// The Read card's file chip renders one for every entry.
+vi.mock("@/ControlHintTooltip.js", () => ({
+  ControlHintTooltip: ({ children }: { children?: ReactNode }) => children,
+}));
+
 const release = vi.fn();
 const layer = { acquire: vi.fn(() => ({ release })) };
 const workflowRunWorkspace = vi.fn<() => Promise<V4ConversationWorkflowRunWorkspaceResult>>();
@@ -338,7 +345,9 @@ describe("WorkflowWorkspaceSidePane", () => {
     const view = renderPane();
     await waitFor(() => expect(view.getAllByTestId("workflow-workspace-card")).toHaveLength(4));
     const read = view.getAllByTestId("workflow-workspace-card")[1]!;
-    const chip = read.querySelector("button[title]")!;
+    // The file chip is the Read card's only button; the chip button no longer carries a
+    // native `title` (the path lives in the hover tooltip, which this suite stubs out).
+    const chip = read.querySelector("button")!;
     fireEvent.click(chip);
     expect(onOpenCodeViewer).toHaveBeenCalledWith({
       type: "file",

@@ -634,7 +634,7 @@ describe("WorkflowRunSidePane 摘要行", () => {
     });
     const view = renderPane();
     const usage = view.getByTestId("workflow-run-usage").textContent ?? "";
-    expect(usage).toContain("1 agent working");
+    expect(usage).toContain("1 subagent working");
     expect(usage).toContain("0/1 steps");
     expect(usage).toContain(`${formatCount(12345)} tokens`);
     expect(usage).not.toContain("%");
@@ -1646,7 +1646,14 @@ describe("WorkflowRunSidePane 阶段名册", () => {
     const pins = within(section).getByTestId("workflow-roster-pins");
     const pills = within(pins).getAllByTestId("workflow-agent-pill");
     // asking 的 6 领头，再是 running 的 2、8，然后 failed 的 4，最后补位的 1。
-    expect(pills.map((pill) => pill.textContent)).toEqual([
+    // Completed pills append an a11y-only "done" word (`sr-only`; the visible check mark
+    // moved onto the avatar); strip it so the subject stays the visible order and counts.
+    const visibleTextOf = (pill: HTMLElement) => {
+      const clone = pill.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll(".sr-only").forEach((node) => node.remove());
+      return clone.textContent ?? "";
+    };
+    expect(pills.map(visibleTextOf)).toEqual([
       "reviewer-61 tasks",
       "reviewer-21 tasks",
       "reviewer-81 tasks",
@@ -1803,7 +1810,7 @@ describe("WorkflowRunSidePane 阶段名册", () => {
         .map((h) => h.textContent),
     ).toEqual(["3done"]);
     expect(within(roll).getByTestId("workflow-roll-unlisted").textContent).toBe(
-      "300 more agents not listed",
+      "300 more subagents not listed",
     );
     // 折起：节头是迷你量条（名册的判定同样算上表外的）。
     fireEvent.click(within(section).getByTestId("workflow-run-phase-toggle"));
