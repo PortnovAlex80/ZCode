@@ -2,8 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
+import { TooltipProvider } from "../src/components/ui/tooltip.js";
 import { ExecuteToolCallBlock } from "@/ToolCallBlocks/renderers/execute.js";
-import { ExecuteGroupToolCallBlock } from "@/ToolCallBlocks/renderers/execute-group.js";
 import { EditToolCallBlock } from "@/ToolCallBlocks/renderers/edit.js";
 import type { ToolCallBlockRenderContext } from "@/ToolCallBlocks/fileSummaryTypes.js";
 
@@ -45,7 +45,12 @@ function context(general: boolean, failed = false): ToolCallBlockRenderContext {
 
 function renderTool(component: typeof ExecuteToolCallBlock, props: ToolCallBlockRenderContext) {
   return renderToStaticMarkup(
-    createElement(ZCodeIntlProvider, { initialLocale: "zh-CN" }, createElement(component, props)),
+    createElement(
+      ZCodeIntlProvider,
+      { initialLocale: "zh-CN" },
+      // The edit file chip renders inside a Radix Tooltip, which requires a provider.
+      createElement(TooltipProvider, null, createElement(component, props)),
+    ),
   );
 }
 
@@ -89,17 +94,7 @@ describe("通用模式工具展示", () => {
   });
 });
 
-it("运行中的执行组只展示状态，不泄露子命令或强制展开详情", () => {
-  const props = context(true);
-  props.isRunning = true;
-  props.toolCallNode.childToolCalls = [
-    {
-      ...context(true).toolCallNode,
-      toolCall: { ...context(true).toolCallNode.toolCall, status: "in_progress" },
-    },
-  ];
-  const general = renderTool(ExecuteGroupToolCallBlock, props);
-  expect(general).not.toContain("MODE_PRIVATE_COMMAND");
-  expect(general).not.toContain("MODE_PRIVATE_OUTPUT");
-  expect(general).not.toContain('aria-expanded="true"');
-});
+// The Execute group surface was retired upstream (session tool aggregation removed;
+// see docs/chat/execute-tool-call-grouping.md). The former standalone assertion that
+// a running execute group leaks neither child commands nor expanded details no longer
+// has a component to exercise, so it is intentionally not ported.

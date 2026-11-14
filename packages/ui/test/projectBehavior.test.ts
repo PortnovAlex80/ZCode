@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/hooks/useWorkspaceServices.js", () => ({
   useBaseWorkspaceServices: () => ({ windowControllerService: mocks, zcodeTaskService: {} }),
+  // Managed worktree rows subscribe via the optional accessor; no services in this fixture.
+  useOptionalBaseWorkspaceServices: () => null,
 }));
 vi.mock("@/hooks/useResolvedRemoteWorkspaceSessionId.js", () => ({
   useResolvedRemoteWorkspaceSessionId: () => null,

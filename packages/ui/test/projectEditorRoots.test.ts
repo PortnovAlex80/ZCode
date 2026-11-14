@@ -184,7 +184,15 @@ it.each(["local", "remote:server:source"])(
       { ...project, hostId: hostId === "local" ? "remote:server:source" : "local", position: 2 },
     ];
     const tree = { projects: items, tasks: [] };
-    readTree.mockReturnValue({ tree, factTree: tree, loading: false });
+    // v3.18 contract: ProjectDirectoryOwner feeds onlineHostIds into mergeBaselineForHosts,
+    // so the useProjectTree mock must publish the per-read host success set.
+    readTree.mockReturnValue({
+      tree,
+      factTree: tree,
+      loading: false,
+      onlineHostIds: new Set(["local"]),
+      hostReadErrors: new Map(),
+    });
     let finish!: () => void;
     const refreshed = new Promise<void>((resolve) => {
       finish = resolve;
@@ -230,7 +238,13 @@ it.each(["local", "remote:server:source"])(
     // 下一次权威刷新才移除目标，同 ID 的另一 Host 项目保持原位置。
     const remaining = [items[0]!, items[2]!];
     const nextTree = { projects: remaining, tasks: [] };
-    readTree.mockReturnValue({ tree: nextTree, factTree: nextTree, loading: false });
+    readTree.mockReturnValue({
+      tree: nextTree,
+      factTree: nextTree,
+      loading: false,
+      onlineHostIds: new Set(["local"]),
+      hostReadErrors: new Map(),
+    });
     rerender(content());
     const after = remaining.map((item) => `${item.hostId}/${item.id}`).join(",");
     expect(screen.getByTestId("sidebar-order").textContent).toBe(after);

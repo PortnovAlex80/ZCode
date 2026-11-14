@@ -175,10 +175,13 @@ describe("V4 code comment composer context", () => {
   });
 
   it("does not claim events in a background pane", () => {
+    // Unsent code comments are cached per composer draft scope; a distinct
+    // scope keeps this pane isolated from the first test's stashed contexts.
     const root = renderHarness({
       listen: false,
       onContextRemoved: vi.fn(),
       requestFocus: vi.fn(),
+      scopeKey: "/target\0session-background",
     });
 
     expect(dispatchCodeCommentAddToChat(comment("remote:ssh:a:/source", "first"))).toBe(false);
@@ -190,7 +193,12 @@ describe("V4 code comment composer context", () => {
   it("clears the claimed comment when the target composer scope changes", () => {
     const requestFocus = vi.fn();
     const onContextRemoved = vi.fn();
-    const firstProps = { listen: true, onContextRemoved, requestFocus };
+    const firstProps = {
+      listen: true,
+      onContextRemoved,
+      requestFocus,
+      scopeKey: "/target\0session-scope-a",
+    };
     const root = renderHarness(firstProps);
 
     act(() => {
@@ -202,15 +210,24 @@ describe("V4 code comment composer context", () => {
       root.render(
         createElement(Harness, {
           ...firstProps,
-          scopeKey: "/target\0session-2",
+          scopeKey: "/target\0session-scope-b",
         }),
       );
     });
 
+    // Scope switch only swaps the displayed contexts; the claimed comment
+    // still belongs to the original draft, so the removal callback must not
+    // fire (it would clear the code preview marker for a context that is
+    // merely stashed, not deleted).
     expect(latestApi?.contexts).toHaveLength(0);
-    expect(onContextRemoved).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "same-id" }),
-    );
+    expect(onContextRemoved).not.toHaveBeenCalled();
+
+    act(() => {
+      root.render(createElement(Harness, firstProps));
+    });
+    expect(latestApi?.contexts).toMatchObject([
+      { comment: "first", workspaceIdentity: "remote:ssh:a:/source" },
+    ]);
 
     act(() => root.unmount());
   });

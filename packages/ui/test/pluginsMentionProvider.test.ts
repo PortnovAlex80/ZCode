@@ -204,7 +204,9 @@ describe("plugin mention markdown carrier", () => {
       { type: "text", text: "before " },
       { type: "plugin", label: "Demo", pluginId: "demo@mkt-a" },
       { type: "text", text: " after " },
-      { type: "file", label: "readme" },
+      // File parts now carry the destination href so the message layer can open
+      // the referenced file; plugin links must never leak into that shape.
+      { type: "file", label: "readme", href: "./README.md" },
     ]);
   });
 

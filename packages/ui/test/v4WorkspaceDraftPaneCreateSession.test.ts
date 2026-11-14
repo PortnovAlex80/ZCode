@@ -114,6 +114,9 @@ function installMinimalDom() {
       ownerDocument: documentMock,
       parentNode: null,
     }),
+    // ZCodeIntlProvider syncs the active locale to <html lang>; the minimal
+    // document must expose a documentElement so that effect stays a no-op.
+    documentElement: { lang: "" },
     nodeType: 9,
     removeEventListener: () => {},
   } as unknown as Document;
@@ -254,9 +257,12 @@ describe("V4WorkspaceChatArea split draft session creation", () => {
     const draftPane = sessionPaneProps("pane-1");
     callSessionCreated(draftPane, "right-session");
 
+    // The pane forwards the optional draft-promotion origin explicitly, so a
+    // plain first send reports origin=undefined as the third argument.
     expect(onPaneActiveSessionChange).toHaveBeenCalledWith(
       { workspacePath: "/workspace" },
       "right-session",
+      undefined,
     );
 
     clearCapturedSessionPaneProps();
@@ -428,7 +434,9 @@ describe("V4WorkspaceChatArea split draft session creation", () => {
 
     callSessionCreated(sessionPaneProps(V4_PRIMARY_PANE_ID), "left-session");
 
-    expect(onSessionCreated).toHaveBeenCalledWith("left-session");
+    // The shell callback receives the optional promotion origin explicitly
+    // (undefined for a plain first send from the draft pane).
+    expect(onSessionCreated).toHaveBeenCalledWith("left-session", undefined);
     const groupState = useWorkbenchGroupStore.getState();
     const activeGroup = groupState.activeGroupId
       ? groupState.groups[groupState.activeGroupId]

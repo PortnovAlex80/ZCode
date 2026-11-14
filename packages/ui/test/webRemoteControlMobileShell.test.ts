@@ -1,10 +1,7 @@
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  WebRemoteControlMobileShell,
-  isWebRemoteControlMobileChatHistoryState,
-} from "@/WebRemoteControlMobileShell.js";
+import { WebRemoteControlMobileShell } from "@/WebRemoteControlMobileShell.js";
 
 vi.mock("@/i18n/IntlProvider.js", () => ({
   useZCodeIntl: () => ({
@@ -201,8 +198,32 @@ describe("WebRemoteControlMobileShell", () => {
   });
 
   it("recognizes only the mobile chat browser history state", () => {
-    expect(isWebRemoteControlMobileChatHistoryState({ zcodeMobilePage: "chat" })).toBe(true);
-    expect(isWebRemoteControlMobileChatHistoryState({ zcodeMobilePage: "home" })).toBe(false);
-    expect(isWebRemoteControlMobileChatHistoryState(null)).toBe(false);
+    // The history-state predicate is internal (hasMobileHistoryPage); its
+    // semantics stay observable through the shell's initial page resolution.
+    const stubHistoryWindow = (state: unknown) => {
+      vi.stubGlobal("window", {
+        history: {
+          state,
+          back: vi.fn(),
+          pushState: vi.fn(),
+          replaceState: vi.fn(),
+        },
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      });
+    };
+
+    stubHistoryWindow({ zcodeMobilePage: "chat" });
+    expect(renderMobileShell()).toContain('data-mobile-page="chat"');
+
+    stubHistoryWindow({ zcodeMobilePage: "home" });
+    const homeHtml = renderMobileShell();
+    expect(homeHtml).toContain('data-mobile-page="home"');
+    expect(homeHtml).not.toContain('data-mobile-page="chat"');
+
+    stubHistoryWindow(null);
+    const nullStateHtml = renderMobileShell();
+    expect(nullStateHtml).toContain('data-mobile-page="home"');
+    expect(nullStateHtml).not.toContain('data-mobile-page="chat"');
   });
 });

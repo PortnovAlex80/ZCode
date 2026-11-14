@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppErrorBoundary, ScopedErrorBoundary } from "@/ErrorBoundary.js";
 import type { ArmsCustomEventPayload } from "@zcode/shared";
 import {
@@ -18,9 +18,17 @@ function makeReporter() {
   };
 }
 
+// The boundary resolves its locale from localStorage, then navigator.language.
+// Node reports the OS locale (varies per developer machine/CI), so pin it to a
+// known locale to keep the fallback copy assertions deterministic.
+beforeEach(() => {
+  vi.stubGlobal("navigator", { language: "en-US" });
+});
+
 afterEach(() => {
   clearReactErrorArmsReporterForTest();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("AppErrorBoundary", () => {

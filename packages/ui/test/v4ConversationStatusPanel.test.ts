@@ -272,7 +272,10 @@ function backgroundWork(overrides: Partial<BackgroundWorkSummary> = {}): Backgro
 }
 
 function runningSubagent(
-  overrides: Partial<ZCodeSessionRunningSubagent> = {},
+  overrides: Partial<ZCodeSessionRunningSubagent> & {
+    // v4 projections attach the exact stop control handle used by the panel.
+    stopControl?: { taskId: string; executionId: string };
+  } = {},
 ): ZCodeSessionRunningSubagent {
   return {
     childSessionId: "child-session",
@@ -592,7 +595,7 @@ describe("ConversationStatusPanel", () => {
     expect(html).not.toContain("lucide-bot");
   });
 
-  it("uses Bot for Subagent-only mini summaries and reserves Activity for mixed work", async () => {
+  it("uses the subagent avatar for Subagent-only mini summaries and reserves Activity for mixed work", async () => {
     const subagentOnly = await renderStatusPanel({
       gitSummary: null,
       gitWorktreeChangeSummary: null,
@@ -602,7 +605,8 @@ describe("ConversationStatusPanel", () => {
     expect(subagentOnly).toContain("chat.statusPanel.runningAgentsValue 1");
     expect(subagentOnly).not.toContain("chat.summaryPanel.runningBackgroundTasksMiniValue 1");
     expect(subagentOnly).not.toMatch(/\d+秒/u);
-    expect(subagentOnly).toContain("lucide-bot");
+    // The Bot lucide icon was replaced by the shared subagent face avatar.
+    expect(subagentOnly).toContain("wf-face");
     expect(subagentOnly).not.toContain("lucide-activity");
     expect(subagentOnly).not.toContain("lucide-square-terminal");
 
@@ -615,7 +619,7 @@ describe("ConversationStatusPanel", () => {
     expect(bashOnly).toContain("chat.summaryPanel.runningBackgroundTasksMiniValue 1");
     expect(bashOnly).not.toContain("chat.statusPanel.runningAgentsValue 1");
     expect(bashOnly).toContain("lucide-square-terminal");
-    expect(bashOnly).not.toContain("lucide-bot");
+    expect(bashOnly).not.toContain("wf-face");
     expect(bashOnly).not.toContain("lucide-activity");
 
     const mixed = await renderStatusPanel({
@@ -628,7 +632,7 @@ describe("ConversationStatusPanel", () => {
     expect(mixed).toContain("chat.statusPanel.runningAgentsValuePlural 2");
     expect(mixed).not.toContain("chat.summaryPanel.runningBackgroundTasksMiniValuePlural 2");
     expect(mixed).toContain("lucide-activity");
-    expect(mixed).not.toContain("lucide-bot");
+    expect(mixed).not.toContain("wf-face");
     expect(mixed).not.toContain("lucide-square-terminal");
   });
 
@@ -1562,7 +1566,7 @@ describe("ConversationStatusPanel", () => {
       gitSummary: null,
       gitWorktreeChangeSummary: null,
       summaryPanelVariantOverride: "panel",
-      onCancelBackgroundWork: vi.fn(),
+      onStopSubagent: vi.fn(),
       backgroundWorks: [
         backgroundWork({
           workId: "bash-newer",
@@ -1571,6 +1575,8 @@ describe("ConversationStatusPanel", () => {
           startedAt: Date.now() - 3_000,
           cancellable: false,
         }),
+        // Stale agent-kind background works no longer join into the agent
+        // section; Stop eligibility comes from the running projection itself.
         backgroundWork({
           workId: "agent-control-work",
           kind: "subagent",
@@ -1578,19 +1584,13 @@ describe("ConversationStatusPanel", () => {
           title: "packages结构分析",
           cancellable: true,
         }),
-        backgroundWork({
-          workId: "agent-disabled-work",
-          kind: "subagent",
-          childSessionId: "agent-disabled",
-          title: "不可停止的 Agent",
-          cancellable: false,
-        }),
       ],
       runningSubagents: [
         runningSubagent({
           childSessionId: "agent-older",
           title: "packages结构分析",
           startedAt: Date.now() - 9_000,
+          stopControl: { taskId: "task-agent-older", executionId: "exec-agent-older" },
         }),
         runningSubagent({
           childSessionId: "agent-disabled",
@@ -1604,25 +1604,29 @@ describe("ConversationStatusPanel", () => {
     });
 
     expect(html).toContain('data-background-task-kind="bash"');
-    expect(html).toContain('data-background-task-kind="agent"');
+    expect(html).toContain('data-testid="v4-running-subagent-item"');
     expect(html).toContain('data-child-session-id="agent-older"');
-    expect(html).toContain('data-work-id="agent-control-work"');
     expect(html).toContain('data-work-status="running"');
-    expect(html).toContain('data-testid="v4-background-work-item-agent-control-work"');
+    // Agent rows are projection-owned; the background work item for the same
+    // agent must not render as a second row.
+    expect(html).not.toContain('data-work-id="agent-control-work"');
     expect(html).toContain('data-status-section="terminal"');
     expect(html).toContain('data-status-section="agent"');
     expect(html).toContain("chat.statusPanel.terminals");
     expect(html).toContain("chat.statusPanel.agents");
-    expect(html).toContain("lucide-bot");
+    // Agent rows use the shared subagent face avatar, not a lucide-bot icon.
+    expect(html).toContain("wf-face");
     expect(html).toContain("lucide-square-terminal");
     expect(html).not.toContain("subagent · packages结构分析");
     expect(html).not.toContain("bash · 启动开发服务器");
     expect(html).toContain("chat.longRunning.elapsedSeconds 9");
     expect(html).toContain("flex-wrap");
-    expect(html).toContain('data-testid="v4-background-work-cancel-agent-control-work"');
-    expect(html).not.toContain('data-testid="v4-background-work-cancel-agent-older"');
-    expect(html).not.toContain('data-testid="v4-background-work-cancel-agent-disabled-work"');
-    expect(html).not.toContain('data-testid="v4-background-work-cancel-foreground-agent"');
+    // Stop is restored only for the projected Agent whose projection carries
+    // the exact stop control handle; agents without it render no Stop at all.
+    expect(html).toContain('data-testid="v4-running-subagent-stop"');
+    expect(html).toContain('data-subagent-task-id="task-agent-older"');
+    expect(html).toContain('data-subagent-execution-id="exec-agent-older"');
+    expect(html.match(/data-testid="v4-running-subagent-stop"/gu)).toHaveLength(1);
     expect(html).not.toContain('data-testid="v4-background-work-cancel-bash-newer"');
     const terminalSection = html.slice(
       html.indexOf('data-status-section="terminal"'),

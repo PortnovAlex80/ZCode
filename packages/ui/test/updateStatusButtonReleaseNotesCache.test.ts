@@ -108,6 +108,11 @@ function installMinimalDom() {
     nodeType: 9,
     removeEventListener: () => {},
   } as unknown as Document;
+  // ZCodeIntlProvider's effect assigns document.documentElement.lang on mount.
+  (documentMock as { documentElement?: Element }).documentElement = createMinimalElement(
+    documentMock as unknown as Document,
+    "html",
+  );
   const windowMock = {
     addEventListener: () => {},
     document: documentMock,

@@ -37,7 +37,6 @@ describe("handleOAuthCallbackSuccess", () => {
     const setOAuthError = vi.fn();
     const refreshProviderState = vi.fn(async () => {});
     const refreshLatestModelProviderFamilySelection = vi.fn(async () => null);
-    const setProviderFamilyDomain = vi.fn(async () => {});
     const platform = {
       reportTelemetryEvent: vi.fn(async () => {}),
     };
@@ -55,7 +54,6 @@ describe("handleOAuthCallbackSuccess", () => {
       platform,
       refreshLatestModelProviderFamilySelection,
       refreshProviderState,
-      setProviderFamilyDomain,
       setUser,
       setOAuthError,
     });
@@ -66,7 +64,6 @@ describe("handleOAuthCallbackSuccess", () => {
       displayName: "BigModel User",
     });
     expect(setOAuthError).toHaveBeenCalledWith(null);
-    expect(setProviderFamilyDomain).toHaveBeenCalledWith(BIGMODEL_PROVIDER_ID);
     expect(refreshLatestModelProviderFamilySelection).toHaveBeenCalledWith(BIGMODEL_PROVIDER_ID);
     expect(refreshProviderState).toHaveBeenCalledOnce();
     expect(reportAppTelemetryEventMock).toHaveBeenCalledTimes(1);
@@ -77,7 +74,11 @@ describe("handleOAuthCallbackSuccess", () => {
     const setUser = vi.fn();
     const setOAuthError = vi.fn();
     const refreshProviderState = vi.fn(async () => {});
-    const refreshLatestModelProviderFamilySelection = vi.fn(async () => null);
+    // The connection-domain CAS conflict now surfaces inside the selection refresh
+    // (settingService.update rejects with the settings-changed error).
+    const refreshLatestModelProviderFamilySelection = vi.fn(async () => {
+      throw new Error("Account connection settings changed");
+    });
     await expect(
       handleOAuthCallbackSuccess({
         result: {
@@ -86,9 +87,6 @@ describe("handleOAuthCallbackSuccess", () => {
           userInfo: { id: "user-1", username: "user" },
         },
         platform: { reportTelemetryEvent: vi.fn(async () => {}) },
-        setProviderFamilyDomain: async () => {
-          throw new Error("Account connection settings changed");
-        },
         setUser,
         setOAuthError,
         refreshProviderState,
@@ -98,7 +96,7 @@ describe("handleOAuthCallbackSuccess", () => {
     expect(setUser).toHaveBeenCalledWith({ id: "user-1", username: "user" });
     expect(setOAuthError).toHaveBeenCalledExactlyOnceWith(null);
     expect(refreshProviderState).toHaveBeenCalledOnce();
-    expect(refreshLatestModelProviderFamilySelection).not.toHaveBeenCalled();
+    expect(refreshLatestModelProviderFamilySelection).toHaveBeenCalledWith(BIGMODEL_PROVIDER_ID);
     expect(reportAppTelemetryEventMock).toHaveBeenCalledOnce();
   });
 
@@ -107,7 +105,6 @@ describe("handleOAuthCallbackSuccess", () => {
     const setUser = vi.fn();
     const setOAuthError = vi.fn();
     const refreshProviderState = vi.fn(async () => {});
-    const setProviderFamilyDomain = vi.fn(async () => {});
     const refreshLatestModelProviderFamilySelection = vi.fn(async () => {
       throw new Error("selection failed");
     });
@@ -129,7 +126,6 @@ describe("handleOAuthCallbackSuccess", () => {
         platform,
         refreshLatestModelProviderFamilySelection,
         refreshProviderState,
-        setProviderFamilyDomain,
         setUser,
         setOAuthError,
       }),
@@ -141,7 +137,6 @@ describe("handleOAuthCallbackSuccess", () => {
       displayName: "BigModel User",
     });
     expect(setOAuthError).toHaveBeenCalledWith(null);
-    expect(setProviderFamilyDomain).toHaveBeenCalledWith(BIGMODEL_PROVIDER_ID);
     expect(refreshLatestModelProviderFamilySelection).toHaveBeenCalledWith(BIGMODEL_PROVIDER_ID);
     expect(refreshProviderState).toHaveBeenCalledOnce();
     expect(reportAppTelemetryEventMock).toHaveBeenCalledTimes(1);
@@ -167,7 +162,6 @@ describe("handleOAuthCallbackSuccess", () => {
         projectId: "project-1",
       };
     });
-    const setProviderFamilyDomain = vi.fn(async () => {});
     const platform = {
       reportTelemetryEvent: vi.fn(async () => {}),
     };
@@ -186,7 +180,6 @@ describe("handleOAuthCallbackSuccess", () => {
       refreshLatestModelProviderFamilySelection,
       refreshAppSettings,
       refreshProviderState,
-      setProviderFamilyDomain,
       setUser,
       setOAuthError,
     });
@@ -209,7 +202,6 @@ describe("handleOAuthCallbackSuccess", () => {
       events.push("selection");
       return { kind: "individual-coding-plan" as const };
     });
-    const setProviderFamilyDomain = vi.fn(async () => {});
     const platform = {
       reportTelemetryEvent: vi.fn(async () => {}),
     };
@@ -228,7 +220,6 @@ describe("handleOAuthCallbackSuccess", () => {
       refreshLatestModelProviderFamilySelection,
       refreshAppSettings,
       refreshProviderState,
-      setProviderFamilyDomain,
       setUser,
       setOAuthError,
     });
@@ -254,11 +245,14 @@ const teamProduct = {
 function createStartupRestoreServices(params: {
   events: string[];
   settings: {
+    providerFamilyDomain?: string;
     providerFamilyConnectionSelections: Record<string, unknown>;
   };
   codingPlanEntitlement?: UsageEntitlementSnapshot | null;
   startPlanEntitlement?: UsageEntitlementSnapshot | null;
   enterprisePricingError?: Error;
+  /** Families reported by the OAuth availability query; bigmodel by default. */
+  availableFamilies?: string[];
 }) {
   const update = vi.fn(async (patch) => {
     params.events.push("update");
@@ -269,6 +263,16 @@ function createStartupRestoreServices(params: {
       settingService: {
         get: vi.fn(async () => params.settings),
         update,
+      },
+      // The refresh flow now consults account availability (family list + session revision
+      // CAS) before and after the network wait; both reads must report the same identity.
+      oauthService: {
+        getAccountAvailability: vi.fn(async () => ({
+          loginProvider: null,
+          userId: "user-1",
+          sessionRevision: "rev-1",
+          families: params.availableFamilies ?? ["bigmodel"],
+        })),
       },
       providerSettingsService: {
         refresh: vi.fn(async () => ({
@@ -371,7 +375,12 @@ describe("refreshRestoredOAuthProviderFamilyAfterStartup", () => {
       ]) {
         const { services, update } = createStartupRestoreServices({
           events: [],
-          settings: { providerFamilyConnectionSelections: { [family]: selection } },
+          // Domain is already bound on startup; the saved selection must be returned
+          // as-is without the login-time conditional domain write or entitlement queries.
+          settings: {
+            providerFamilyDomain: family,
+            providerFamilyConnectionSelections: { [family]: selection },
+          },
           startPlanEntitlement: { checkedAt: 1, unavailableReason: "no_plan" },
           codingPlanEntitlement: { checkedAt: 1, unavailableReason: "no_plan" },
         });
@@ -391,7 +400,10 @@ describe("refreshRestoredOAuthProviderFamilyAfterStartup", () => {
       await import("@/root/useRootOAuthEffects.js");
     const { services, update } = createStartupRestoreServices({
       events: [],
-      settings: { providerFamilyConnectionSelections: { bigmodel: { kind: "start-plan" } } },
+      settings: {
+        providerFamilyDomain: "bigmodel",
+        providerFamilyConnectionSelections: { bigmodel: { kind: "start-plan" } },
+      },
     });
     services.providerSettingsService.refresh.mockRejectedValue(new Error("offline"));
     expect(

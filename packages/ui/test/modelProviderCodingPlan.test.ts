@@ -8,6 +8,7 @@ import {
   BUILTIN_MODEL_PROVIDER_IDS,
   getModelProviderFamilySpec,
   ZAI_PROVIDER_ID,
+  type OAuthAccountAvailability,
   type UsageEntitlementSnapshot,
 } from "@zcode/shared";
 import {
@@ -657,25 +658,47 @@ describe("model provider coding plan", () => {
   );
 
   it("uses a stable provider/auth identity for Z.ai and BigModel plan transitions", () => {
+    // v3.18.2: the sync attempt identity is derived from the account availability
+    // snapshot (userId + sessionRevision) instead of the raw active provider string.
+    const zaiAvailability: OAuthAccountAvailability = {
+      loginProvider: ZAI_PROVIDER_ID,
+      userId: "zai-user-1",
+      sessionRevision: "rev-1",
+      families: ["zai"],
+    };
     expect(
       resolveCodingPlanProviderSyncAttemptKey({
-        activeOAuthProvider: ZAI_PROVIDER_ID,
+        accountAvailability: zaiAvailability,
         oauthProviderId: ZAI_PROVIDER_ID,
         providerId: BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan,
       }),
-    ).toBe(`${BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan}:${ZAI_PROVIDER_ID}`);
+    ).toBe(`${BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan}:zai-user-1:rev-1`);
     expect(
       resolveCodingPlanProviderSyncAttemptKey({
-        activeOAuthProvider: BIGMODEL_PROVIDER_ID,
+        accountAvailability: {
+          loginProvider: BIGMODEL_PROVIDER_ID,
+          userId: "bigmodel-user-2",
+          sessionRevision: "rev-2",
+          families: ["bigmodel"],
+        } satisfies OAuthAccountAvailability,
         oauthProviderId: BIGMODEL_PROVIDER_ID,
         providerId: BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan,
       }),
-    ).toBe(`${BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan}:${BIGMODEL_PROVIDER_ID}`);
+    ).toBe(`${BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan}:bigmodel-user-2:rev-2`);
+    // Cross-family navigation must not reuse another family's availability snapshot.
     expect(
       resolveCodingPlanProviderSyncAttemptKey({
-        activeOAuthProvider: ZAI_PROVIDER_ID,
+        accountAvailability: zaiAvailability,
         oauthProviderId: BIGMODEL_PROVIDER_ID,
         providerId: BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan,
+      }),
+    ).toBeNull();
+    // Without an availability snapshot there is no stable identity to sync against.
+    expect(
+      resolveCodingPlanProviderSyncAttemptKey({
+        accountAvailability: null,
+        oauthProviderId: ZAI_PROVIDER_ID,
+        providerId: BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan,
       }),
     ).toBeNull();
   });
@@ -1159,23 +1182,27 @@ describe("model provider coding plan", () => {
       oauthProviderId: ZAI_PROVIDER_ID,
       label: "Z.ai - Coding Plan",
       providerName: "Z.ai",
-      provider: createProvider({
-        id: BUILTIN_MODEL_PROVIDER_IDS.zaiStartPlan,
-        name: "Z.ai - Coding Plan",
-        defaultKind: "anthropic",
-        endpoints: {
-          baseURL: "https://zcode.z.ai/api/v1/zcode-plan/anthropic",
-          paths: { anthropic: "/v1/messages" },
-        },
-        models: [
-          createModelProviderModelConfig({
-            id: "GLM-5.2",
-            kinds: ["anthropic"],
-            defaultKind: "anthropic",
-            contextWindow: 1_000_000,
-          }),
-        ],
-      }),
+      provider: {
+        ...createProvider({
+          id: BUILTIN_MODEL_PROVIDER_IDS.zaiStartPlan,
+          name: "Z.ai - Coding Plan",
+          defaultKind: "anthropic",
+          endpoints: {
+            baseURL: "https://zcode.z.ai/api/v1/zcode-plan/anthropic",
+            paths: { anthropic: "/v1/messages" },
+          },
+          models: [
+            createModelProviderModelConfig({
+              id: "GLM-5.2",
+              kinds: ["anthropic"],
+              defaultKind: "anthropic",
+              contextWindow: 1_000_000,
+            }),
+          ],
+        }),
+        // v3.18.2: the Start model editor only renders once the Account snapshot confirms availability.
+        accountState: { availability: "available", entitled: true, current: true },
+      },
       status: "purchased",
       statusActive: true,
     });
@@ -1220,29 +1247,33 @@ describe("model provider coding plan", () => {
       oauthProviderId: BIGMODEL_PROVIDER_ID,
       label: "BigModel - Start Plan",
       providerName: "BigModel",
-      provider: createProvider({
-        id: BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan,
-        name: "BigModel - Start Plan",
-        defaultKind: "anthropic",
-        endpoints: {
-          baseURL: "https://zcode.z.ai/api/v1/zcode-plan/anthropic",
-          paths: { anthropic: "/v1/messages" },
-        },
-        models: [
-          createModelProviderModelConfig({
-            id: primaryModel,
-            builtin: true,
-            kinds: ["anthropic"],
-            defaultKind: "anthropic",
-          }),
-          createModelProviderModelConfig({
-            id: secondaryModel,
-            builtin: true,
-            kinds: ["anthropic"],
-            defaultKind: "anthropic",
-          }),
-        ],
-      }),
+      provider: {
+        ...createProvider({
+          id: BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan,
+          name: "BigModel - Start Plan",
+          defaultKind: "anthropic",
+          endpoints: {
+            baseURL: "https://zcode.z.ai/api/v1/zcode-plan/anthropic",
+            paths: { anthropic: "/v1/messages" },
+          },
+          models: [
+            createModelProviderModelConfig({
+              id: primaryModel,
+              builtin: true,
+              kinds: ["anthropic"],
+              defaultKind: "anthropic",
+            }),
+            createModelProviderModelConfig({
+              id: secondaryModel,
+              builtin: true,
+              kinds: ["anthropic"],
+              defaultKind: "anthropic",
+            }),
+          ],
+        }),
+        // v3.18.2: the Start model editor only renders once the Account snapshot confirms availability.
+        accountState: { availability: "available", entitled: true, current: true },
+      },
       status: "purchased",
       statusActive: true,
     });
@@ -4784,7 +4815,9 @@ describe("model provider coding plan", () => {
           id: providerId,
           models: ["stale-nav-model"],
         }),
-        status: "checking",
+        // v3.18.2: plan model settings render only with a resolved "purchased"
+        // snapshot; a "checking" status now keeps the model area hidden.
+        status: "purchased",
         inactivePlanTitle: "Team A",
         planLevel: "Team A",
         teamPlanName: "Team A",
@@ -4792,7 +4825,7 @@ describe("model provider coding plan", () => {
         projectId: "proj-team",
         currentProductId: "product-team",
         quotaLimits: [],
-        statusActive: false,
+        statusActive: true,
       },
       { providerSettingsView: createProviderSettingsView(effectiveProvider) },
     );
@@ -4839,9 +4872,30 @@ describe("model provider coding plan", () => {
     expect(html).not.toContain("stale-team-model");
   });
 
-  it("Individual Coding Plan 在不可用状态仍显示 Effective 模型，但隐藏 Endpoint 与 API Schema", () => {
+  it("Individual Coding Plan 仅在已确认 purchased 快照显示 Effective 模型，且隐藏 Endpoint 与 API Schema", () => {
+    // v3.18.2: model settings render only for a resolved "purchased" snapshot.
+    // An "unavailable" status keeps the model area hidden instead of showing stale models.
     const providerId = BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan;
-    const html = renderDetail({
+    const purchasedHtml = renderDetail({
+      key: `coding-plan:${providerId}`,
+      type: "codingPlan",
+      presetId: providerId,
+      oauthProviderId: BIGMODEL_PROVIDER_ID,
+      label: "BigModel - Coding Plan",
+      providerName: "BigModel",
+      provider: createProvider({
+        id: providerId,
+        models: ["individual-visible-model"],
+      }),
+      status: "purchased",
+      statusActive: true,
+    });
+
+    expect(purchasedHtml).toContain("individual-visible-model");
+    expectConnectionApiFormatHidden(purchasedHtml);
+    expect(purchasedHtml).not.toContain("settings.modelProvider.baseUrl");
+
+    const unavailableHtml = renderDetail({
       key: `coding-plan:${providerId}`,
       type: "codingPlan",
       presetId: providerId,
@@ -4856,9 +4910,8 @@ describe("model provider coding plan", () => {
       statusActive: false,
     });
 
-    expect(html).toContain("individual-visible-model");
-    expectConnectionApiFormatHidden(html);
-    expect(html).not.toContain("settings.modelProvider.baseUrl");
+    expect(unavailableHtml).not.toContain("individual-visible-model");
+    expect(unavailableHtml).not.toContain("settings.modelProvider.baseUrl");
   });
 
   it.each(["disconnected", "notPurchased", "purchased", "checking", "unavailable"] as const)(
@@ -4876,9 +4929,9 @@ describe("model provider coding plan", () => {
         status,
         statusActive: status === "purchased",
       });
-      expect(html.includes("entitlement-model")).toBe(
-        status !== "notPurchased" && status !== "disconnected",
-      );
+      // v3.18.2: only a resolved "purchased" entitlement snapshot keeps the model
+      // settings visible; checking/unavailable states now hide them as well.
+      expect(html.includes("entitlement-model")).toBe(status === "purchased");
     },
   );
 

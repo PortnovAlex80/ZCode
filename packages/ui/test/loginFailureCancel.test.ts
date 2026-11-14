@@ -19,6 +19,10 @@ const oauthState = vi.hoisted(() => ({
   providers: [
     { id: "bigmodel", displayName: "BigModel", enabled: true, order: 0 },
     { id: "zai", displayName: "Z.AI", enabled: true, order: 1 },
+    // The unified login page pins one region-specific provider (zai_cn for the
+    // default domestic region); without it the idle screen shows the
+    // "no providers" warning instead of the login button.
+    { id: "zai_cn", displayName: "Z.AI", enabled: true, order: 2 },
   ] as Array<{ id: string; displayName: string; enabled: boolean; order: number }>,
 }));
 

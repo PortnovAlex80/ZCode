@@ -13,6 +13,7 @@ import {
 import { CallCard } from "@/ModelTrajectoryPaneParts.js";
 import { TrajectorySearchRevealContext } from "@/ModelTrajectorySearch.js";
 import { trajectoryToolOutputs } from "@/ModelTrajectoryToolPayload.js";
+import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 
 
 const messages: Record<string, string> = {
@@ -239,24 +240,28 @@ describe("ModelTrajectoryPaneParts", () => {
       value: { writeText },
     });
     const { container } = render(
-      createElement(CallCard, {
-        index: 0,
-        intl: intl as never,
-        inputMessages: [
-          {
-            role: "system",
-            parts: [{ kind: "text", text: " \n system summary\nfull system prompt\n \n" }],
+      createElement(
+        ZCodeIntlProvider,
+        { initialLocale: "zh-CN" },
+        createElement(CallCard, {
+          index: 0,
+          intl: intl as never,
+          inputMessages: [
+            {
+              role: "system",
+              parts: [{ kind: "text", text: " \n system summary\nfull system prompt\n \n" }],
+            },
+          ],
+          record: {
+            attempt: 1,
+            durationMs: 2_000,
+            model: { modelId: "glm-test" },
+            request: { messages: [], toolNames: [] },
+            requestId: "req-system",
+            startedAt: "2026-06-03T12:00:00.000Z",
           },
-        ],
-        record: {
-          attempt: 1,
-          durationMs: 2_000,
-          model: { modelId: "glm-test" },
-          request: { messages: [], toolNames: [] },
-          requestId: "req-system",
-          startedAt: "2026-06-03T12:00:00.000Z",
-        },
-      }),
+        }),
+      ),
     );
 
     const systemContainer = container.querySelector('[data-trajectory-expandable-role="system"]');
@@ -289,47 +294,51 @@ describe("ModelTrajectoryPaneParts", () => {
       value: { writeText },
     });
     const { container } = render(
-      createElement(CallCard, {
-        index: 0,
-        intl: intl as never,
-        inputMessages: [
-          {
-            role: "user",
-            parts: [{ kind: "text", text: "summary message\nfull user message" }],
+      createElement(
+        ZCodeIntlProvider,
+        { initialLocale: "zh-CN" },
+        createElement(CallCard, {
+          index: 0,
+          intl: intl as never,
+          inputMessages: [
+            {
+              role: "user",
+              parts: [{ kind: "text", text: "summary message\nfull user message" }],
+            },
+            {
+              role: "tool",
+              parts: [
+                {
+                  kind: "tool-result",
+                  toolCallId: "tool-call-1",
+                  toolName: "Read",
+                  output: { content: "file body\nsecond output line" },
+                },
+              ],
+            },
+          ],
+          record: {
+            attempt: 1,
+            durationMs: 21_700,
+            model: { modelId: "glm-test" },
+            request: { messages: [], toolNames: ["Read"] },
+            requestId: "req-expand",
+            startedAt: "2026-06-03T12:00:00.000Z",
+            response: {
+              reasoningText: "inspect the file\nreasoning detail",
+              text: "file inspected\nmessage detail",
+              toolCalls: [
+                {
+                  kind: "tool-call",
+                  toolCallId: "tool-call-1",
+                  toolName: "Read",
+                  input: { path: "/tmp/a.ts" },
+                },
+              ],
+            },
           },
-          {
-            role: "tool",
-            parts: [
-              {
-                kind: "tool-result",
-                toolCallId: "tool-call-1",
-                toolName: "Read",
-                output: { content: "file body\nsecond output line" },
-              },
-            ],
-          },
-        ],
-        record: {
-          attempt: 1,
-          durationMs: 21_700,
-          model: { modelId: "glm-test" },
-          request: { messages: [], toolNames: ["Read"] },
-          requestId: "req-expand",
-          startedAt: "2026-06-03T12:00:00.000Z",
-          response: {
-            reasoningText: "inspect the file\nreasoning detail",
-            text: "file inspected\nmessage detail",
-            toolCalls: [
-              {
-                kind: "tool-call",
-                toolCallId: "tool-call-1",
-                toolName: "Read",
-                input: { path: "/tmp/a.ts" },
-              },
-            ],
-          },
-        },
-      }),
+        }),
+      ),
     );
 
     const userTrigger = screen.getByRole("button", { name: /用户消息summary message/ });

@@ -48,7 +48,11 @@ it("完整内容不依赖桌面宿主，正文不被摘要挤进折叠历史", (
   expect(html).toContain("军棋项目进度看板");
   expect(html).toContain("军棋项目交付报告");
   expect(html).not.toContain("WORKFLOW_FALLBACK");
-  expect(html).not.toContain('data-history-open="false"');
+  // data-history-open is now a state flag on the history trigger (markup changed upstream),
+  // so "no collapsed flag" no longer holds. The guarded invariant is that the final text
+  // renders as visible inline markup: Radix omits children of a closed collapsible-content,
+  // so containing the rendered paragraph proves it was not squeezed into folded history.
+  expect(html).toContain("<p>ORIGINAL_FINAL_TEXT</p>");
 });
 it("不展示空的不可用工作流卡及本地网站卡，也不恢复其占位摘要", () => {
   const unavailable = {

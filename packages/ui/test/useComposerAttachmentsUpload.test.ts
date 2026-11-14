@@ -1,4 +1,4 @@
-import { act, createElement, type DragEvent } from "react";
+import { act, createElement, type ChangeEvent, type DragEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IPromptAttachmentTransferService } from "@zcode/services";
@@ -19,8 +19,8 @@ const mocks = vi.hoisted(() => ({
   platform: {
     canSelectFilePath: true,
     createTempTextAttachment: vi.fn(),
+    // Stands in for the preload path resolution behind the picker flow.
     getPathForFile: vi.fn(),
-    selectFiles: vi.fn(async () => [] as string[]),
   },
   service: null as IPromptAttachmentTransferService | null,
   toast: vi.fn(),
@@ -191,9 +191,34 @@ function renderProbe(options: ProbeOptions) {
   };
 }
 
+// The picker no longer calls platform.selectFiles: openAttachmentPicker clicks
+// the hidden file input and handleAttachmentInputChange feeds the selected File
+// objects through addAttachmentFiles(…, fromPicker=true). Emulate that flow;
+// getPathForFile stands in for the preload path resolution so path-backed
+// attachments are produced for the local zero-copy and remote staging paths.
+function selectPickerFiles(paths: string[]) {
+  act(() =>
+    latestApi?.handleAttachmentInputChange({
+      currentTarget: {
+        files: paths.map((path) => new File([path], path.split(/[\\/]/).pop() ?? path)),
+        value: "C:\\fakepath\\selection",
+      },
+    } as unknown as ChangeEvent<HTMLInputElement>),
+  );
+}
+
+function resolvePickerPaths(paths: string[]) {
+  const pathByFileName = new Map(
+    paths.map((path) => [path.split(/[\\/]/).pop() ?? path, path] as const),
+  );
+  mocks.platform.getPathForFile.mockImplementation(
+    (file: File) => pathByFileName.get(file.name) ?? undefined,
+  );
+}
+
 async function addPaths(paths: string[]) {
-  mocks.platform.selectFiles.mockResolvedValueOnce(paths);
-  act(() => latestApi?.openAttachmentPicker());
+  resolvePickerPaths(paths);
+  selectPickerFiles(paths);
   await vi.waitFor(() => expect(latestApi?.attachments).toHaveLength(paths.length));
 }
 
@@ -210,7 +235,6 @@ beforeEach(() => {
   latestApi = null;
   mocks.platform.createTempTextAttachment.mockReset();
   mocks.platform.getPathForFile.mockReset();
-  mocks.platform.selectFiles.mockReset();
   mocks.toast.mockClear();
   useComposerAttachmentUploadStore.setState({ scopes: {} });
 });
@@ -262,14 +286,16 @@ describe("useComposerAttachments eager upload", () => {
       scopeId: "full-limit",
       localDesktop: true,
     });
-    mocks.platform.selectFiles.mockResolvedValueOnce(
-      Array.from({ length: 8 }, (_, index) => `/workspace/${index}.txt`),
-    );
-    await act(async () => latestApi?.openAttachmentPicker());
-    mocks.platform.selectFiles.mockClear();
+    resolvePickerPaths(Array.from({ length: 8 }, (_, index) => `/workspace/${index}.txt`));
+    selectPickerFiles(Array.from({ length: 8 }, (_, index) => `/workspace/${index}.txt`));
+    await vi.waitFor(() => expect(latestApi?.attachments).toHaveLength(8));
+
+    // openAttachmentPicker must click the hidden input; expose a stub to observe it.
+    const inputClick = vi.fn();
+    latestApi!.attachmentInputRef.current = { click: inputClick } as never;
 
     act(() => latestApi?.openAttachmentPicker());
-    expect(mocks.platform.selectFiles).not.toHaveBeenCalled();
+    expect(inputClick).not.toHaveBeenCalled();
     expect(mocks.toast).toHaveBeenCalledWith(
       "chat.attachments.maxFiles",
       expect.objectContaining({ variant: "warning" }),
@@ -292,10 +318,12 @@ describe("useComposerAttachments eager upload", () => {
     expect(latestApi?.attachments.some((item) => item.filename === "extra.txt")).toBe(false);
 
     act(() => latestApi?.removeAttachment(latestApi.attachments[0]!.id));
-    mocks.platform.selectFiles.mockResolvedValueOnce(["/workspace/replacement.txt"]);
-    await act(async () => latestApi?.openAttachmentPicker());
+    // A slot freed: clicking add opens the picker input again, and the change
+    // event accepts the replacement file.
+    act(() => latestApi?.openAttachmentPicker());
+    expect(inputClick).toHaveBeenCalledTimes(1);
+    selectPickerFiles(["/workspace/replacement.txt"]);
     await vi.waitFor(() => expect(latestApi?.attachments).toHaveLength(8));
-    expect(mocks.platform.selectFiles).toHaveBeenCalledTimes(1);
     expect(mocks.toast).toHaveBeenCalledTimes(3);
     act(() => root.unmount());
   });
@@ -307,15 +335,11 @@ describe("useComposerAttachments eager upload", () => {
       scopeId: "partial-limit",
       localDesktop: true,
     });
-    mocks.platform.selectFiles.mockResolvedValueOnce(
-      Array.from({ length: 7 }, (_, index) => `/workspace/${index}.txt`),
-    );
-    await act(async () => latestApi?.openAttachmentPicker());
-    mocks.platform.selectFiles.mockResolvedValueOnce([
-      "/workspace/accepted.txt",
-      "/workspace/rejected.txt",
-    ]);
-    await act(async () => latestApi?.openAttachmentPicker());
+    resolvePickerPaths(Array.from({ length: 7 }, (_, index) => `/workspace/${index}.txt`));
+    selectPickerFiles(Array.from({ length: 7 }, (_, index) => `/workspace/${index}.txt`));
+    await vi.waitFor(() => expect(latestApi?.attachments).toHaveLength(7));
+    resolvePickerPaths(["/workspace/accepted.txt", "/workspace/rejected.txt"]);
+    selectPickerFiles(["/workspace/accepted.txt", "/workspace/rejected.txt"]);
     await vi.waitFor(() => expect(latestApi?.attachments).toHaveLength(8));
     expect(latestApi?.attachments.at(-1)?.filename).toBe("accepted.txt");
     expect(mocks.toast).toHaveBeenCalledTimes(1);
@@ -698,8 +722,8 @@ describe("useComposerAttachments eager upload", () => {
     await vi.waitFor(() => expect(latestApi?.attachments[0]?.uploadStatus).toBe("ready"));
     const submitted = latestApi!.attachments.map((item) => item.id);
     const submittedOperation = latestApi!.attachments[0]!.operationId;
-    mocks.platform.selectFiles.mockResolvedValueOnce(["/tmp/next.png"]);
-    act(() => latestApi!.openAttachmentPicker());
+    resolvePickerPaths(["/tmp/next.png"]);
+    selectPickerFiles(["/tmp/next.png"]);
     await vi.waitFor(() => expect(latestApi!.attachments).toHaveLength(2));
     await vi.waitFor(() => expect(latestApi!.attachments[1]!.uploadStatus).toBe("ready"));
     await act(async () => {
@@ -745,8 +769,10 @@ describe("useComposerAttachments eager upload", () => {
     const pending = deferred<ReturnType<typeof resultFor>>();
     transfer.stage.mockImplementation(() => pending.promise);
     const { root } = renderProbe({ attachmentSessionId: "session-1", scopeId: "task-a" });
-    mocks.platform.selectFiles.mockResolvedValueOnce(["/tmp/a.png"]);
-    act(() => latestApi?.openAttachmentPicker());
+    // Path-backed selection so the remote staging branch (with its progress
+    // subscription) drives the flow.
+    mocks.platform.getPathForFile.mockReturnValue("/tmp/a.png");
+    selectPickerFiles(["/tmp/a.png"]);
     await act(async () => Promise.resolve());
     const operationId = latestApi?.attachments[0]?.operationId ?? "";
 
@@ -780,8 +806,8 @@ describe("useComposerAttachments eager upload", () => {
       .mockRejectedValueOnce(new Error("ECONNRESET"))
       .mockResolvedValueOnce(resultFor("manual"));
     const { root } = renderProbe({ attachmentSessionId: "session-1", scopeId: "task-a" });
-    mocks.platform.selectFiles.mockResolvedValueOnce(["/tmp/a.png"]);
-    act(() => latestApi?.openAttachmentPicker());
+    mocks.platform.getPathForFile.mockReturnValue("/tmp/a.png");
+    selectPickerFiles(["/tmp/a.png"]);
     await act(async () => Promise.resolve());
     await act(async () => vi.advanceTimersByTimeAsync(500));
     await act(async () => Promise.resolve());

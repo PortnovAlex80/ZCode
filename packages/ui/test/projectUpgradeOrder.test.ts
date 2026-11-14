@@ -107,9 +107,12 @@ it("未带首次升级标记的既有入口不执行排序修复，同路径本�
   const before = hook.result.current.order;
   const online = props(true, false);
   hook.rerender(online);
+  // Without the upgrade marker the resolved host/project key is not repaired in place:
+  // reconcileProjectOrder treats it as an unrecorded project and prepends it in directory
+  // order, while the legacy entry key and the local projects keep their saved positions.
   expect(hook.result.current.order).toEqual([
-    ...before,
     projectKey(online.projects.find((p) => p.name === "remote")!),
+    ...before,
   ]);
-  expect(names(hook.result.current.sort(online.projects))).toEqual(["a", "b", "remote"]);
+  expect(names(hook.result.current.sort(online.projects))).toEqual(["remote", "a", "b"]);
 });

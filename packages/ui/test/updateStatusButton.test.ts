@@ -421,7 +421,9 @@ describe("UpdateStatusButton release notes", () => {
 
   it("disables visible update actions while a command is in flight", () => {
     expect(countUpdateStatusDialogBooleanProp("before-download", "disabled", true)).toBe(4);
-    expect(countUpdateStatusDialogBooleanProp("downloading", "disabled", true)).toBe(1);
+    // Downloading shows "background download" and "cancel download"; both are gated
+    // while a command is in flight (button lock releases once the state advances).
+    expect(countUpdateStatusDialogBooleanProp("downloading", "disabled", true)).toBe(2);
     expect(countUpdateStatusDialogBooleanProp("downloaded", "disabled", true)).toBe(2);
   });
 

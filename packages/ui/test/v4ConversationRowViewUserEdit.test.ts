@@ -1,11 +1,9 @@
-import { act, createElement, type ReactElement } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { FileClockIcon } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   TID_V4_EDIT,
-  TID_V4_EDIT_ATTACHMENT_REMOVE,
-  TID_V4_EDIT_REWIND_WORKSPACE,
+  TID_V4_EDIT_IN_COMPOSER_HINT,
   TID_V4_FEEDBACK_DISLIKE,
   TID_V4_FEEDBACK_LIKE,
   testId,
@@ -22,6 +20,10 @@ import {
 import { ConversationRowView } from "@/v4/ConversationRowView.js";
 import type { ConversationRowRenderContext } from "@/v4/conversationRowContext.js";
 import { serializeComposerPromptContexts } from "@/v4/composer/composerPromptContexts.js";
+import {
+  composerEditSessionKey,
+  useComposerEditStore,
+} from "@/composer-edit-mode/index.js";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 
 const {
@@ -261,6 +263,9 @@ function installMinimalDom() {
       nodeValue,
       parentNode: null,
     }),
+    // ZCodeIntlProvider syncs the active locale to <html lang>; the minimal
+    // document must expose a documentElement so that effect stays a no-op.
+    documentElement: { lang: "" },
     nodeType: 9,
     removeEventListener: () => {},
   } as unknown as Document & { defaultView?: unknown };
@@ -408,11 +413,30 @@ afterEach(() => {
   messageActionPropsByTestId.clear();
   messageResponseProps.length = 0;
   reasoningTriggerProps.length = 0;
+  useComposerEditStore.setState({ sessions: {} });
   vi.restoreAllMocks();
   delete (globalThis as { document?: unknown }).document;
   delete (globalThis as { window?: unknown }).window;
   delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: unknown }).IS_REACT_ACT_ENVIRONMENT;
 });
+
+// Composer edit mode: editing reuses the bottom composer (docs/ui/composer-edit-mode.md).
+// The row only reports the edit target and its workspace-rewind availability;
+// these helpers emulate the composer-side edit session for row-level tests.
+const rowEditSessionKey = composerEditSessionKey(
+  rowContext.workspaceIdentity?.trim() || rowContext.workspacePath,
+  rowContext.sessionId,
+);
+
+function beginRowEdit(row: UserInputRow): void {
+  useComposerEditStore.getState().begin(rowEditSessionKey, {
+    target: { kind: "userQuery", rowId: row.rowId, entityId: row.entityId! },
+    scopeId: "edit-scope-row-test",
+    inputKind: "sendText",
+    loadedText: row.text,
+    lockConfirmed: true,
+  });
+}
 
 describe("ConversationRowView reasoning summary", () => {
   it("opens topic history from the owning transport only after clicking the attachment", async () => {
@@ -824,7 +848,8 @@ describe("ConversationRowView user query editing", () => {
     const web = findElementByAttribute(pillRow, "aria-label", "1 个网页元素");
     const codeComment = findElementByAttribute(pillRow, "aria-label", "1 条评论");
     const pptx = findElementByAttribute(pillRow, "aria-label", "1 个幻灯片元素");
-    const conversation = findElementByAttribute(pillRow, "aria-label", "1 条对话引用");
+    // Conversation selections now share the annotation chip wording.
+    const conversation = findElementByAttribute(pillRow, "aria-label", "1 条注释");
     expect(imageRow?.parentNode).toBe(attachmentArea);
     expect(pillRow?.parentNode).toBe(attachmentArea);
     expect(image?.parentNode).toBe(imageRow);
@@ -1688,7 +1713,9 @@ describe("ConversationRowView user query editing", () => {
       );
     });
 
-    expect(hoverCardContentProps).toHaveLength(4);
+    // Context chips render once, in the attachment pill row (the bubble no
+    // longer duplicates them); each chip still right-aligns its hover card.
+    expect(hoverCardContentProps).toHaveLength(2);
     expect(hoverCardContentProps.every((props) => props.align === "end")).toBe(true);
 
     await act(async () => {
@@ -1764,8 +1791,8 @@ describe("ConversationRowView user query editing", () => {
     });
   });
 
-  it("opens an inline editor and submits edited text with original attachments", async () => {
-    const onEdit = vi.fn(async () => true);
+  it("routes the edit entry to the composer edit mode with the row target", async () => {
+    const onEdit = vi.fn(async () => undefined);
     const row = userInputRow();
     const root: Root = createRoot(installMinimalDom());
 
@@ -1792,29 +1819,19 @@ describe("ConversationRowView user query editing", () => {
       (editOnClick as () => void)();
     });
 
-    expect(chatPromptEditorProps).toHaveLength(1);
-    expect(chatPromptEditorProps[0]?.initialValue).toBe(row.text);
-    const submitEdit = chatPromptEditorProps[0]?.onSubmit;
-    expect(typeof submitEdit).toBe("function");
-
-    await act(async () => {
-      await (submitEdit as (value: string) => Promise<void>)("改过的问题");
-    });
-
-    expect(onEdit).toHaveBeenCalledWith(
-      { rowId: row.rowId, entityId: row.entityId },
-      "改过的问题",
-      row.attachments,
-      "preserve",
-    );
+    // Editing now happens in the bottom composer; the row never mounts an
+    // inline editor and only reports the edit target once.
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenCalledWith({ rowId: row.rowId, entityId: row.entityId });
+    expect(chatPromptEditorProps).toHaveLength(0);
 
     await act(async () => {
       root.unmount();
     });
   });
 
-  it("renders edit attachments like the composer and submits the remaining refs in source order", async () => {
-    const onEdit = vi.fn(async () => true);
+  it("keeps sent attachments ordered media-first while the composer edit mode owns editing", async () => {
+    const onEdit = vi.fn(async () => undefined);
     const row = userInputRow({
       text: "",
       attachments: [
@@ -1838,7 +1855,8 @@ describe("ConversationRowView user query editing", () => {
         },
       ],
     });
-    const root: Root = createRoot(installMinimalDom());
+    const container = installMinimalDom();
+    const root: Root = createRoot(container);
 
     await act(async () => {
       root.render(
@@ -1860,52 +1878,43 @@ describe("ConversationRowView user query editing", () => {
           | undefined
       )?.();
     });
+    expect(onEdit).toHaveBeenCalledWith({ rowId: row.rowId, entityId: row.entityId });
 
-    // 编辑态按「媒体优先、组内原序」排列：second.png、third.mov 为媒体卡，first.txt 为文件卡。
-    expect(attachmentPropsById.get(`${row.rowId}-1`)).toMatchObject({
-      variant: "grid",
-      "data-v4-user-edit-attachment-kind": "image",
-    });
-    expect(attachmentPropsById.get(`${row.rowId}-2`)).toMatchObject({
-      variant: "grid",
-      "data-v4-user-edit-attachment-kind": "video",
-    });
-    expect(attachmentPropsById.get(`${row.rowId}-0`)).toMatchObject({
-      variant: "inline",
-      "data-v4-user-edit-attachment-kind": "file",
-    });
-
-    const firstRemoveId = testId(TID_V4_EDIT_ATTACHMENT_REMOVE, `${row.rowId}-0`);
-    const secondRemoveId = testId(TID_V4_EDIT_ATTACHMENT_REMOVE, `${row.rowId}-1`);
-    expect(attachmentRemovePropsByTestId.get(firstRemoveId)).toMatchObject({
-      alwaysVisible: undefined,
-      label: "移除附件",
-      placement: "corner",
-      variant: "default",
-    });
-    expect(attachmentRemovePropsByTestId.get(secondRemoveId)).toBeDefined();
-
-    await act(async () => {
-      (attachmentRemovePropsByTestId.get(firstRemoveId)!.onClick as () => void)();
-    });
-    expect(chatPromptEditorProps.at(-1)?.allowSubmitWhenEmpty).toBe(true);
-    expect(chatPromptEditorProps.at(-1)?.submitDisabled).toBe(false);
-
-    await act(async () => {
-      await (chatPromptEditorProps.at(-1)!.onSubmit as (value: string) => Promise<void>)("");
-    });
-    expect(onEdit).toHaveBeenCalledWith(
-      { rowId: row.rowId, entityId: row.entityId },
-      "",
-      [row.attachments?.[1], row.attachments?.[2]],
-      "preserve",
+    // The composer edit mode loads these refs with the same "media first,
+    // original order inside each group" rule; the row keeps displaying its
+    // sent attachments split that way: second.png/third.mov as media cards,
+    // first.txt as a file pill.
+    const attachmentArea = findElementByAttribute(
+      container,
+      "data-v4-user-input-attachments",
+      "true",
     );
+    const imageRow = findElementByAttribute(
+      attachmentArea,
+      "data-v4-user-input-media-attachments",
+      "true",
+    );
+    const pillRow = findElementByAttribute(
+      attachmentArea,
+      "data-v4-user-input-attachment-pills",
+      "true",
+    );
+    expect(imageRow).not.toBeNull();
+    // Both media cards stay mounted in the media row in original order.
+    expect(attachmentPropsById.has(`${row.rowId}-1`)).toBe(true);
+    expect(attachmentPropsById.has(`${row.rowId}-2`)).toBe(true);
+    expect(collectText(pillRow)).toContain("first.txt");
+    expect(collectText(pillRow)).not.toContain("second.png");
+    expect(collectText(pillRow)).not.toContain("third.mov");
+    // Attachment add/remove now happens in the composer edit mode; the row
+    // renders no per-attachment remove controls of its own.
+    expect(attachmentRemovePropsByTestId.size).toBe(0);
 
     await act(async () => root.unmount());
   });
 
-  it("renders prompt contexts in the edit second row and keeps protocol text out of the editor", async () => {
-    const onEdit = vi.fn(async () => true);
+  it("keeps protocol contexts out of the visible text and reports them for the composer edit", async () => {
+    const onEdit = vi.fn(async () => undefined);
     const webContext: WebElementContextComposerAttachment = {
       capturedAt: 1_700_000_000_000,
       id: "edit-web-element",
@@ -1935,6 +1944,18 @@ describe("ConversationRowView user query editing", () => {
         ),
       );
     });
+
+    // The protocol block stays out of the visible text; the web element chip
+    // is what the composer edit mode will reload into the edit scope.
+    expect(collectText(container)).toContain("改一下");
+    expect(collectText(container)).not.toContain("# Web page elements:");
+    const pillRow = findElementByAttribute(
+      container,
+      "data-v4-user-input-attachment-pills",
+      "true",
+    );
+    expect(collectText(pillRow)).toContain("1 个网页元素");
+
     await act(async () => {
       (
         messageActionPropsByTestId.get(testId(TID_V4_EDIT, String(row.rowId)))?.onClick as
@@ -1942,31 +1963,14 @@ describe("ConversationRowView user query editing", () => {
           | undefined
       )?.();
     });
-
-    expect(chatPromptEditorProps.at(-1)?.initialValue).toBe("改一下");
-    const contextRow = findElementByAttribute(
-      container,
-      "data-v4-user-edit-context-attachments-row",
-      "true",
-    );
-    expect(contextRow).not.toBeNull();
-    expect(collectText(contextRow)).toContain("1 个网页元素");
-
-    await act(async () => {
-      await (chatPromptEditorProps.at(-1)!.onSubmit as (value: string) => Promise<void>)("更新");
-    });
-    expect(onEdit).toHaveBeenCalledWith(
-      { rowId: row.rowId, entityId: row.entityId },
-      buildPromptWithWebElementContexts("更新", [webContext]),
-      [],
-      "preserve",
-    );
+    expect(onEdit).toHaveBeenCalledWith({ rowId: row.rowId, entityId: row.entityId });
+    expect(chatPromptEditorProps).toHaveLength(0);
 
     await act(async () => root.unmount());
   });
 
-  it("rejects an edit only after both text and attachments become empty", async () => {
-    const onEdit = vi.fn(async () => true);
+  it("delegates edits of text-less rows to the composer which owns the empty-submission gate", async () => {
+    const onEdit = vi.fn(async () => undefined);
     const row = userInputRow({ text: "" });
     const root: Root = createRoot(installMinimalDom());
 
@@ -1983,6 +1987,10 @@ describe("ConversationRowView user query editing", () => {
         ),
       );
     });
+
+    // The row still offers the edit entry for an attachments-only message;
+    // rejecting an edit that is empty in both text and attachments is owned
+    // by the composer edit mode submission gate, not by the row.
     await act(async () => {
       (
         messageActionPropsByTestId.get(testId(TID_V4_EDIT, String(row.rowId)))?.onClick as
@@ -1990,27 +1998,15 @@ describe("ConversationRowView user query editing", () => {
           | undefined
       )?.();
     });
-    expect(chatPromptEditorProps.at(-1)?.submitDisabled).toBe(false);
-
-    await act(async () => {
-      (
-        attachmentRemovePropsByTestId.get(testId(TID_V4_EDIT_ATTACHMENT_REMOVE, `${row.rowId}-0`))!
-          .onClick as () => void
-      )();
-    });
-    expect(chatPromptEditorProps.at(-1)?.allowSubmitWhenEmpty).toBe(false);
-    expect(chatPromptEditorProps.at(-1)?.submitDisabled).toBe(true);
-
-    await act(async () => {
-      await (chatPromptEditorProps.at(-1)!.onSubmit as (value: string) => Promise<void>)("   ");
-    });
-    expect(onEdit).not.toHaveBeenCalled();
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenCalledWith({ rowId: row.rowId, entityId: row.entityId });
+    expect(chatPromptEditorProps).toHaveLength(0);
 
     await act(async () => root.unmount());
   });
 
-  it("restores the original attachment list after cancelling and reopening edit", async () => {
-    const onEdit = vi.fn(async () => true);
+  it("restores the edit entry after the composer edit session ends", async () => {
+    const onEdit = vi.fn(async () => undefined);
     const row = userInputRow({
       attachments: [
         ...(userInputRow().attachments ?? []),
@@ -2022,7 +2018,8 @@ describe("ConversationRowView user query editing", () => {
         },
       ],
     });
-    const root: Root = createRoot(installMinimalDom());
+    const container = installMinimalDom();
+    const root: Root = createRoot(container);
 
     await act(async () => {
       root.render(
@@ -2037,103 +2034,111 @@ describe("ConversationRowView user query editing", () => {
         ),
       );
     });
-    await act(async () => {
-      (
-        messageActionPropsByTestId.get(testId(TID_V4_EDIT, String(row.rowId)))?.onClick as
-          | (() => void)
-          | undefined
-      )?.();
-    });
-    await act(async () => {
-      (
-        attachmentRemovePropsByTestId.get(testId(TID_V4_EDIT_ATTACHMENT_REMOVE, `${row.rowId}-0`))!
-          .onClick as () => void
-      )();
-      (chatPromptEditorProps.at(-1)!.onCancel as () => void)();
-    });
-    await act(async () => {
-      (
-        messageActionPropsByTestId.get(testId(TID_V4_EDIT, String(row.rowId)))?.onClick as
-          | (() => void)
-          | undefined
-      )?.();
-    });
-    await act(async () => {
-      await (chatPromptEditorProps.at(-1)!.onSubmit as (value: string) => Promise<void>)(row.text);
-    });
 
-    expect(onEdit).toHaveBeenCalledWith(
-      { rowId: row.rowId, entityId: row.entityId },
-      row.text,
-      row.attachments,
-      "preserve",
-    );
-    await act(async () => root.unmount());
-  });
-
-  it("keeps removed refs after a failed ACK and leaves 15360+ pasted text in the editor", async () => {
-    const onEdit = vi.fn(async () => false);
-    const row = userInputRow({
-      attachments: [
-        ...(userInputRow().attachments ?? []),
-        {
-          bytes: 24,
-          fileName: "second.txt",
-          mime: "text/plain",
-          ref: "/workspace/second.txt",
-        },
-      ],
-    });
-    const longText = "长".repeat(15_361);
-    const root: Root = createRoot(installMinimalDom());
-
+    // While the composer edit mode owns this row, the row swaps its edit
+    // action for the "editing below" hint. The action-capture map keeps stale
+    // entries across renders, so assert the rendered DOM instead.
     await act(async () => {
-      root.render(
-        createElement(
-          ZCodeIntlProvider,
-          { initialLocale: "zh-CN" },
-          createElement(ConversationRowView, {
-            context: rowContext,
-            onEdit,
-            row,
-          }),
-        ),
-      );
+      beginRowEdit(row);
     });
-    await act(async () => {
-      (
-        messageActionPropsByTestId.get(testId(TID_V4_EDIT, String(row.rowId)))?.onClick as
-          | (() => void)
-          | undefined
-      )?.();
-    });
-    expect(chatPromptEditorProps.at(-1)?.onPaste).toBeUndefined();
-    await act(async () => {
-      (
-        attachmentRemovePropsByTestId.get(testId(TID_V4_EDIT_ATTACHMENT_REMOVE, `${row.rowId}-0`))!
-          .onClick as () => void
-      )();
-      (chatPromptEditorProps.at(-1)!.onChange as (value: string) => void)(longText);
-    });
-    await act(async () => {
-      await (chatPromptEditorProps.at(-1)!.onSubmit as (value: string) => Promise<void>)(longText);
-    });
-
-    expect(onEdit).toHaveBeenCalledWith(
-      { rowId: row.rowId, entityId: row.entityId },
-      longText,
-      [row.attachments?.[1]],
-      "preserve",
-    );
-    expect(chatPromptEditorProps.at(-1)?.initialValue).toBe(row.text);
     expect(
-      attachmentRemovePropsByTestId.has(testId(TID_V4_EDIT_ATTACHMENT_REMOVE, `${row.rowId}-0`)),
-    ).toBe(true);
+      findElementByAttribute(
+        container,
+        "data-testid",
+        testId(TID_V4_EDIT, String(row.rowId)),
+      ),
+    ).toBeNull();
+    expect(
+      findElementByAttribute(
+        container,
+        "data-testid",
+        testId(TID_V4_EDIT_IN_COMPOSER_HINT, String(row.rowId)),
+      ),
+    ).not.toBeNull();
+
+    // Cancelling ends the edit session and the edit entry becomes available
+    // again; the row content was never mutated by the editing flow.
+    await act(async () => {
+      useComposerEditStore.getState().end(rowEditSessionKey);
+    });
+    expect(
+      findElementByAttribute(
+        container,
+        "data-testid",
+        testId(TID_V4_EDIT_IN_COMPOSER_HINT, String(row.rowId)),
+      ),
+    ).toBeNull();
+    await act(async () => {
+      (
+        messageActionPropsByTestId.get(testId(TID_V4_EDIT, String(row.rowId)))?.onClick as
+          | (() => void)
+          | undefined
+      )?.();
+    });
+    expect(onEdit).toHaveBeenCalledWith({ rowId: row.rowId, entityId: row.entityId });
+    expect(attachmentPropsById.has(`${row.rowId}-0`)).toBe(true);
+    expect(attachmentPropsById.has(`${row.rowId}-1`)).toBe(true);
 
     await act(async () => root.unmount());
   });
 
-  it("keeps the disabled file reset tooltip hoverable and explains why it is unavailable", async () => {
+  it("leaves the sent row untouched when the composer reports a failed edit ACK", async () => {
+    const onEdit = vi.fn(async () => undefined);
+    const row = userInputRow({
+      attachments: [
+        ...(userInputRow().attachments ?? []),
+        {
+          bytes: 24,
+          fileName: "second.txt",
+          mime: "text/plain",
+          ref: "/workspace/second.txt",
+        },
+      ],
+    });
+    const container = installMinimalDom();
+    const root: Root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        createElement(
+          ZCodeIntlProvider,
+          { initialLocale: "zh-CN" },
+          createElement(ConversationRowView, {
+            context: rowContext,
+            onEdit,
+            row,
+          }),
+        ),
+      );
+    });
+
+    // A rejected edit submission is retried inside the composer edit mode;
+    // the sent row itself keeps its original text and attachment list.
+    await act(async () => {
+      (
+        messageActionPropsByTestId.get(testId(TID_V4_EDIT, String(row.rowId)))?.onClick as
+          | (() => void)
+          | undefined
+      )?.();
+    });
+    await act(async () => {
+      beginRowEdit(row);
+    });
+    expect(collectText(container)).toContain(row.text);
+    expect(attachmentPropsById.has(`${row.rowId}-0`)).toBe(true);
+    expect(attachmentPropsById.has(`${row.rowId}-1`)).toBe(true);
+    expect(
+      findElementByAttribute(
+        container,
+        "data-testid",
+        testId(TID_V4_EDIT_IN_COMPOSER_HINT, String(row.rowId)),
+      ),
+    ).not.toBeNull();
+
+    await act(async () => root.unmount());
+  });
+
+  it("pushes the row's disabled workspace rewind availability to the composer edit session", async () => {
     const row = userInputRow();
     const root: Root = createRoot(installMinimalDom());
 
@@ -2155,68 +2160,27 @@ describe("ConversationRowView user query editing", () => {
       );
     });
 
-    const editAction = messageActionPropsByTestId.get(testId(TID_V4_EDIT, String(row.rowId)));
-    const editOnClick = editAction?.onClick;
-    expect(editOnClick).toBeTypeOf("function");
+    // The "reset with files" action moved into the composer edit bar; the row
+    // only reports whether a safe rewind exists for this turn while the
+    // composer edit session targets this row.
     await act(async () => {
-      (editOnClick as () => void)();
+      beginRowEdit(row);
     });
-
-    const slot = chatPromptEditorProps.at(-1)?.betweenCancelAndSubmitAction as ReactElement<{
-      description?: string;
-      title: string;
-      children: ReactElement<Record<string, unknown>>;
-    }>;
-    const disabledTooltipTrigger = slot.props.children;
-    const rewindButton = disabledTooltipTrigger.props.children as ReactElement<
-      Record<string, unknown>
-    >;
-    expect(slot.props.title).toBe("与文件一起重置");
-    expect(slot.props.description).toBe("本轮没有可安全恢复的文件改动");
-    expect(disabledTooltipTrigger.type).toBe("span");
-    expect(disabledTooltipTrigger.props["data-disabled-tooltip-trigger"]).toBe("true");
-    expect(rewindButton.props.disabled).toBe(true);
-    expect((rewindButton.props.children as ReactElement).type).toBe(FileClockIcon);
+    expect(useComposerEditStore.getState().sessions[rowEditSessionKey]?.workspaceRewind).toEqual({
+      enabled: false,
+      reason: "noFiles",
+    });
 
     await act(async () => {
       root.unmount();
     });
   });
 
-  it("keeps the file+conversation action between cancel and send and falls back after a blocked preview", async () => {
-    const preview = {
-      canApply: false,
-      safeFiles: [],
-      unsafeFiles: [
-        {
-          action: "restore" as const,
-          operationCount: 1,
-          path: "/workspace/note.txt",
-          reason: "external_modified" as const,
-          toolNames: ["Write"],
-        },
-      ],
-      ignoredFiles: [],
-    };
-    const onEdit = vi
-      .fn()
-      .mockResolvedValueOnce({
-        commandId: "edit-rewind-command",
-        accepted: true,
-        result: {
-          type: "editUserQuery",
-          disposition: "blocked",
-          preview,
-          reasonCode: "edit.workspaceRewindBlocked",
-        },
-      })
-      .mockResolvedValueOnce({
-        commandId: "edit-conversation-only-command",
-        accepted: true,
-        result: { type: "editUserQuery", disposition: "rewind" },
-      });
+  it("reports available workspace rewind for the owning row during the composer edit session", async () => {
+    const onEdit = vi.fn(async () => undefined);
     const row = userInputRow();
-    const root: Root = createRoot(installMinimalDom());
+    const container = installMinimalDom();
+    const root: Root = createRoot(container);
 
     await act(async () => {
       root.render(
@@ -2235,58 +2199,37 @@ describe("ConversationRowView user query editing", () => {
         ),
       );
     });
-    const editAction = messageActionPropsByTestId.get(testId(TID_V4_EDIT, String(row.rowId)));
-    const editOnClick = editAction?.onClick;
-    expect(editOnClick).toBeTypeOf("function");
-    await act(async () => {
-      (editOnClick as () => void)();
-    });
-
-    const slot = chatPromptEditorProps.at(-1)?.betweenCancelAndSubmitAction as ReactElement<{
-      description?: string;
-      title: string;
-      children: ReactElement<Record<string, unknown>>;
-    }>;
-    const rewindButton = slot.props.children;
-    expect(slot.props.title).toBe("与文件一起重置");
-    expect(slot.props.description).toBeUndefined();
-    expect(rewindButton.props["data-testid"]).toBe(
-      testId(TID_V4_EDIT_REWIND_WORKSPACE, String(row.rowId)),
-    );
-    expect(rewindButton.props.disabled).toBe(false);
-    expect((rewindButton.props.children as ReactElement).type).toBe(FileClockIcon);
 
     await act(async () => {
-      (rewindButton.props.onClick as () => void)();
-      await Promise.resolve();
+      beginRowEdit(row);
     });
-
-    expect(onEdit).toHaveBeenNthCalledWith(
-      1,
-      { rowId: row.rowId, entityId: row.entityId },
-      row.text,
-      row.attachments,
-      "rewind",
-    );
-    expect(fileRewindDialogProps.at(-1)).toMatchObject({
-      open: true,
-      preview,
-      variant: "editConflict",
+    expect(useComposerEditStore.getState().sessions[rowEditSessionKey]?.workspaceRewind).toEqual({
+      enabled: true,
+      reason: "available",
     });
+    // The rewind trigger itself (with the blocked-preview fallback dialog)
+    // now lives in the composer edit bar; the row shows only the hint.
+    expect(
+      findElementByAttribute(
+        container,
+        "data-testid",
+        testId(TID_V4_EDIT_IN_COMPOSER_HINT, String(row.rowId)),
+      ),
+    ).not.toBeNull();
+    expect(fileRewindDialogProps).toHaveLength(0);
+    expect(onEdit).not.toHaveBeenCalled();
 
-    const onConversationOnly = fileRewindDialogProps.at(-1)?.onConversationOnly;
-    expect(onConversationOnly).toBeTypeOf("function");
     await act(async () => {
-      (onConversationOnly as () => void)();
-      await Promise.resolve();
+      useComposerEditStore.getState().end(rowEditSessionKey);
     });
-    expect(onEdit).toHaveBeenNthCalledWith(
-      2,
-      { rowId: row.rowId, entityId: row.entityId },
-      row.text,
-      row.attachments,
-      "preserve",
-    );
+    await act(async () => {
+      (
+        messageActionPropsByTestId.get(testId(TID_V4_EDIT, String(row.rowId)))?.onClick as
+          | (() => void)
+          | undefined
+      )?.();
+    });
+    expect(onEdit).toHaveBeenCalledWith({ rowId: row.rowId, entityId: row.entityId });
 
     await act(async () => {
       root.unmount();

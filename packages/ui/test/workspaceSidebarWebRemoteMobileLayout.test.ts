@@ -64,7 +64,13 @@ vi.mock("@/hooks/useWorkspaceServices.js", () => {
     zcodeTaskService: { onDynamicWorkspaceEvent: () => () => ({ dispose: vi.fn() }) },
     broadcastService: { onMessage: () => ({ dispose: vi.fn() }) },
   };
-  return { useBaseWorkspaceServices: () => base };
+  return {
+    useBaseWorkspaceServices: () => base,
+    // The sidebar reads optional base services for worktree capability; the
+    // fixture has no managed worktree service, which keeps those entry points
+    // hidden exactly like a plain local workspace.
+    useOptionalBaseWorkspaceServices: () => base,
+  };
 });
 vi.mock("@/store/TabStoreProvider.js", () => ({
   useTabStore: (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
@@ -112,8 +118,10 @@ vi.mock("@/WorkspaceSidebarFooter.js", () => ({
   WorkspaceSidebarFooter: () => createElement("footer", {}, "Footer"),
 }));
 vi.mock("@/NewTaskButtonGroup.js", () => ({
+  // The real group button invokes onCreateTask without the DOM event; keep the
+  // stub faithful so the top-entry assertion stays about the call arguments.
   NewTaskButtonGroup: ({ onCreateTask }: { onCreateTask(): void }) =>
-    createElement("button", { onClick: onCreateTask }, "New task"),
+    createElement("button", { onClick: () => onCreateTask() }, "New task"),
 }));
 vi.mock("@/project-sidebar/ProjectTaskRows.js", () => ({ ProjectTaskRows: () => null }));
 vi.mock("@/project-sidebar/useProjectTaskNavigation.js", () => ({

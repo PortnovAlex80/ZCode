@@ -36,7 +36,14 @@ it("SBV04：两个消费者共用目录，视图切换不改变手动项目顺�
     ],
     tasks: [{ taskId: "t", projectId: "two", hostId: "local", updatedAt: 10 } as never],
   };
-  read.mockReturnValue({ tree, factTree: tree });
+  // v3.18 contract: the directory owner feeds onlineHostIds into mergeBaselineForHosts,
+  // so the useProjectTree mock must publish the per-read host success set.
+  read.mockReturnValue({
+    tree,
+    factTree: tree,
+    onlineHostIds: new Set(["local"]),
+    hostReadErrors: new Map(),
+  });
   function Consumer({ name }: { name: string }) {
     const { projects, preferences } = useProjectDirectory();
     return createElement(
@@ -79,7 +86,12 @@ it("父级草稿更新不广播等价目录，项目改名仍更新消费者", (
     ],
     tasks: [],
   };
-  read.mockReturnValue({ tree, factTree: tree });
+  read.mockReturnValue({
+    tree,
+    factTree: tree,
+    onlineHostIds: new Set(["local"]),
+    hostReadErrors: new Map(),
+  });
   const observed = vi.fn();
   const Consumer = memo(function Consumer() {
     const { projects } = useProjectDirectory();
@@ -91,7 +103,12 @@ it("父级草稿更新不广播等价目录，项目改名仍更新消费者", (
   view.rerender(createElement(ProjectDirectoryProvider, null, createElement(Consumer)));
   expect(observed).not.toHaveBeenCalled();
   const renamed = { ...tree, projects: [{ ...tree.projects[0]!, name: "After" }] };
-  read.mockReturnValue({ tree: renamed, factTree: renamed });
+  read.mockReturnValue({
+    tree: renamed,
+    factTree: renamed,
+    onlineHostIds: new Set(["local"]),
+    hostReadErrors: new Map(),
+  });
   view.rerender(createElement(ProjectDirectoryProvider, null, createElement(Consumer)));
   expect(screen.getByText("After")).toBeTruthy();
   expect(observed).toHaveBeenCalled();

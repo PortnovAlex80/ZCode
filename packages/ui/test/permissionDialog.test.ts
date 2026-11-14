@@ -8,6 +8,7 @@ import type { ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { PermissionDialog } from "../src/PermissionDialog.js";
+import { TooltipProvider } from "@/components/ui/tooltip.js";
 import { ZCodeIntlProvider } from "../src/i18n/IntlProvider.js";
 
 const WORKSPACE_PATH = "/Users/dev/ZCodeProject/demo";
@@ -30,13 +31,18 @@ function renderPermissionDialog(
     createElement(
       ZCodeIntlProvider,
       { initialLocale: "zh-CN" },
-      createElement(Dialog, {
-        request,
-        onRespond: () => {},
-        workspacePath: WORKSPACE_PATH,
-        provider,
-        ...extraProps,
-      }),
+      // File-change previews render inline tooltips; Radix requires a provider.
+      createElement(
+        TooltipProvider,
+        null,
+        createElement(Dialog, {
+          request,
+          onRespond: () => {},
+          workspacePath: WORKSPACE_PATH,
+          provider,
+          ...extraProps,
+        }),
+      ),
     ),
   );
 }

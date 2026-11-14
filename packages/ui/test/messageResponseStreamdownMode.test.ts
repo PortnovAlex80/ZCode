@@ -38,6 +38,19 @@ vi.mock("@/hooks/usePlatform.js", () => ({
   }),
 }));
 
+// Streaming mode wraps every text unit in a `data-zcode-reveal` span. The
+// animation is style-only (transition-delay), so stripping the wrappers in
+// assertions keeps the original contiguous-text expectations intact.
+function stripStreamingRevealSpans(html: string): string {
+  const revealSpan = /<span data-zcode-reveal="[^"]*"(?: style="[^"]*")?>(.*?)<\/span>/g;
+  let current = html.replace(revealSpan, "$1");
+  while (current !== html) {
+    html = current;
+    current = current.replace(revealSpan, "$1");
+  }
+  return current;
+}
+
 describe("resolveMessageStreamdownMode", () => {
   it("invalidates memoized artifact images when their session or reader changes", () => {
     const readAttachment = vi.fn();
@@ -232,7 +245,7 @@ describe("resolveMessageStreamdownMode", () => {
         ),
       ),
     );
-    expect(html).toContain("正文");
+    expect(stripStreamingRevealSpans(html)).toContain("正文");
     expect(html).not.toContain("::zcode-file-citation");
 
     const malformedHtml = renderToStaticMarkup(
@@ -251,7 +264,7 @@ describe("resolveMessageStreamdownMode", () => {
         ),
       ),
     );
-    expect(malformedHtml).toContain("后续说明仍然可见");
+    expect(stripStreamingRevealSpans(malformedHtml)).toContain("后续说明仍然可见");
   });
 
   it.each([
@@ -460,9 +473,10 @@ describe("resolveMessageStreamdownMode", () => {
       ),
     );
 
-    expect(html).toContain("~单波浪线~");
-    expect(html).not.toContain("<del>单波浪线</del>");
-    expect(html).toContain("<del>双波浪线。</del>后续文字");
+    const staticHtml = stripStreamingRevealSpans(html);
+    expect(staticHtml).toContain("~单波浪线~");
+    expect(staticHtml).not.toContain("<del>单波浪线</del>");
+    expect(staticHtml).toContain("<del>双波浪线。</del>后续文字");
   });
 
   it("keeps completed messages on Streamdown static mode", () => {

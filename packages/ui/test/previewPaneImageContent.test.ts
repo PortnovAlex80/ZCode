@@ -29,6 +29,10 @@ describe("copyPreviewImage", () => {
     });
     vi.stubGlobal("document", { createElement: () => canvas });
     vi.stubGlobal("navigator", { clipboard: { write } });
+    // Same-origin location so the copy path skips the cross-origin blob re-fetch.
+    vi.stubGlobal("window", {
+      location: { href: "http://localhost.test/preview", origin: "http://localhost.test" },
+    });
     vi.stubGlobal(
       "ClipboardItem",
       class {

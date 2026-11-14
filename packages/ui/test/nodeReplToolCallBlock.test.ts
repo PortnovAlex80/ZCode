@@ -363,7 +363,9 @@ describe("node repl tool display", () => {
     );
 
     expect(html).toContain("选择浏览器并读取操作说明");
-    expect(html).toContain("已完成");
+    // Completed runs no longer render a status word in the summary row; the
+    // status label is reserved for failures ("操作失败"), so assert its absence.
+    expect(html).not.toContain("操作失败");
     expect(html).toContain("已选择应用内浏览器，并读取操作说明。");
     expect(html).not.toContain(">结果</span>");
     expect(html).not.toContain('aria-label="复制结果"');

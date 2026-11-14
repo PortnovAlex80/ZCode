@@ -66,7 +66,9 @@ vi.mock("@/settings/CodingPlanUpgradeDialogProvider.js", () => ({
 }));
 vi.mock("@/rewards/RewardsProvider.js", () => ({ useOpenRewards: () => h.rewards }));
 vi.mock("@/i18n/IntlProvider.js", () => ({
-  useZCodeIntl: () => ({ intl: h.intl, locale: "en-US" }),
+  // localeResolved gates runtime creation: the provider no longer queries before
+  // IntlProvider finished reading the persisted locale.
+  useZCodeIntl: () => ({ intl: h.intl, locale: "en-US", localeResolved: true }),
 }));
 vi.mock("@/components/cloud-content-dialog/useCloudHeroEnvironment.js", () => ({
   useCloudHeroEnvironment: () => ({ dark: false }),

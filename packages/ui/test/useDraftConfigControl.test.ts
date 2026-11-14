@@ -81,6 +81,18 @@ vi.mock("@/hooks/useZCodeSessionService.js", () => ({
   useZCodeSessionService: () => ({ readWorkspacePresentation: vi.fn() }),
 }));
 
+vi.mock("@/hooks/useZCodeAgentService.js", () => ({
+  // useDraftConfigControl now pulls the agent service through the workspace
+  // service resolution, which throws without a ServiceProvider. The draft
+  // control only consumes the plugin startup-degraded subscription, so a
+  // no-op stub keeps that effect inert without the provider tree.
+  useZCodeAgentService: () => ({
+    onDynamicPluginStartupDegraded:
+      (_params: Record<string, unknown>) =>
+      (_listener: () => void): { dispose: () => void } => ({ dispose: () => {} }),
+  }),
+}));
+
 vi.mock("@/hooks/useSettingService.js", () => ({
   useSettings: () => ({ settings: null }),
 }));
@@ -931,7 +943,10 @@ describe("useDraftConfigControl slash command hydration", () => {
       control = useActualDraftConfigControl({
         workspacePath,
         sessionId,
-        sessionConfig: { mode: "build" },
+        // The first session snapshot owns the draft model, so the fixture
+        // session carries the persisted selection; the service then resolves
+        // it to the account-mapped effective selection.
+        sessionConfig: { mode: "build", modelSelection: original },
         agentStartupAllowed: false,
         modelSelectionService: service,
       });
@@ -1217,7 +1232,18 @@ describe("useDraftConfigControl slash command hydration", () => {
       control = useDraftConfigControl({
         workspacePath,
         sessionId: "session",
-        sessionConfig: { mode: "build" },
+        // The first session snapshot owns the draft toolbar config, so the
+        // fixture seeds the same selection the persisted draft carried; the
+        // scenario then exercises view-unavailable retention and view-ready
+        // reasoning-level validation on that selection.
+        sessionConfig: {
+          mode: "build",
+          modelSelection: {
+            providerId: "provider",
+            modelId: "old",
+            options: { reasoningLevel: "deleted" },
+          },
+        },
         agentStartupAllowed: false,
         modelSelectionView: view,
       });
@@ -1302,14 +1328,15 @@ describe("useDraftConfigControl slash command hydration", () => {
     await act(async () => {
       root.render(createElement(Probe, { sessionId: "a", config: { mode: "build" } }));
     });
+    // The first session snapshot now owns the draft toolbar config: the text
+    // saved for scope "a" survives, while the model comes from the session/
+    // View resolution instead of the stale draft value selected before the
+    // switch.
     expect(control!.composerDraft).toMatchObject({
       text: "草稿 A",
       mode: "build",
-      modelSelection: {
-        providerId: "provider",
-        modelId: "new",
-      },
     });
+    expect(control!.draftConfig.modelSelection).toBeUndefined();
     expect(readV4ComposerDraft(workspacePath, undefined, "a")).toBeNull();
     act(() => root.unmount());
   });
@@ -1480,11 +1507,13 @@ describe("useDraftConfigControl slash command hydration", () => {
         return null;
       }
       await act(async () => root.render(createElement(Probe, { sessionId: "s" })));
+      // The session snapshot now owns mode/plan/model on first restore; the
+      // persisted draft only contributes its text ("keep text").
       expect(control!.composerDraft).toMatchObject({
         text: hasText ? "keep text" : "",
         mode: "build",
         planEnabled: false,
-        modelSelection: { modelId: hasText ? "draft-model" : "session-model" },
+        modelSelection: { modelId: "session-model" },
       });
       act(() => {
         control!.handleDraftSwitchMode("yolo");

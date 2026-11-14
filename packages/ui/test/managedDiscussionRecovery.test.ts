@@ -21,6 +21,9 @@ import { persistV4ComposerDraft, readV4ComposerDraft } from "@/v4/composer/compo
 
 vi.mock("@/hooks/useServices.js", () => ({
   useServices: () => ({ zcodeSessionService: { closeSession: vi.fn() } }),
+  // useAppPanels now resolves services through the optional accessor; return null so the
+  // hooks fall back to their non-service defaults in this unit test.
+  useOptionalServices: () => null,
 }));
 vi.mock("@/hooks/useInterfaceMode.js", () => ({
   useIsOfficeMode: () => false,

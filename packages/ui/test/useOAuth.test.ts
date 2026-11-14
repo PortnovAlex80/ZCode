@@ -198,8 +198,10 @@ describe("useOAuth", () => {
       loadingProviders: false,
       providers: [provider],
     });
+    // The active-provider read failure no longer clears the channel list; the
+    // warn copy now says the login channels are retained.
     expect(mocks.logger.warn).toHaveBeenCalledWith(
-      "[useOAuth] 加载 active provider 凭据失败，已按未登录处理:",
+      "[useOAuth] 加载 active provider 失败，保留登录渠道:",
       decryptError,
     );
 
@@ -230,13 +232,18 @@ describe("useOAuth", () => {
       await Promise.resolve();
     });
 
+    // Any active-provider read failure only clears the local account projection;
+    // the fetched channel metadata stays visible and no list-level error fires.
     expect(observed.at(-1)).toEqual({
       activeProvider: null,
       loadingProviders: false,
-      providers: [],
+      providers: [provider],
     });
-    expect(mocks.logger.warn).not.toHaveBeenCalled();
-    expect(mocks.logger.error).toHaveBeenCalledWith("[useOAuth] 加载 provider 列表失败:", rpcError);
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      "[useOAuth] 加载 active provider 失败，保留登录渠道:",
+      rpcError,
+    );
+    expect(mocks.logger.error).not.toHaveBeenCalled();
 
     act(() => {
       root.unmount();

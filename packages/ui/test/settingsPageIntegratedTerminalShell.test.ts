@@ -10,6 +10,9 @@ const pendingEffects = vi.hoisted(() => [] as Array<() => void | (() => void)>);
 const generalSectionCapture = vi.hoisted(
   () => ({ props: undefined }) as { props: Record<string, unknown> | undefined },
 );
+const agentBehaviorSectionCapture = vi.hoisted(
+  () => ({ props: undefined }) as { props: Record<string, unknown> | undefined },
+);
 const settingsPageConfigCalls = vi.hoisted(
   () =>
     [] as Array<{
@@ -189,21 +192,27 @@ vi.mock("@/hooks/useUsageEntitlement.js", () => ({
   }),
 }));
 
-vi.mock("@/store/StoreProvider.js", () => ({
-  useZCodeStoreWithDefault: (_selector: unknown, fallback: unknown) => fallback,
-  useZCodeStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      codePreviewSettings: {},
-      notificationEnabled: true,
-      notificationSoundEnabled: true,
-      requestOnboardingDialog: vi.fn(),
-      setCodePreviewSettings: vi.fn(),
-      setNotificationEnabled: vi.fn(),
-      setNotificationSoundEnabled: vi.fn(),
-      setTheme: vi.fn(),
-      theme: "system",
-    }),
-}));
+vi.mock("@/store/StoreProvider.js", async () => {
+  const { createContext } = await vi.importActual<typeof import("react")>("react");
+  const store = {
+    codePreviewSettings: {},
+    notificationEnabled: true,
+    notificationSoundEnabled: true,
+    requestOnboardingDialog: vi.fn(),
+    setCodePreviewSettings: vi.fn(),
+    setNotificationEnabled: vi.fn(),
+    setNotificationSoundEnabled: vi.fn(),
+    setTheme: vi.fn(),
+    theme: "system",
+  };
+  return {
+    // Telemetry helpers read the store through this context; default to the mock store
+    // so components rendered without an explicit provider still resolve it.
+    StoreContext: createContext(store),
+    useZCodeStoreWithDefault: (_selector: unknown, fallback: unknown) => fallback,
+    useZCodeStore: (selector: (state: Record<string, unknown>) => unknown) => selector(store),
+  };
+});
 
 vi.mock("@/store/TabStoreProvider.js", () => ({
   useOptionalTabStore: () => undefined,
@@ -228,6 +237,9 @@ vi.mock("@/lib/settingsNavigation.js", () => ({
   consumePendingSettingsSourceServerId: () => undefined,
   consumePendingSettingsSourceServerDetails: () => false,
   resolveSettingsSection: (section: string) => section,
+  // settingsPageConfig gates section registration through this predicate; keep every
+  // mocked section visible so the navigation assertions cover the same set as before.
+  isSettingsSectionEnabled: () => true,
   shouldFallbackSettingsUsageTabToApp: () => false,
   writeLastSettingsSectionPreference: vi.fn(),
 }));
@@ -313,6 +325,11 @@ vi.mock("../src/settingsPageHelpers.js", () => ({
     generalSectionCapture.props = props;
     return createElement("div", null, "general");
   },
+  // Upstream moved the tool-search / reasoning / interaction switches into this section.
+  AgentBehaviorSectionContent: (props: Record<string, unknown>) => {
+    agentBehaviorSectionCapture.props = props;
+    return createElement("div", null, "agent-behavior");
+  },
   GeneralSectionHeader: () => null,
   TaskAutoArchiveSettings: (props: Record<string, unknown>) => {
     generalSectionCapture.props = props;
@@ -340,6 +357,7 @@ describe("SettingsPage integrated terminal shell", () => {
     localServices.settingService.get.mockReset().mockResolvedValue({});
     remoteServices.settingService.get.mockReset().mockResolvedValue({});
     generalSectionCapture.props = undefined;
+    agentBehaviorSectionCapture.props = undefined;
     settingsPageConfigCalls.length = 0;
     sharedSettingsState.value = undefined;
     sourceServerManagementState.value = undefined;
@@ -388,9 +406,11 @@ describe("SettingsPage integrated terminal shell", () => {
 
   it("defaults ToolSearch off and saves the selected mode through shared settings", async () => {
     const { SettingsPage } = await import("../src/SettingsPage.js");
+    // ToolSearch moved from the general section to the agent-behavior section upstream.
+    selectedSection.value = "agentBehavior";
     renderToStaticMarkup(createElement(SettingsPage, {}));
-    expect(generalSectionCapture.props?.toolSearchMode).toBe("off");
-    const change = generalSectionCapture.props?.onToolSearchModeChange as (
+    expect(agentBehaviorSectionCapture.props?.toolSearchMode).toBe("off");
+    const change = agentBehaviorSectionCapture.props?.onToolSearchModeChange as (
       mode: "auto" | "local" | "off",
     ) => Promise<void>;
     for (const mode of ["auto", "local", "off"] as const) {
@@ -401,10 +421,11 @@ describe("SettingsPage integrated terminal shell", () => {
 
   it("defaults message stream reasoning to visible before settings hydrate", async () => {
     const { SettingsPage } = await import("../src/SettingsPage.js");
-
+    // The message stream switches moved to the agent-behavior section upstream.
+    selectedSection.value = "agentBehavior";
     renderToStaticMarkup(createElement(SettingsPage, {}));
 
-    expect(generalSectionCapture.props?.messageStreamShowReasoning).toBe(true);
+    expect(agentBehaviorSectionCapture.props?.messageStreamShowReasoning).toBe(true);
   });
 
   it("uses the local host system service for the global shell setting", async () => {

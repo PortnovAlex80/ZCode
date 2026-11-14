@@ -4,6 +4,7 @@ import { fireEvent, render } from "@testing-library/react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 import {
   ConversationUserInputContent,
   parseV4UserInputGoalQuery,
@@ -150,10 +151,16 @@ describe("V4 user input mention rendering", () => {
   });
 
   it("renders files, directories, and subagents with their previous UI variants", () => {
+    // File mentions now resolve preview labels through the shared intl
+    // provider (ConversationImageFileMention), so wrap the content.
     const html = renderToStaticMarkup(
-      createElement(ConversationUserInputContent, {
-        text: "查看 [demo.ts](./src/demo.ts)、[components](./src/components/)，再交给 @reviewer",
-      }),
+      createElement(
+        ZCodeIntlProvider,
+        { initialLocale: "zh-CN" },
+        createElement(ConversationUserInputContent, {
+          text: "查看 [demo.ts](./src/demo.ts)、[components](./src/components/)，再交给 @reviewer",
+        }),
+      ),
     );
 
     expect(html.match(/text-file-node-foreground/g)).toHaveLength(2);

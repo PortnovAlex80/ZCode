@@ -108,9 +108,14 @@ describe("WorkflowAgentPill", () => {
   });
 
   it("完成状态标记带可读文字", () => {
+    // Completed agent pills no longer carry the visible PillStatusMark: the check
+    // moved onto the avatar corner badge, and the readable label became an
+    // sr-only span inside the pill.
     const view = renderPill({ laneClass: "agent", name: "Ada", status: "done" });
-    const mark = view.getByTestId("workflow-pill-status");
-    expect(mark.getAttribute("aria-label")).toBe("done");
+    const face = view.container.querySelector("svg[data-subagent-avatar]")!;
+    expect(face.querySelector('[data-subagent-completion-badge="true"]')).not.toBeNull();
+    expect(view.queryByTestId("workflow-pill-status")).toBeNull();
+    expect(view.getByText("done")).toBeTruthy();
   });
 
   it("脚本药丸没有头像色相；子代理悬停色相与脸同源：编号优先，无编号退回名字散列", () => {

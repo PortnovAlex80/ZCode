@@ -76,6 +76,34 @@ vi.mock("@/components/ai-elements/image-preview-dialog.js", async () => {
   };
 });
 
+vi.mock("@/voice-input/index.js", async () => {
+  const React = await import("react");
+  return {
+    // Composer voice input resolves services through the ServiceProvider;
+    // these tests only exercise attachment rendering, so keep the feature
+    // inert (available=false) with a stable stub instead of the provider tree.
+    useComposerVoiceInput: () => ({
+      available: false,
+      state: "idle" as const,
+      toggle: () => {},
+      settle: () => undefined,
+      permissionGuide: {
+        phase: null,
+        os: "windows" as const,
+        available: false,
+        busy: false,
+        show: () => {},
+        close: () => {},
+        openSettings: () => {},
+        reauthorize: () => {},
+        relaunch: () => {},
+      },
+      subscribeLevel: () => () => {},
+    }),
+    VoiceInputButton: () => React.createElement("span"),
+  };
+});
+
 vi.mock("@/v4/composer/useComposerAttachments.js", () => ({
   useComposerAttachments: (options: Record<string, unknown>) => {
     attachmentState.hookOptions.push(options);

@@ -48,10 +48,24 @@ vi.mock("@/i18n/IntlProvider.js", () => ({
   }),
 }));
 
-vi.mock("@/store/StoreProvider.js", () => ({
-  useZCodeStore: (selector: (state: { isRestoringOAuthSession: boolean }) => unknown) =>
-    selector({ isRestoringOAuthSession: false }),
-}));
+vi.mock("@/store/StoreProvider.js", async () => {
+  const { createContext } = await import("react");
+  return {
+    useZCodeStore: (selector: (state: {
+      interfaceMode: string;
+      isRestoringOAuthSession: boolean;
+    }) => unknown) => selector({ interfaceMode: "office", isRestoringOAuthSession: false }),
+    // useSetInterfaceModeWithTelemetry reads the raw store through
+    // useContext(StoreContext) + store.getState(); expose a context whose
+    // default covers the fields the footer's SSR render touches.
+    StoreContext: createContext({
+      getState: () => ({
+        interfaceMode: "office",
+        setInterfaceMode: () => {},
+      }),
+    }),
+  };
+});
 
 vi.mock("@/hooks/useModelProviders.js", () => ({
   useModelProviders: () => ({

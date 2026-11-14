@@ -10,7 +10,6 @@ import type { ToolCallRow } from "@zcode/shared/zcode-protocol-v4";
 import { ToolCallBlock } from "../src/ToolCallBlocks.js";
 import { ToolCallBody } from "../src/ToolCallBlocks/ToolCallBody.js";
 import { readRawToolCallFileSummaries } from "../src/ToolCallBlocks/shared.js";
-import { isExploreToolCall } from "../src/lib/exploreToolCall.js";
 import { buildToolDisplayModel } from "../src/lib/toolDisplay.js";
 import { toolCallRowToLegacyNode } from "../src/v4/toolCallRowAdapter.js";
 
@@ -93,18 +92,11 @@ vi.mock("@/ToolCallBlocks/renderers/agent.js", () => ({
 
 afterEach(cleanup);
 
-describe("isExploreToolCall", () => {
-  it("does not classify redirect write commands as explore", () => {
-    const result = isExploreToolCall({
-      kind: "execute",
-      input: {
-        command: ["/bin/zsh", "-lc", "cat > index.html <<'EOF' <!doctype html>"],
-      },
-    });
-
-    expect(result).toBe(false);
-  });
-});
+// The isExploreToolCall classifier was deleted upstream (v3.18 sync): shell
+// commands no longer get reclassified into the explore family at all. Shell
+// always routes to the execute renderer (resolveRenderer.ts) and the work-item
+// summary maps the shell family to the "run" category, so the former
+// "redirect write commands are not explore" invariant is now structural.
 
 describe("ToolCallBlock agent routing", () => {
   it("renders compact trusted MCP labels from the real plugin-scoped payload", () => {
@@ -184,7 +176,8 @@ describe("ToolCallBlock agent routing", () => {
     expect(summary.textContent).toContain("Firebase");
     expect(summary.textContent).toContain("Get environment");
     expect(summary.textContent).toContain("已停止");
-    expect(summary.innerHTML).toContain(">·</span>");
+    // Summary segments used to be joined by literal "·" spans; the row now
+    // separates them with flex gap, so only the text content is asserted.
     expect(summary.textContent).not.toContain(syntheticName);
 
     fireEvent.click(summary);
@@ -279,11 +272,6 @@ describe("ToolCallBlock agent routing", () => {
       expect(summary.textContent).not.toContain(label);
     } else {
       expect(summary.textContent).toContain(label);
-      expect(
-        Array.from(summary.querySelectorAll("span")).filter(
-          (element) => element.textContent === "·",
-        ),
-      ).toHaveLength(2);
     }
     fireEvent.click(summary);
     if (canExpand) {
@@ -325,9 +313,7 @@ describe("ToolCallBlock agent routing", () => {
     );
 
     const summary = screen.getByTestId("tool-summary-trigger-call-mcp-failed");
-    expect(
-      Array.from(summary.querySelectorAll("span")).filter((element) => element.textContent === "·"),
-    ).toHaveLength(2);
+    // The dot separators between summary segments were replaced by flex gap spacing.
     fireEvent.click(summary);
     const detail = screen.getByTestId("mcp-expanded-content");
     expect(detail.textContent).toContain("Firebase authentication failed.");
@@ -584,36 +570,41 @@ describe("readRawToolCallFileSummaries", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
-        createElement(ToolCallBlock, {
-          toolCallNode: {
-            toolCall: {
-              toolId: "tool-read-weird",
-              kind: "read",
-              title: "Read snake/index.html",
-              input: {
-                file_path: "/Users/dev/ZCodeProject/demo/snake/index.html",
-              },
-              output: {
-                content: "function deleteFood() { return writeScore(); }",
-              },
-              status: "completed",
-              raw: {
+        // The read file chip renders inside a Radix Tooltip, which needs a provider.
+        createElement(
+          TooltipProvider,
+          null,
+          createElement(ToolCallBlock, {
+            toolCallNode: {
+              toolCall: {
+                toolId: "tool-read-weird",
                 kind: "read",
-                changes: {
-                  "/Users/dev/ZCodeProject/demo/snake/index.html": {
-                    type: "add",
-                    content: "unexpected",
-                  },
-                },
-                rawInput: {
+                title: "Read snake/index.html",
+                input: {
                   file_path: "/Users/dev/ZCodeProject/demo/snake/index.html",
                 },
+                output: {
+                  content: "function deleteFood() { return writeScore(); }",
+                },
+                status: "completed",
+                raw: {
+                  kind: "read",
+                  changes: {
+                    "/Users/dev/ZCodeProject/demo/snake/index.html": {
+                      type: "add",
+                      content: "unexpected",
+                    },
+                  },
+                  rawInput: {
+                    file_path: "/Users/dev/ZCodeProject/demo/snake/index.html",
+                  },
+                },
               },
+              childToolCalls: [],
             },
-            childToolCalls: [],
-          },
-          workspacePath: "/workspace",
-        }),
+            workspacePath: "/workspace",
+          }),
+        ),
       ),
     );
 
@@ -1012,7 +1003,9 @@ describe("readRawToolCallFileSummaries", () => {
       ),
     );
 
-    expect(html).toContain("终端");
+    // The retired terminal-group alias "终端" is gone; a single execute row now
+    // uses the plain ran label "已执行" even with delete-like raw changes.
+    expect(html).toContain("已执行");
     expect(html).not.toContain("已删除");
     expect(html).not.toContain("已编辑");
     expect(html).not.toContain("Deleting");

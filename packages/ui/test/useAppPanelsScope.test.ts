@@ -8,8 +8,19 @@ import { getVisibleSidePaneTabs } from "@/lib/workspaceSidePane.js";
 vi.mock("@/hooks/useInterfaceMode.js", () => ({ useIsOfficeMode: () => false }));
 vi.mock("@/hooks/useServices.js", () => ({
   useServices: () => ({ zcodeSessionService: { closeSession: vi.fn(async () => {}) } }),
+  // v3.18: useAppPanels routes file opens through the extension file.viewer router, which
+  // reads the optional services accessor; no extension facade in this fixture.
+  useOptionalServices: () => null,
 }));
-vi.mock("@/logger.js", () => ({ logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } }));
+vi.mock("@/logger.js", () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    lifecycle: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  },
+}));
 
 const a = { workspaceIdentity: "ssh://one/repo", ownerTaskId: "a" as string | null };
 const b = { ...a, ownerTaskId: "b" };

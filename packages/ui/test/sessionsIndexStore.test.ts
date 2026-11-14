@@ -384,7 +384,8 @@ describe("SessionsIndexStore", () => {
 
   it("强制 snapshot 再次被内容拒绝 → contentRejected 终态，且不排退避重订阅", async () => {
     vi.useFakeTimers();
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    // 终态日志改为结构化 lifecycle.warn（生产构建下 logger.warn 是 no-op）。
+    const warn = vi.spyOn(logger.lifecycle, "warn").mockImplementation(() => {});
     try {
       const store = new SessionsIndexStore();
       const kit = mockTransport();
@@ -399,7 +400,13 @@ describe("SessionsIndexStore", () => {
       kit.pushFault("recovery", WIRE_FAULT_INVALID_PAYLOAD);
       await vi.advanceTimersByTimeAsync(0);
       expect(store.getStatus()).toBe("error");
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining(SUBSCRIPTION_CONTENT_REJECTED));
+      expect(warn).toHaveBeenCalledWith(
+        "v4 sessions index recovery fail-closed",
+        expect.objectContaining({
+          reasonCode: SUBSCRIPTION_CONTENT_REJECTED,
+          scheduleRetry: false,
+        }),
+      );
 
       // 关键回归：退避重订阅不再排。修复前这里会每 5s/15s 清空投影再订阅一次，永不收敛。
       await vi.advanceTimersByTimeAsync(60_000);
@@ -427,7 +434,8 @@ describe("SessionsIndexStore", () => {
 
   it("内容 flight 上的 deadline 超时仍报 timeout 终态，并保留退避重订阅", async () => {
     vi.useFakeTimers();
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    // 终态日志改为结构化 lifecycle.warn（生产构建下 logger.warn 是 no-op）。
+    const warn = vi.spyOn(logger.lifecycle, "warn").mockImplementation(() => {});
     try {
       const store = new SessionsIndexStore();
       const kit = mockTransport();
@@ -439,7 +447,11 @@ describe("SessionsIndexStore", () => {
       await vi.advanceTimersByTimeAsync(PROTOCOL_V4_LIMITS.logicalFrameAssemblyTimeoutMs);
       expect(store.getStatus()).toBe("error");
       expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("fault.subscription.recoveryFrameTimedOut"),
+        "v4 sessions index recovery fail-closed",
+        expect.objectContaining({
+          reasonCode: "fault.subscription.recoveryFrameTimedOut",
+          scheduleRetry: true,
+        }),
       );
       await vi.advanceTimersByTimeAsync(5_000);
       await Promise.resolve();

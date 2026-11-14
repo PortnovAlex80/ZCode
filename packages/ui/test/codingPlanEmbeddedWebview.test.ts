@@ -55,6 +55,18 @@ vi.mock("@/store/StoreProvider.js", () => ({
     }),
 }));
 
+// The dialog now reads session facts through useServices; the src-stability test
+// only exercises rendering, so a stable no-op oauthService mock is enough.
+vi.mock("@/hooks/useServices.js", () => ({
+  useServices: () => ({
+    oauthService: {
+      getWebsiteSession: vi.fn(async () => null),
+      getAccountAvailability: vi.fn(async () => null),
+      onDidChangeSession: vi.fn(() => ({ dispose: vi.fn() })),
+    },
+  }),
+}));
+
 afterEach(() => {
   cleanup();
   h.theme = "zai-light";
@@ -351,7 +363,6 @@ describe("coding plan embedded webview bridge", () => {
 
   it("keeps the initial webview src stable when the app theme changes while open", () => {
     const props = {
-      credentialService: { load: vi.fn(() => Promise.resolve(null)) },
       onOpenChange: vi.fn(),
       open: true,
       providerId: BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan,

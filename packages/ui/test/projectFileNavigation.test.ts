@@ -91,6 +91,14 @@ it("binds an unopened remote root through its existing host connector", async ()
     findSession: () => (bound ? { sessionId: "attached" } : undefined),
   } as never);
   expect(connectHost).toHaveBeenCalledWith("remote:server:s");
-  expect(bind).toHaveBeenCalledWith("attached", "/repo", undefined, result.workspaceIdentity);
+  // v3.18: the bind bridge forwards the navigation guard slot too; this path has no
+  // membership/project validation, so the guard stays undefined.
+  expect(bind).toHaveBeenCalledWith(
+    "attached",
+    "/repo",
+    undefined,
+    result.workspaceIdentity,
+    undefined,
+  );
   expect(result.workspaceRemoteSessionId).toBe("attached");
 });

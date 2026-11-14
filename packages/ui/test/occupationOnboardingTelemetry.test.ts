@@ -30,10 +30,23 @@ vi.mock("@/hooks/useOnboardingRecordService.js", () => ({
 vi.mock("@/onboarding/useOnboardingTrigger.js", () => ({
   useOnboardingTrigger: () => [mocks.needs, vi.fn()],
 }));
-vi.mock("@/store/StoreProvider.js", () => ({
-  useZCodeStore: (selector: (state: unknown) => unknown) =>
-    selector({ ...mocks.store, newUserOnboardingOpen: mocks.requested }),
-}));
+vi.mock("@/store/StoreProvider.js", async () => {
+  const { createContext } = await import("react");
+  return {
+    useZCodeStore: (selector: (state: unknown) => unknown) =>
+      selector({ ...mocks.store, newUserOnboardingOpen: mocks.requested }),
+    // useSetInterfaceModeWithTelemetry reads the raw store through
+    // useContext(StoreContext) + store.getState(); expose a context whose
+    // default delegates to the mutable mocks.store so it stays current
+    // across beforeEach reassignments.
+    StoreContext: createContext({
+      getState: () => ({
+        interfaceMode: mocks.store.interfaceMode,
+        setInterfaceMode: mocks.store.setInterfaceMode,
+      }),
+    }),
+  };
+});
 vi.mock("@/shortcuts/useShortcutBindings.js", () => ({
   useEffectiveShortcutBindings: () => ({ toggleInterfaceMode: [], openOnboarding: ["Alt+o"] }),
 }));

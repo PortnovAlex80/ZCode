@@ -161,6 +161,9 @@ const documentMock = {
   },
   createTextNode: (nodeValue: string) => ({ nodeType: 3, nodeValue }),
   createElementNS: (_namespace: string, tagName: string) => documentMock.createElement(tagName),
+  // ZCodeIntlProvider syncs the active locale to <html lang>; the minimal
+  // document must expose a documentElement so that effect stays a no-op.
+  documentElement: { lang: "" },
   nodeType: 9,
   activeElement: null,
   removeEventListener: () => {},

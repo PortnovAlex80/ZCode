@@ -6,6 +6,9 @@ import { testId, TID_TOOL_SUMMARY_TRIGGER } from "@zcode/shared/test-ids";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ServiceProvider } from "@/hooks/useServices.js";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
+import { TooltipProvider } from "../src/components/ui/tooltip.js";
+import { ToolPresentationCapabilitiesProvider } from "../src/ToolCallBlocks/presentationCapabilities.js";
+import { SUBAGENT_WORKFLOW_COLOR } from "../src/lib/subagentColors.js";
 import { StoreProvider } from "@/store/StoreProvider.js";
 import { useSubagentsStore } from "@/store/subagentsStore.js";
 import { AgentToolCallBlock } from "../src/ToolCallBlocks/renderers/agent.js";
@@ -66,6 +69,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -118,6 +125,7 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
     expect(html).toContain(testId(TID_TOOL_SUMMARY_TRIGGER, "tool-agent-running"));
@@ -133,6 +141,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -188,6 +200,7 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
@@ -203,6 +216,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -255,6 +272,7 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
@@ -268,26 +286,22 @@ describe("AgentToolCallBlock", () => {
   });
 
   it("colors the subagent name from the configured agent color", () => {
-    useSubagentsStore.setState({
-      agents: [
-        {
-          id: "agent-explore",
-          name: "Explore",
-          description: "Explore workspace",
-          systemPrompt: "Explore",
-          color: "red",
-          path: "/workspace/.zcode/agents/explore.md",
-          scope: "user",
-          source: "user",
-          enabled: true,
-        },
-      ],
-    });
+    // Upstream moved configured-color resolution into the host presentation
+    // capabilities (SessionPane builds agentColor from the subagent list), so the
+    // harness now mirrors that wiring instead of seeding the legacy store directly.
+    const agentColor = (name: string) => (name.trim().toLowerCase() === "explore" ? "red" : undefined);
 
     const html = renderToStaticMarkup(
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
+        createElement(
+          ToolPresentationCapabilitiesProvider,
+          { value: { agentColor } },
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -334,11 +348,15 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
+        ),
       ),
     );
 
     expect(html).toContain("Explore");
-    expect(html).toContain("text-rose-700");
+    // Upstream restyled from tailwind text color classes to inline workflow face
+    // colors; "red" resolves through SUBAGENT_WORKFLOW_COLOR.
+    expect(html).toContain(`color:${SUBAGENT_WORKFLOW_COLOR.red}`);
   });
 
   it("keeps the agent type blank while subagent_type may still be streaming", () => {
@@ -346,6 +364,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -395,6 +417,7 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
@@ -407,6 +430,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -461,6 +488,7 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
@@ -472,6 +500,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -539,14 +571,19 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
     // Bugfix: Agent 收起态使用最新子工具摘要，外层仍展示子智能体。
-    expect(html).toMatch(/>(SubAgent|子智能体)</);
-    expect(html).toContain("·");
+    // The outer kind slot no longer renders the literal "SubAgent" word; the
+    // subagent identity is the workflow face avatar plus the colored agent name.
+    expect(html).toMatch(/data-subagent-avatar="true"/);
+    // The old "kind · summary" dot separator is gone; the summary row now uses
+    // flex gap spacing, so the action label and file chip sit in separate spans.
     expect(html).toContain("正在读取");
     expect(html).toContain("App.tsx");
-    expect(html).toContain("/workspace/src");
+    // The full path moved into the tooltip/title attribute instead of inline text.
+    expect(html).toContain('title="/workspace/src/App.tsx"');
     expect(html).not.toContain("读取核心入口文件");
   });
 
@@ -555,6 +592,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -622,12 +663,15 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
     // Bugfix: 父 Agent 的完成态只看父 tool 生命周期；
     // 子工具属于展开区明细，不能让 completed 父块继续显示 running 渐变。
-    expect(html).toMatch(/>(SubAgent|子智能体)</);
+    // The outer kind slot no longer renders the literal "SubAgent" word; the
+    // subagent identity is the workflow face avatar plus the colored agent name.
+    expect(html).toMatch(/data-subagent-avatar="true"/);
     expect(html).toContain("Explore");
     expect(html).not.toContain("正在读取");
     expect(html).not.toContain("App.tsx");
@@ -640,6 +684,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -707,10 +755,12 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
-    expect(html).toContain("·");
+    // The dot separator is replaced by flex gap spacing between the action
+    // label and the file chip; the label itself is unchanged.
     expect(html).toContain("App.tsx");
     expect(html).toContain("正在读取");
   });
@@ -720,6 +770,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -801,10 +855,12 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
-    expect(html).toContain("·");
+    // The dot separator is replaced by flex gap spacing between the todo
+    // action label, progress count and active step content.
     expect(html).toContain("更新待办");
     expect(html).toContain("1/3");
     expect(html).toContain("补齐待办子工具摘要");
@@ -816,6 +872,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -874,12 +934,15 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
     // 外层 kind 固定显示 SubAgent；真实子智能体类型作为彩色名称展示。
-    expect(html).toMatch(/>(SubAgent|子智能体)</);
-    expect(html).toContain("·");
+    // The outer kind slot no longer renders the literal "SubAgent" word; the
+    // subagent identity is the workflow face avatar plus the colored agent name.
+    expect(html).toMatch(/data-subagent-avatar="true"/);
+    // Summary text and identity name are separate flex spans without a dot separator.
     expect(html).toContain("Explore project structure");
     expect(html).not.toContain("子智能体 2");
     expect(html).not.toMatch(/>Agent</);
@@ -891,6 +954,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -945,13 +1012,16 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
     // Bugfix: provider 原生子 agent 工具名 spawn_agent 直接展示会暴露实现细节；
     // 外层 kind 固定为 SubAgent，nickname 作为彩色名称和摘要正文展示。
     expect(html).not.toMatch(/>explorer</);
-    expect(html).toMatch(/>(SubAgent|子智能体)</);
+    // The outer kind slot no longer renders the literal "SubAgent" word; the
+    // subagent identity is the workflow face avatar plus the colored agent name.
+    expect(html).toMatch(/data-subagent-avatar="true"/);
     expect(html).toContain("Locke");
     expect(html).not.toContain("子智能体 1");
     expect(html).not.toContain("spawn_agent");
@@ -963,6 +1033,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -1011,11 +1085,14 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
     expect(html).toContain("explorer");
-    expect(html).toMatch(/>(SubAgent|子智能体)</);
+    // The outer kind slot no longer renders the literal "SubAgent" word; the
+    // subagent identity is the workflow face avatar plus the colored agent name.
+    expect(html).toMatch(/data-subagent-avatar="true"/);
     expect(html).not.toContain("子智能体 1");
     expect(html).not.toContain("spawn_agent");
   });
@@ -1025,6 +1102,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -1097,11 +1178,14 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
     // Agent/Task 在消息流中固定为单行；详情只通过持久化 child session 打开。
-    expect(html).toMatch(/>(SubAgent|子智能体)</);
+    // The outer kind slot no longer renders the literal "SubAgent" word; the
+    // subagent identity is the workflow face avatar plus the colored agent name.
+    expect(html).toMatch(/data-subagent-avatar="true"/);
     expect(html).toMatch(/>Explore</);
     expect(html).toContain("Explore project structure");
     expect(html).not.toMatch(/提示词|Prompt/);
@@ -1116,6 +1200,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -1178,6 +1266,7 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
@@ -1191,6 +1280,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -1248,6 +1341,7 @@ describe("AgentToolCallBlock", () => {
             }),
           ),
         ),
+        ),
       ),
     );
 
@@ -1261,6 +1355,10 @@ describe("AgentToolCallBlock", () => {
       createElement(
         ZCodeIntlProvider,
         { initialLocale: "zh-CN" },
+        // ToolLayout summary rows can render Radix Tooltips, which require a provider.
+        createElement(
+          TooltipProvider,
+          null,
         createElement(
           ServiceProvider,
           { services: mockServices },
@@ -1320,6 +1418,7 @@ describe("AgentToolCallBlock", () => {
               onOpenBrowserUrl: undefined,
             }),
           ),
+        ),
         ),
       ),
     );

@@ -14,6 +14,16 @@ const TEST_BIGMODEL_PROVIDER_ID = "test-bigmodel-api-provider";
 
 const refreshMock = vi.fn(async () => {});
 const getActiveProviderMock = vi.fn(async () => null as string | null);
+// v3.18.2: purchase-token auth reads come from oauthService.getAccountAvailability()
+// (session-revision guarded) instead of raw credential loads.
+const getAccountAvailabilityMock = vi.fn(
+  async (): Promise<{
+    loginProvider: string | null;
+    userId: string | null;
+    sessionRevision: string | null;
+    families: string[];
+  }> => ({ loginProvider: null, userId: "user-1", sessionRevision: "rev-1", families: [] }),
+);
 const requestLoginEntryMock = vi.fn();
 const startOAuthMock = vi.fn(async () => ({
   authorizeUrl: "https://example.com/oauth/authorize?state=demo",
@@ -24,7 +34,6 @@ const openExternalMock = vi.fn();
 const registerOAuthStateMock = vi.fn();
 const logoutMock = vi.fn(async () => {});
 const refreshCodingPlanEntitlementsMock = vi.fn(async () => {});
-const credentialLoadMock = vi.fn(async () => null as string | null);
 const updateSharedSettingsMock = vi.fn(async () => {});
 const setUserMock = vi.fn();
 const setOAuthErrorMock = vi.fn();
@@ -118,11 +127,9 @@ vi.mock("@/hooks/useServices.js", () => ({
     },
     oauthService: {
       getActiveProvider: getActiveProviderMock,
+      getAccountAvailability: getAccountAvailabilityMock,
       startOAuth: startOAuthMock,
       logout: logoutMock,
-    },
-    credentialService: {
-      load: credentialLoadMock,
     },
     settingService: {
       get: vi.fn(async () => ({})),
@@ -200,7 +207,7 @@ describe("ModelProviderSection preset subscription action", () => {
     };
     const { ModelProviderSection } = await import("@/settings/ModelProviderSection.js");
     const mounted = render(createElement(ModelProviderSection));
-    await waitFor(() => expect(credentialLoadMock).toHaveBeenCalled());
+    await waitFor(() => expect(getAccountAvailabilityMock).toHaveBeenCalled());
     mounted.rerender(createElement(ModelProviderSection));
     expect(updateSharedSettingsMock).not.toHaveBeenCalled();
   });
@@ -307,8 +314,13 @@ describe("ModelProviderSection preset subscription action", () => {
     registerOAuthStateMock.mockClear();
     logoutMock.mockClear();
     refreshCodingPlanEntitlementsMock.mockClear();
-    credentialLoadMock.mockClear();
-    credentialLoadMock.mockResolvedValue(null);
+    getAccountAvailabilityMock.mockClear();
+    getAccountAvailabilityMock.mockResolvedValue({
+      loginProvider: null,
+      userId: "user-1",
+      sessionRevision: "rev-1",
+      families: [],
+    });
     updateSharedSettingsMock.mockClear();
     setUserMock.mockClear();
     setOAuthErrorMock.mockClear();
@@ -328,7 +340,9 @@ describe("ModelProviderSection preset subscription action", () => {
     )?.(BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan, ZAI_PROVIDER_ID, "Z.ai");
 
     expect(refreshMock).not.toHaveBeenCalled();
-    expect(requestLoginEntryMock).toHaveBeenCalledWith(ZAI_PROVIDER_ID);
+    // v3.18.2: the login entry hint is derived from the active login provider.
+    // With no active provider the App login entry still opens, without a provider hint.
+    expect(requestLoginEntryMock).toHaveBeenCalledWith(undefined);
     expect(startOAuthMock).not.toHaveBeenCalled();
   });
 
@@ -350,7 +364,8 @@ describe("ModelProviderSection preset subscription action", () => {
         | undefined
     )?.(BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan, ZAI_PROVIDER_ID, "Z.ai", "unavailable");
 
-    expect(requestLoginEntryMock).toHaveBeenCalledWith(ZAI_PROVIDER_ID);
+    // No active provider: the in-app login entry opens without a provider hint.
+    expect(requestLoginEntryMock).toHaveBeenCalledWith(undefined);
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
@@ -379,7 +394,8 @@ describe("ModelProviderSection preset subscription action", () => {
       { forceOAuth: true },
     );
 
-    expect(requestLoginEntryMock).toHaveBeenCalledWith(ZAI_PROVIDER_ID);
+    // Forced re-login must stay inside the app entry; no active provider means no hint.
+    expect(requestLoginEntryMock).toHaveBeenCalledWith(undefined);
     expect(openExternalMock).not.toHaveBeenCalled();
     expect(refreshMock).not.toHaveBeenCalled();
   });
@@ -408,7 +424,8 @@ describe("ModelProviderSection preset subscription action", () => {
     await vi.waitFor(() => {
       expect(refreshMock).toHaveBeenCalled();
     });
-    expect(credentialLoadMock).toHaveBeenCalledWith("oauth:active_provider");
+    // Account Source refresh moved to getAccountAvailability; raw credential reads are gone.
+    expect(getAccountAvailabilityMock).toHaveBeenCalled();
   });
 
   it("BigModel Coding Plan 解绑交给 OAuth logout 清理派生状态", async () => {
@@ -424,7 +441,9 @@ describe("ModelProviderSection preset subscription action", () => {
         | undefined
     )?.(BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan, BIGMODEL_PROVIDER_ID, "BigModel");
 
-    expect(logoutMock).toHaveBeenCalledWith(BIGMODEL_PROVIDER_ID);
+    // v3.18.2: unlink delegates to oauthService.logout() for the active provider;
+    // the explicit provider argument is gone.
+    expect(logoutMock).toHaveBeenCalledTimes(1);
     expect(setUserMock).toHaveBeenCalledWith(null);
     expect(refreshMock).toHaveBeenCalled();
     expect(refreshCodingPlanEntitlementsMock).not.toHaveBeenCalled();
@@ -443,7 +462,9 @@ describe("ModelProviderSection preset subscription action", () => {
         | undefined
     )?.(BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan, ZAI_PROVIDER_ID, "Z.ai");
 
-    expect(logoutMock).toHaveBeenCalledWith(ZAI_PROVIDER_ID);
+    // v3.18.2: unlink delegates to oauthService.logout() for the active provider;
+    // the explicit provider argument is gone.
+    expect(logoutMock).toHaveBeenCalledTimes(1);
     expect(setUserMock).toHaveBeenCalledWith(null);
     expect(refreshMock).toHaveBeenCalled();
     expect(refreshCodingPlanEntitlementsMock).not.toHaveBeenCalled();

@@ -8,6 +8,9 @@ const mode = vi.hoisted(() => ({ general: false }));
 vi.mock("@/hooks/useInterfaceMode.js", () => ({ useIsOfficeMode: () => mode.general }));
 vi.mock("@/hooks/useServices.js", () => ({
   useServices: () => ({ zcodeSessionService: { closeSession: vi.fn(async () => {}) } }),
+  // v3.18: useAppPanels routes file opens through the extension file.viewer router, which
+  // reads the optional services accessor; no extension facade in this fixture.
+  useOptionalServices: () => null,
 }));
 
 function renderPanels() {

@@ -33,11 +33,13 @@ describe("buildEditCodeViewerSource", () => {
 describe("getEditKindLabelMessageId", () => {
   it("uses edit labels for update operations", () => {
     expect(getEditKindLabelMessageId(["update"], [], true)).toBe("chat.toolCall.edit.editing");
-    expect(getEditKindLabelMessageId(["update"], [], false)).toBe("chat.toolCall.kind.edit");
+    // Completed state reuses the past-tense edit copy instead of the old
+    // chat.toolCall.kind.* tool-type names (upstream v3.18 contract).
+    expect(getEditKindLabelMessageId(["update"], [], false)).toBe("chat.toolCall.edit.edited");
   });
 
   it("uses stable terminal kinds for writes and deletes", () => {
-    expect(getEditKindLabelMessageId(["write"], [], false)).toBe("chat.toolCall.kind.write");
-    expect(getEditKindLabelMessageId(["delete"], [], false)).toBe("chat.toolCall.kind.delete");
+    expect(getEditKindLabelMessageId(["write"], [], false)).toBe("chat.toolCall.edit.wrote");
+    expect(getEditKindLabelMessageId(["delete"], [], false)).toBe("chat.toolCall.edit.deleted");
   });
 });

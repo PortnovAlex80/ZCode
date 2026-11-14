@@ -176,10 +176,21 @@ vi.mock("@/hooks/usePlatform.js", async (importOriginal) => ({
   useOptionalPlatform: () => null,
 }));
 
-vi.mock("@/hooks/useWorkspaceServices.js", () => ({
+vi.mock("@/hooks/useWorkspaceServices.js", async (importOriginal) => ({
+  // Spread the real module so hooks added by later upstream merges keep working
+  // under SSR (the previous closed mock missed useOptionalBaseWorkspaceServices).
+  ...(await importOriginal<typeof import("@/hooks/useWorkspaceServices.js")>()),
   useBaseWorkspaceServices: () => ({}),
   // 布局断言不启动远端挂回；保留 services resolver 的本地 ready 合同。
   useWorkspaceServicesResolution: () => ({ services: {}, connectionKind: "local-ready" }),
+}));
+
+vi.mock("@/managed-worktrees/useWorktreeSupport.js", () => ({
+  // v3.18 draft header queries worktree capability through useServices, which
+  // requires a ServiceProvider this SSR layout test does not mount. The real
+  // hook resolves to the same hidden default when no managed worktree service
+  // exists, so pinning it keeps the draft composer assertions unchanged.
+  useWorktreeSupport: () => ({ visible: false, available: false }),
 }));
 
 vi.mock("@/store/TabStoreProvider.js", () => ({
@@ -405,11 +416,15 @@ function createWorkspaceShellProps() {
   };
 }
 
-async function renderWorkspaceShell(
+// Import the full page graph at file scope: with the dynamic import inside the
+// first test, that test alone paid the whole cold transform and blew the global
+// 30s per-test timeout on slower machines. Top-level import moves the cost into
+// the module loading phase, which has no per-test timeout.
+const { WorkspaceShellLayout } = await import("@/app-shell/WorkspaceShellLayout.js");
+
+function renderWorkspaceShell(
   overrides: Partial<ReturnType<typeof createWorkspaceShellProps>> = {},
 ) {
-  const { WorkspaceShellLayout } = await import("@/app-shell/WorkspaceShellLayout.js");
-
   return renderToStaticMarkup(
     createElement(WorkspaceShellLayout, {
       ...createWorkspaceShellProps(),

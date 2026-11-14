@@ -18,6 +18,9 @@ vi.mock("@/hooks/useServices.js", () => ({
   useServices: () => ({
     zcodeSessionService: { closeSession: closeSessionMock },
   }),
+  // v3.18: useAppPanels routes file opens through the extension file.viewer router, which
+  // reads the optional services accessor; no extension facade in this fixture.
+  useOptionalServices: () => null,
 }));
 
 vi.mock("@/logger.js", () => ({
@@ -26,6 +29,7 @@ vi.mock("@/logger.js", () => ({
     error: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
+    lifecycle: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   },
 }));
 

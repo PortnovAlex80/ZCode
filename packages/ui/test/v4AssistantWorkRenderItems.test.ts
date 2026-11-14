@@ -5,19 +5,42 @@ import type {
   SubagentRow,
   ToolCallRow,
 } from "@zcode/shared/zcode-protocol-v4";
-import { buildAssistantWorkRenderItems } from "@/v4/conversationAssistantWorkItems.js";
+import {
+  buildAssistantWorkRenderItems,
+  getActiveAssistantSummaryItem,
+  groupConsecutiveAssistantSummaries,
+  type ConversationAssistantWorkRenderItem,
+} from "@/v4/conversationAssistantWorkItems.js";
 
 const SHOW_ALL_REASONING = { messageStreamShowReasoning: true } as const;
 
 function buildRenderItems(
   rows: Parameters<typeof buildAssistantWorkRenderItems>[0],
   reasoningVisibility: Parameters<typeof buildAssistantWorkRenderItems>[1] = SHOW_ALL_REASONING,
-  options?: Parameters<typeof buildAssistantWorkRenderItems>[2],
 ) {
-  return buildAssistantWorkRenderItems(rows, reasoningVisibility, {
-    ...options,
-    enableChangesGrouping: options?.enableChangesGrouping ?? true,
-  });
+  return buildAssistantWorkRenderItems(rows, reasoningVisibility);
+}
+
+// v3.18 replaced the explicit explore/execute/changes/cua group items with
+// render-time summary groups: buildAssistantWorkRenderItems now emits plain
+// rows (plus paired agent tool calls), and the component merges consecutive
+// summary rows via groupConsecutiveAssistantSummaries. These helpers keep the
+// original scenarios expressed against that merged-group model.
+function buildSummaryGroups(
+  rows: Parameters<typeof buildAssistantWorkRenderItems>[0],
+  reasoningVisibility: Parameters<typeof buildAssistantWorkRenderItems>[1] = SHOW_ALL_REASONING,
+) {
+  return groupConsecutiveAssistantSummaries(buildRenderItems(rows, reasoningVisibility));
+}
+
+function groupRowIds(group: { items: readonly ConversationAssistantWorkRenderItem[] }): number[] {
+  return group.items.map((item) => item.row.rowId);
+}
+
+function rowStatuses(group: {
+  items: readonly ConversationAssistantWorkRenderItem[];
+}): Array<ToolCallRow["status"]> {
+  return group.items.map((item) => (item.row as ToolCallRow).status);
 }
 
 function toolCall(
@@ -82,43 +105,46 @@ describe("buildAssistantWorkRenderItems", () => {
   });
 
   it("groups two consecutive tools of the same display family", () => {
-    expect(
-      buildRenderItems([
-        toolCall(1, "Read", { path: "package.json" }),
-        toolCall(2, "Grep", { pattern: "group" }),
-      ]),
-    ).toMatchObject([{ kind: "exploreGroup", rows: [{ rowId: 1 }, { rowId: 2 }] }]);
-    expect(
-      buildRenderItems([
-        toolCall(3, "Bash", { command: "pnpm test" }),
-        toolCall(4, "Bash", { command: "pnpm lint" }),
-      ]),
-    ).toMatchObject([{ kind: "executeGroup", rows: [{ rowId: 3 }, { rowId: 4 }] }]);
-    expect(
-      buildRenderItems([
-        toolCall(5, "Write", { file_path: "src/a.ts", content: "a" }),
-        toolCall(6, "Edit", {
-          file_path: "src/b.ts",
-          old_string: "b",
-          new_string: "c",
-        }),
-      ]),
-    ).toMatchObject([{ kind: "changesGroup", rows: [{ rowId: 5 }, { rowId: 6 }] }]);
+    // The explicit explore/execute/changes group items became render-time
+    // summary groups over the same consecutive tools.
+    const explorePair = buildSummaryGroups([
+      toolCall(1, "Read", { path: "package.json" }),
+      toolCall(2, "Grep", { pattern: "group" }),
+    ]);
+    expect(explorePair).toHaveLength(1);
+    expect(groupRowIds(explorePair[0]!)).toEqual([1, 2]);
+
+    const executePair = buildSummaryGroups([
+      toolCall(3, "Bash", { command: "pnpm test" }),
+      toolCall(4, "Bash", { command: "pnpm lint" }),
+    ]);
+    expect(executePair).toHaveLength(1);
+    expect(groupRowIds(executePair[0]!)).toEqual([3, 4]);
+
+    const changesPair = buildSummaryGroups([
+      toolCall(5, "Write", { file_path: "src/a.ts", content: "a" }),
+      toolCall(6, "Edit", {
+        file_path: "src/b.ts",
+        old_string: "b",
+        new_string: "c",
+      }),
+    ]);
+    expect(changesPair).toHaveLength(1);
+    expect(groupRowIds(changesPair[0]!)).toEqual([5, 6]);
   });
 
   it("marks a terminal Explore group as stopped when a child was cancelled", () => {
-    const items = buildRenderItems([
+    const groups = buildSummaryGroups([
       toolCall(1, "Read", { path: "package.json" }),
       toolCall(2, "Grep", { pattern: "group" }, { status: "cancelled" }),
     ]);
 
-    expect(items).toMatchObject([
-      {
-        kind: "exploreGroup",
-        node: { toolCall: { status: "stopped" } },
-        rows: [{ rowId: 1 }, { rowId: 2 }],
-      },
-    ]);
+    expect(groups).toHaveLength(1);
+    expect(groupRowIds(groups[0]!)).toEqual([1, 2]);
+    // The cancellation stays on the cancelled child; with no running tail the
+    // group presents as completed instead of inheriting a synthetic status.
+    expect(rowStatuses(groups[0]!)).toEqual(["success", "cancelled"]);
+    expect(getActiveAssistantSummaryItem(groups[0]!.items)).toBeUndefined();
   });
 
   it("does not group same-family tools across a visible tool boundary", () => {
@@ -131,7 +157,7 @@ describe("buildAssistantWorkRenderItems", () => {
     expect(items.map((item) => item.kind)).toEqual(["row", "row", "row"]);
   });
 
-  it("keeps reasoning outside without closing and lets an uncorrelated message close", () => {
+  it("keeps reasoning in the summary without closing it and lets an uncorrelated message close", () => {
     const rows = [
       toolCall(1, "mcp__computer-use__get_app_state", { app_ref: { pid: 691 } }),
       reasoning(2),
@@ -150,53 +176,45 @@ describe("buildAssistantWorkRenderItems", () => {
       toolCall(5, "Bash", { command: "pnpm test" }),
     ];
 
-    const items = buildRenderItems(rows);
+    const groups = buildSummaryGroups(rows);
 
-    expect(items.map((item) => item.kind)).toEqual(["cuaGroup", "row", "row", "cuaGroup", "row"]);
-    const group = items[0];
-    expect(group?.kind).toBe("cuaGroup");
-    if (group?.kind !== "cuaGroup") throw new Error("expected CUA group");
-    expect(group.key).toBe("cua:1");
-    expect(group.node.toolCall.toolId).toBe("cua:tool-1");
-    expect(group.node.toolCall.status).toBe("completed");
-    expect(group.rows.map((row) => row.rowId)).toEqual([1]);
-    expect(group.events.map((event) => event.row.rowId)).toEqual([1]);
+    // Reasoning is part of the running summary and does not close it; the
+    // assistant text is not summary material and closes the group.
+    expect(groups.map(groupRowIds)).toEqual([[1, 2], [3], [4, 5]]);
   });
 
-  it("keeps a tail CUA group active across reasoning and starts a new group after a tool boundary", () => {
-    const first = buildRenderItems(
-      [toolCall(1, "mcp__computer-use__list_apps", {}, { status: "running" })],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    const grown = buildRenderItems(
-      [
-        toolCall(1, "mcp__computer-use__list_apps", {}),
-        reasoning(2),
-        toolCall(3, "mcp__computer-use__get_app_state", {}, { status: "running" }),
-      ],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    const bounded = buildRenderItems([
+  it("keeps a tail CUA summary active across reasoning and starts a new group after a text boundary", () => {
+    const first = buildSummaryGroups([
+      toolCall(1, "mcp__computer-use__list_apps", {}, { status: "running" }),
+    ]);
+    const grown = buildSummaryGroups([
       toolCall(1, "mcp__computer-use__list_apps", {}),
-      toolCall(2, "Read", { path: "package.json" }),
-      toolCall(3, "mcp__computer-use__screenshot", {}),
+      reasoning(2),
+      toolCall(3, "mcp__computer-use__get_app_state", {}, { status: "running" }),
+    ]);
+    const bounded = buildSummaryGroups([
+      toolCall(1, "mcp__computer-use__list_apps", {}),
+      reasoning(2),
+      {
+        rowId: 3,
+        turnId: "turn-1",
+        createdAt: 1_700_000_000_003,
+        createdAtSeq: 3,
+        kind: "assistantText",
+        text: "done",
+        state: "complete",
+      } satisfies ConversationRow,
+      toolCall(4, "mcp__computer-use__screenshot", {}),
     ]);
 
-    const firstGroup = first[0];
-    const grownGroup = grown[0];
-    expect(firstGroup?.kind).toBe("cuaGroup");
-    expect(grown.map((item) => item.kind)).toEqual(["cuaGroup", "row"]);
-    expect(grownGroup?.kind).toBe("cuaGroup");
-    if (firstGroup?.kind !== "cuaGroup" || grownGroup?.kind !== "cuaGroup") {
-      throw new Error("expected stable CUA groups");
-    }
-    expect(grownGroup.key).toBe(firstGroup.key);
-    expect(grownGroup.node.toolCall.toolId).toBe(firstGroup.node.toolCall.toolId);
-    expect(grownGroup.node.toolCall.status).toBe("in_progress");
-    expect(grownGroup.rows.map((row) => row.rowId)).toEqual([1, 3]);
-    expect(bounded.map((item) => item.kind)).toEqual(["cuaGroup", "row", "cuaGroup"]);
+    expect(groupRowIds(first[0]!)).toEqual([1]);
+    expect(getActiveAssistantSummaryItem(first[0]!.items)?.row.rowId).toBe(1);
+    expect(groupRowIds(grown[0]!)).toEqual([1, 2, 3]);
+    // Group identity is the first member row, so it stays stable while the
+    // running tail grows across the interleaved reasoning.
+    expect(grown[0]!.key).toBe(first[0]!.key);
+    expect(getActiveAssistantSummaryItem(grown[0]!.items)?.row.rowId).toBe(3);
+    expect(bounded.map(groupRowIds)).toEqual([[1, 2], [3], [4]]);
   });
 
   it("does not group third-party computer-use names and honors the release gate", () => {
@@ -290,99 +308,80 @@ describe("buildAssistantWorkRenderItems", () => {
   });
 
   it("keeps a running Explore tail stable while a later shell awaits its command", () => {
-    const explore = toolCall(1, "Grep", { pattern: "renderer" });
+    const explore = toolCall(1, "Grep", { pattern: "renderer" }, { status: "running" });
     const pendingShell = toolCall(2, "Bash", undefined, {
       inputText: "",
       status: "inputStreaming",
     });
 
-    const pendingItems = buildRenderItems([explore, pendingShell], SHOW_ALL_REASONING, {
-      stageTailIsRunning: true,
-    });
-    expect(pendingItems).toHaveLength(1);
-    expect(pendingItems[0]).toMatchObject({ kind: "row", row: { rowId: 1 } });
+    const pendingGroups = buildSummaryGroups([explore, pendingShell]);
+    expect(pendingGroups).toHaveLength(1);
+    expect(groupRowIds(pendingGroups[0]!)).toEqual([1]);
+    expect(getActiveAssistantSummaryItem(pendingGroups[0]!.items)?.row.rowId).toBe(1);
 
-    const readonlyItems = buildRenderItems(
-      [
-        explore,
-        toolCall(
-          2,
-          "Bash",
-          { command: "ls packages/ui/src/ToolCallBlocks/renderers" },
-          { status: "running" },
-        ),
-      ],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    const readonlyExplore = readonlyItems[0];
-    expect(readonlyExplore?.kind).toBe("exploreGroup");
-    if (readonlyExplore?.kind !== "exploreGroup") {
-      throw new Error("expected readonly shell to join Explore");
-    }
-    expect(readonlyExplore.rows.map((row) => row.rowId)).toEqual([1, 2]);
-    expect(readonlyExplore.node.toolCall.status).toBe("in_progress");
+    const readonlyGroups = buildSummaryGroups([
+      explore,
+      toolCall(
+        2,
+        "Bash",
+        { command: "ls packages/ui/src/ToolCallBlocks/renderers" },
+        { status: "running" },
+      ),
+    ]);
+    expect(readonlyGroups).toHaveLength(1);
+    expect(groupRowIds(readonlyGroups[0]!)).toEqual([1, 2]);
+    expect(getActiveAssistantSummaryItem(readonlyGroups[0]!.items)?.row.rowId).toBe(2);
 
-    const executeItems = buildRenderItems(
-      [explore, toolCall(2, "Bash", { command: "pnpm test" }, { status: "running" })],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    expect(executeItems.map((item) => item.kind)).toEqual(["row", "row"]);
+    const executeGroups = buildSummaryGroups([
+      explore,
+      toolCall(2, "Bash", { command: "pnpm test" }, { status: "running" }),
+    ]);
+    // Summary groups merge every working family once the shell command
+    // arrives, so the executable shell joins the same group as the explore
+    // tail instead of closing it.
+    expect(groupRowIds(executeGroups[0]!)).toEqual([1, 2]);
+    expect(getActiveAssistantSummaryItem(executeGroups[0]!.items)?.row.rowId).toBe(2);
   });
 
   it("upgrades consecutive non-explore shell calls to a stable group", () => {
-    const initialItems = buildRenderItems([
+    const initialGroups = buildSummaryGroups([
       toolCall(1, "Bash", { command: "pnpm install" }, { status: "running" }),
     ]);
-    const grownItems = buildRenderItems(
-      [
-        toolCall(1, "Bash", { command: "pnpm install" }),
-        toolCall(2, "Bash", { command: "pnpm test" }, { status: "running" }),
-      ],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    const extendedItems = buildRenderItems(
-      [
-        toolCall(1, "Bash", { command: "pnpm install" }),
-        toolCall(2, "Bash", { command: "pnpm test" }),
-        toolCall(3, "Bash", { command: "pnpm lint" }, { status: "running" }),
-      ],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    const initialExecute = initialItems[0];
-    const grownExecute = grownItems[0];
-    const extendedExecute = extendedItems[0];
+    const grownGroups = buildSummaryGroups([
+      toolCall(1, "Bash", { command: "pnpm install" }),
+      toolCall(2, "Bash", { command: "pnpm test" }, { status: "running" }),
+    ]);
+    const extendedGroups = buildSummaryGroups([
+      toolCall(1, "Bash", { command: "pnpm install" }),
+      toolCall(2, "Bash", { command: "pnpm test" }),
+      toolCall(3, "Bash", { command: "pnpm lint" }, { status: "running" }),
+    ]);
 
-    expect(initialExecute?.kind).toBe("row");
-    expect(grownExecute?.kind).toBe("executeGroup");
-    expect(extendedExecute?.kind).toBe("executeGroup");
-    if (grownExecute?.kind !== "executeGroup" || extendedExecute?.kind !== "executeGroup") {
-      throw new Error("expected stable execute groups");
-    }
-
-    expect(extendedExecute.key).toBe(grownExecute.key);
-    expect(extendedExecute.node.toolCall.toolId).toBe(grownExecute.node.toolCall.toolId);
-    expect(grownExecute.rows.map((row) => row.rowId)).toEqual([1, 2]);
-    expect(grownExecute.node.toolCall.status).toBe("in_progress");
+    expect(groupRowIds(initialGroups[0]!)).toEqual([1]);
+    expect(groupRowIds(grownGroups[0]!)).toEqual([1, 2]);
+    expect(groupRowIds(extendedGroups[0]!)).toEqual([1, 2, 3]);
+    // The summary group key is its first member row, so it stays stable while
+    // the running tail grows.
+    expect(grownGroups[0]!.key).toBe(initialGroups[0]!.key);
+    expect(extendedGroups[0]!.key).toBe(grownGroups[0]!.key);
+    expect(getActiveAssistantSummaryItem(grownGroups[0]!.items)?.row.rowId).toBe(2);
+    expect(getActiveAssistantSummaryItem(extendedGroups[0]!.items)?.row.rowId).toBe(3);
+    expect(getActiveAssistantSummaryItem(initialGroups[0]!.items)?.row.rowId).toBe(1);
   });
 
   it("keeps child failures on execute children and stops at explore boundaries", () => {
-    const items = buildRenderItems([
+    const groups = buildSummaryGroups([
       toolCall(1, "Bash", { command: "pnpm install" }),
       toolCall(2, "Bash", { command: "pnpm build" }, { status: "error" }),
       toolCall(3, "Bash", { command: "git status" }),
       toolCall(4, "Bash", { command: "pnpm test" }, { status: "cancelled" }),
     ]);
 
-    expect(items.map((item) => item.kind)).toEqual(["executeGroup", "row", "row"]);
-    const firstExecute = items[0];
-    if (firstExecute?.kind !== "executeGroup") throw new Error("expected execute group");
-    expect(firstExecute.node.toolCall.status).toBe("completed");
-    expect(firstExecute.node.childToolCalls[1]?.toolCall.status).toBe("failed");
-    expect(items[2]).toMatchObject({ kind: "row", row: { status: "cancelled" } });
+    expect(groups).toHaveLength(1);
+    // Failures and cancellations stay on their own child rows; the merged
+    // group has no running tail, so it presents as completed.
+    expect(rowStatuses(groups[0]!)).toEqual(["success", "error", "success", "cancelled"]);
+    expect(getActiveAssistantSummaryItem(groups[0]!.items)).toBeUndefined();
   });
 
   it("merges execute calls across hidden later reasoning only", () => {
@@ -393,18 +392,17 @@ describe("buildAssistantWorkRenderItems", () => {
       toolCall(4, "Bash", { command: "pnpm test" }),
     ];
 
-    const hiddenItems = buildRenderItems(rows, {
+    const hiddenGroups = buildSummaryGroups(rows, {
       messageStreamShowReasoning: false,
       messageStreamFirstReasoningRowId: 1,
     });
-    expect(hiddenItems.map((item) => item.kind)).toEqual(["row", "executeGroup"]);
-    const hiddenExecute = hiddenItems[1];
-    if (hiddenExecute?.kind !== "executeGroup") {
-      throw new Error("expected merged execute group");
-    }
-    expect(hiddenExecute.rows.map((row) => row.rowId)).toEqual([2, 4]);
+    // Hidden reasoning rows are dropped entirely: the later reasoning no
+    // longer splits the consecutive execute calls.
+    expect(hiddenGroups.map(groupRowIds)).toEqual([[1, 2, 4]]);
 
-    expect(buildRenderItems(rows).map((item) => item.kind)).toEqual(["row", "row", "row", "row"]);
+    const visibleGroups = buildSummaryGroups(rows);
+    // Visible reasoning renders inside the summary group instead of splitting it.
+    expect(visibleGroups.map(groupRowIds)).toEqual([[1, 2, 3, 4]]);
   });
 
   it("keeps an unclassified failed shell tool visible", () => {
@@ -431,120 +429,83 @@ describe("buildAssistantWorkRenderItems", () => {
       toolCall(2, "Bash", { command: "rg test packages/ui" }),
     ];
 
-    const items = buildRenderItems(rows);
+    const groups = buildSummaryGroups(rows);
 
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({
-      kind: "exploreGroup",
-      rowId: 1,
-    });
-    const first = items[0];
-    expect(first?.kind).toBe("exploreGroup");
-    if (first?.kind !== "exploreGroup") {
-      throw new Error("expected explore group");
-    }
-    expect(first.rows).toHaveLength(2);
+    expect(groups).toHaveLength(1);
+    expect(groupRowIds(groups[0]!)).toEqual([1, 2]);
+    expect(groups[0]!.items.every((item) => item.kind === "row")).toBe(true);
   });
 
   it("upgrades read-only tools to an Explore group with stable identity", () => {
-    const initialItems = buildRenderItems([
+    const initialGroups = buildSummaryGroups([
       toolCall(1, "Read", { path: "package.json" }, { status: "running" }),
     ]);
-    const grownItems = buildRenderItems([
+    const grownGroups = buildSummaryGroups([
       toolCall(1, "Read", { path: "package.json" }, { status: "success" }),
       toolCall(2, "Bash", { command: "rg test packages/ui" }, { status: "running" }),
     ]);
-    const extendedItems = buildRenderItems([
+    const extendedGroups = buildSummaryGroups([
       toolCall(1, "Read", { path: "package.json" }),
       toolCall(2, "Bash", { command: "rg test packages/ui" }),
       toolCall(3, "Grep", { pattern: "renderer" }, { status: "running" }),
     ]);
-    const initialExplore = initialItems[0];
-    const grownExplore = grownItems[0];
-    const extendedExplore = extendedItems[0];
 
-    expect(initialExplore?.kind).toBe("row");
-    expect(grownExplore?.kind).toBe("exploreGroup");
-    expect(extendedExplore?.kind).toBe("exploreGroup");
-    if (grownExplore?.kind !== "exploreGroup" || extendedExplore?.kind !== "exploreGroup") {
-      throw new Error("expected stable explore groups");
-    }
-
-    expect(extendedExplore.key).toBe(grownExplore.key);
-    expect(extendedExplore.node.toolCall.toolId).toBe(grownExplore.node.toolCall.toolId);
-    expect(grownExplore.rows).toHaveLength(2);
+    expect(groupRowIds(initialGroups[0]!)).toEqual([1]);
+    expect(groupRowIds(grownGroups[0]!)).toEqual([1, 2]);
+    expect(groupRowIds(extendedGroups[0]!)).toEqual([1, 2, 3]);
+    // The summary group key tracks its first member row and stays stable as
+    // the explore tail grows.
+    expect(grownGroups[0]!.key).toBe(initialGroups[0]!.key);
+    expect(extendedGroups[0]!.key).toBe(grownGroups[0]!.key);
+    expect(getActiveAssistantSummaryItem(extendedGroups[0]!.items)?.row.rowId).toBe(3);
   });
 
   it("derives Explore parent status from the running stage tail", () => {
-    const completedItems = buildRenderItems(
-      [
-        toolCall(1, "Read", { path: "package.json" }),
-        toolCall(2, "Grep", { pattern: "missing" }, { status: "error" }),
-      ],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    const boundedItems = buildRenderItems([
+    const completedGroups = buildSummaryGroups([
+      toolCall(1, "Read", { path: "package.json" }),
+      toolCall(2, "Grep", { pattern: "missing" }, { status: "error" }),
+    ]);
+    const runningGroups = buildSummaryGroups([
       toolCall(1, "Read", { path: "missing.json" }, { status: "error" }),
       toolCall(2, "Grep", { pattern: "still-running" }, { status: "running" }),
-      toolCall(3, "Bash", { command: "pnpm test" }, { status: "running" }),
+      toolCall(3, "Bash", { command: "pnpm test" }),
     ]);
-    const runningExplore = completedItems[0];
-    const boundedExplore = boundedItems[0];
 
-    expect(runningExplore?.kind).toBe("exploreGroup");
-    expect(boundedExplore?.kind).toBe("exploreGroup");
-    if (runningExplore?.kind !== "exploreGroup" || boundedExplore?.kind !== "exploreGroup") {
-      throw new Error("expected explore groups");
-    }
-
-    expect(runningExplore.node.toolCall.status).toBe("in_progress");
-    expect(runningExplore.node.childToolCalls[1]?.toolCall.status).toBe("failed");
-    expect(boundedExplore.node.toolCall.status).toBe("completed");
-    expect(boundedExplore.node.childToolCalls[1]?.toolCall.status).toBe("in_progress");
+    expect(completedGroups).toHaveLength(1);
+    // With no running child left the summary presents as completed and keeps
+    // the failure on its own child row.
+    expect(getActiveAssistantSummaryItem(completedGroups[0]!.items)).toBeUndefined();
+    expect(rowStatuses(completedGroups[0]!)).toEqual(["success", "error"]);
+    expect(runningGroups).toHaveLength(1);
+    expect(groupRowIds(runningGroups[0]!)).toEqual([1, 2, 3]);
+    expect(getActiveAssistantSummaryItem(runningGroups[0]!.items)?.row.rowId).toBe(2);
   });
 
   it("derives Execute parent status from the running stage tail", () => {
-    const tailItems = buildRenderItems(
-      [
-        toolCall(1, "Bash", { command: "pnpm test" }),
-        toolCall(2, "Bash", { command: "pnpm lint" }),
-      ],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    const boundedItems = buildRenderItems(
-      [
-        toolCall(1, "Bash", { command: "pnpm test" }, { status: "running" }),
-        toolCall(2, "Bash", { command: "pnpm lint" }),
-        toolCall(3, "Read", { path: "package.json" }),
-      ],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    const terminalItems = buildRenderItems([
+    const settledGroups = buildSummaryGroups([
+      toolCall(1, "Bash", { command: "pnpm test" }),
+      toolCall(2, "Bash", { command: "pnpm lint" }),
+    ]);
+    const boundedGroups = buildSummaryGroups([
+      toolCall(1, "Bash", { command: "pnpm test" }, { status: "running" }),
+      toolCall(2, "Bash", { command: "pnpm lint" }),
+      toolCall(3, "Read", { path: "package.json" }),
+    ]);
+    const runningGroups = buildSummaryGroups([
       toolCall(1, "Bash", { command: "pnpm test" }, { status: "running" }),
       toolCall(2, "Bash", { command: "pnpm lint" }),
     ]);
-    const tailExecute = tailItems[0];
-    const boundedExecute = boundedItems[0];
-    const terminalExecute = terminalItems[0];
 
-    expect(tailExecute?.kind).toBe("executeGroup");
-    expect(boundedExecute?.kind).toBe("executeGroup");
-    expect(terminalExecute?.kind).toBe("executeGroup");
-    if (
-      tailExecute?.kind !== "executeGroup" ||
-      boundedExecute?.kind !== "executeGroup" ||
-      terminalExecute?.kind !== "executeGroup"
-    ) {
-      throw new Error("expected execute groups");
-    }
-
-    expect(tailExecute.node.toolCall.status).toBe("in_progress");
-    expect(boundedExecute.node.toolCall.status).toBe("completed");
-    expect(boundedExecute.node.childToolCalls[0]?.toolCall.status).toBe("in_progress");
-    expect(terminalExecute.node.toolCall.status).toBe("completed");
+    expect(settledGroups).toHaveLength(1);
+    expect(getActiveAssistantSummaryItem(settledGroups[0]!.items)).toBeUndefined();
+    // The execute and explore tools now share the merged summary group, whose
+    // active item is the still-running shell call.
+    expect(boundedGroups).toHaveLength(1);
+    expect(groupRowIds(boundedGroups[0]!)).toEqual([1, 2, 3]);
+    expect(getActiveAssistantSummaryItem(boundedGroups[0]!.items)?.row.rowId).toBe(1);
+    expect(rowStatuses(boundedGroups[0]!)[0]).toBe("running");
+    expect(runningGroups).toHaveLength(1);
+    expect(getActiveAssistantSummaryItem(runningGroups[0]!.items)?.row.rowId).toBe(1);
   });
 
   it("merges explore calls across hidden later reasoning only", () => {
@@ -555,27 +516,14 @@ describe("buildAssistantWorkRenderItems", () => {
       toolCall(4, "Bash", { command: "rg test packages/ui" }),
     ];
 
-    const hiddenReasoningItems = buildRenderItems(
-      rows,
-      {
-        messageStreamShowReasoning: false,
-        messageStreamFirstReasoningRowId: 1,
-      },
-      { stageTailIsRunning: true },
-    );
-    expect(hiddenReasoningItems.map((item) => item.kind)).toEqual(["row", "exploreGroup"]);
-    const hiddenExplore = hiddenReasoningItems[1];
-    expect(hiddenExplore?.kind).toBe("exploreGroup");
-    if (hiddenExplore?.kind !== "exploreGroup") {
-      throw new Error("expected merged explore group");
-    }
-    expect(hiddenExplore.rows.map((row) => row.rowId)).toEqual([2, 4]);
-    expect(hiddenExplore.node.toolCall.status).toBe("in_progress");
-
-    const visibleReasoningItems = buildRenderItems(rows, SHOW_ALL_REASONING, {
-      stageTailIsRunning: true,
+    const hiddenReasoningGroups = buildSummaryGroups(rows, {
+      messageStreamShowReasoning: false,
+      messageStreamFirstReasoningRowId: 1,
     });
-    expect(visibleReasoningItems.map((item) => item.kind)).toEqual(["row", "row", "row", "row"]);
+    expect(hiddenReasoningGroups.map(groupRowIds)).toEqual([[1, 2, 4]]);
+
+    const visibleReasoningGroups = buildSummaryGroups(rows);
+    expect(visibleReasoningGroups.map(groupRowIds)).toEqual([[1, 2, 3, 4]]);
   });
 
   it("ends Explore and starts a Changes group for write tools", () => {
@@ -599,50 +547,38 @@ describe("buildAssistantWorkRenderItems", () => {
   });
 
   it("upgrades consecutive Write/Edit rows to a stable group", () => {
-    const initial = buildRenderItems([
+    const initial = buildSummaryGroups([
       toolCall(1, "Write", { file_path: "src/a.ts", content: "a" }),
     ]);
-    const grown = buildRenderItems(
-      [
-        toolCall(1, "Write", { file_path: "src/a.ts", content: "a" }),
-        toolCall(2, "Edit", {
-          file_path: "src/b.ts",
-          old_string: "b",
-          new_string: "c",
-        }),
-      ],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    const extended = buildRenderItems(
-      [
-        toolCall(1, "Write", { file_path: "src/a.ts", content: "a" }),
-        toolCall(2, "Edit", {
-          file_path: "src/b.ts",
-          old_string: "b",
-          new_string: "c",
-        }),
-        toolCall(3, "Write", { file_path: "src/c.ts", content: "c" }),
-      ],
-      SHOW_ALL_REASONING,
-      { stageTailIsRunning: true },
-    );
-    const first = initial[0];
-    const next = grown[0];
-    const last = extended[0];
-    expect(first?.kind).toBe("row");
-    expect(next?.kind).toBe("changesGroup");
-    expect(last?.kind).toBe("changesGroup");
-    if (next?.kind !== "changesGroup" || last?.kind !== "changesGroup")
-      throw new Error("expected Changes groups");
-    expect(last.key).toBe(next.key);
-    expect(last.node.toolCall.toolId).toBe(next.node.toolCall.toolId);
-    expect(next.rows.map((row) => row.rowId)).toEqual([1, 2]);
-    expect(next.node.toolCall.status).toBe("in_progress");
+    const grown = buildSummaryGroups([
+      toolCall(1, "Write", { file_path: "src/a.ts", content: "a" }),
+      toolCall(2, "Edit", {
+        file_path: "src/b.ts",
+        old_string: "b",
+        new_string: "c",
+      }),
+    ]);
+    const extended = buildSummaryGroups([
+      toolCall(1, "Write", { file_path: "src/a.ts", content: "a" }),
+      toolCall(2, "Edit", {
+        file_path: "src/b.ts",
+        old_string: "b",
+        new_string: "c",
+      }),
+      toolCall(3, "Write", { file_path: "src/c.ts", content: "c" }),
+    ]);
+
+    expect(groupRowIds(initial[0]!)).toEqual([1]);
+    expect(groupRowIds(grown[0]!)).toEqual([1, 2]);
+    expect(groupRowIds(extended[0]!)).toEqual([1, 2, 3]);
+    // The Changes summary group keeps the identity of its first member row as
+    // the write tail grows.
+    expect(grown[0]!.key).toBe(initial[0]!.key);
+    expect(extended[0]!.key).toBe(grown[0]!.key);
   });
 
   it("completes Changes at visible boundaries without inheriting child cancellation", () => {
-    const items = buildRenderItems([
+    const groups = buildSummaryGroups([
       toolCall(
         1,
         "Edit",
@@ -652,26 +588,29 @@ describe("buildAssistantWorkRenderItems", () => {
       toolCall(2, "Write", { file_path: "src/b.ts", content: "b" }),
       toolCall(3, "Read", { path: "src/a.ts" }),
     ]);
-    const changes = items[0];
-    expect(changes?.kind).toBe("changesGroup");
-    if (changes?.kind !== "changesGroup") throw new Error("expected Changes group");
-    expect(changes.node.toolCall.status).toBe("completed");
-    expect(changes.node.childToolCalls[0]?.toolCall.status).toBe("stopped");
+
+    expect(groups).toHaveLength(1);
+    // The cancelled child keeps its own terminal status; the merged group has
+    // no running tail, so it presents as completed.
+    expect(rowStatuses(groups[0]!)).toEqual(["cancelled", "success", "success"]);
+    expect(getActiveAssistantSummaryItem(groups[0]!.items)).toBeUndefined();
   });
 
-  it("merges Changes across hidden later reasoning but splits at visible reasoning", () => {
+  it("merges Changes across hidden later reasoning without splitting at visible reasoning", () => {
     const rows = [
       reasoning(1),
       toolCall(2, "Write", { file_path: "src/a.ts", content: "a" }),
       reasoning(3),
       toolCall(4, "Edit", { file_path: "src/b.ts", old_string: "b", new_string: "c" }),
     ];
-    const hidden = buildRenderItems(rows, {
+    const hidden = buildSummaryGroups(rows, {
       messageStreamShowReasoning: false,
       messageStreamFirstReasoningRowId: 1,
     });
-    expect(hidden.map((item) => item.kind)).toEqual(["row", "changesGroup"]);
-    expect(buildRenderItems(rows).map((item) => item.kind)).toEqual(["row", "row", "row", "row"]);
+    // Hidden reasoning rows are dropped and no longer split the write tail.
+    expect(hidden.map(groupRowIds)).toEqual([[1, 2, 4]]);
+    // Visible reasoning renders inside the merged Changes summary group.
+    expect(buildSummaryGroups(rows).map(groupRowIds)).toEqual([[1, 2, 3, 4]]);
   });
 
   it("pairs agent tool calls with subagent rows by parentToolCallId", () => {

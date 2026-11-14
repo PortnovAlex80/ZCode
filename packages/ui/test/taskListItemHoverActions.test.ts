@@ -58,6 +58,16 @@ vi.mock("lucide-react", () => {
   };
 });
 
+// The row's import graph reaches the image-preview editor through the shared message
+// image dialog; the row never renders it, so stub the dialog instead of loading the
+// editor (and its many lucide icons) in this unit test.
+vi.mock("@/components/ai-elements/image-preview-dialog.js", () => ({
+  downloadImagePreview: vi.fn(),
+  sanitizeImageSourceForLog: (source: string) => source,
+  clampImagePreviewOffset: (value: number) => value,
+  ImagePreviewDialog: () => null,
+}));
+
 vi.mock("@/components/ui/badge.js", () => ({
   Badge: ({ children }: { children?: ReactNode }) => createElement("span", null, children),
 }));
@@ -215,6 +225,9 @@ function createMinimalElement(ownerDocument: Document, tagName = "div") {
     },
     nodeName: tagName.toUpperCase(),
     nodeType: 1,
+    // The identity hover card only opens for keyboard focus (:focus-visible); synthetic
+    // dispatches in this minimal DOM never match, so the card stays closed.
+    matches: () => false,
     ownerDocument,
     parentNode: null as TestElement | null,
     querySelector: (selector: string) => {

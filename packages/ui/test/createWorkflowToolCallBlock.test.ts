@@ -286,7 +286,7 @@ describe("CreateWorkflowToolCallBlock 静态形态（编过、未联接 run）",
     expect(view.getByTestId("workflow-card-kind").textContent).toBe("Workflow");
     expect(view.getByTestId("workflow-card-name").textContent).toBe("Research pipeline");
     expect(view.getByTestId("workflow-card-static-status").textContent).toBe("compiled");
-    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 2 agents");
+    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 2 subagents");
 
     const stations = view.getAllByTestId("workflow-timeline-station");
     expect(stations.map((station) => station.textContent)).toEqual([
@@ -327,7 +327,7 @@ describe("CreateWorkflowToolCallBlock 静态形态（编过、未联接 run）",
     });
     expect(view.getByTestId("workflow-timeline-station").textContent).toContain("Workflow");
     expect(view.getByTestId("workflow-agent-pill").textContent).toContain("a");
-    expect(view.getByTestId("workflow-card-detail").textContent).toBe("1 phase · 1 agent");
+    expect(view.getByTestId("workflow-card-detail").textContent).toBe("1 phase · 1 subagent");
   });
 
   it("没有图（或零 step 的图）时不画时间线，脚本折叠仍在", () => {
@@ -478,7 +478,11 @@ describe("CreateWorkflowToolCallBlock 编译反馈", () => {
     expect(row.querySelector(".tool-summary-kind-label")?.textContent).toBe("Workflow draft");
     expect(row.textContent).toContain("Release notes digest");
     expect(view.getByTestId("workflow-draft-ordinal").textContent).toBe("draft 2");
-    expect(view.getByTestId("workflow-draft-status").textContent).toBe("2 to fix · not run");
+    // The two status segments used to be joined by a literal "·"; the row now
+    // separates them with flex gap, so each segment is asserted on its own.
+    const draftStatus = view.getByTestId("workflow-draft-status").textContent;
+    expect(draftStatus).toContain("2 to fix");
+    expect(draftStatus).toContain("not run");
     const lamp = view.getByTestId("workflow-draft-lamp");
     expect(lamp.getAttribute("data-draft-lamp")).toBe("open");
     expect(lamp.className).toContain("border-warning");
@@ -496,7 +500,10 @@ describe("CreateWorkflowToolCallBlock 编译反馈", () => {
     expect(lamp.className).toContain("border-foreground-subtlest");
     expect(lamp.className).not.toContain("border-warning");
     expect(view.getByTestId("workflow-draft-ordinal").textContent).toBe("draft 1");
-    expect(view.getByTestId("workflow-draft-status").textContent).toBe("2 to fix · not run");
+    // Same segment layout as above: flex gap instead of the literal "·" separator.
+    const supersededStatus = view.getByTestId("workflow-draft-status").textContent;
+    expect(supersededStatus).toContain("2 to fix");
+    expect(supersededStatus).toContain("not run");
   });
 
   it("宿主没有稿号联接：不编号，灯保持警示色", () => {
@@ -548,7 +555,10 @@ describe("CreateWorkflowToolCallBlock 编译反馈", () => {
       { forceOpen: true },
     );
     expect(one.getByTestId("workflow-compiler-feedback-count").textContent).toBe("1 note");
-    expect(one.getByTestId("workflow-draft-status").textContent).toBe("1 to fix · not run");
+    // Flex-gap segment layout: assert both segments instead of the old "·"-joined string.
+    const singleStatus = one.getByTestId("workflow-draft-status").textContent;
+    expect(singleStatus).toContain("1 to fix");
+    expect(singleStatus).toContain("not run");
     cleanup();
 
     const many = renderBlockDom(
@@ -593,7 +603,10 @@ describe("CreateWorkflowToolCallBlock 编译反馈", () => {
       "工作流草稿",
     );
     expect(view.getByTestId("workflow-draft-ordinal").textContent).toBe("第 1 稿");
-    expect(view.getByTestId("workflow-draft-status").textContent).toBe("2 处待修正 · 未运行");
+    // Flex-gap segment layout: assert both segments instead of the old "·"-joined string.
+    const zhDraftStatus = view.getByTestId("workflow-draft-status").textContent;
+    expect(zhDraftStatus).toContain("2 处待修正");
+    expect(zhDraftStatus).toContain("未运行");
     expect(view.getByTestId("workflow-compiler-feedback-title").textContent).toBe("编译反馈");
     expect(view.getByTestId("workflow-compiler-feedback-count").textContent).toBe("2 条");
     expect(view.getByTestId("workflow-compiler-feedback-lede").textContent).toBe(
@@ -768,7 +781,7 @@ describe("CreateWorkflowToolCallBlock 运行态", () => {
     expect(card.getAttribute("data-workflow-run-id")).toBe("dwfrun-42");
     expect(view.getByTestId("workflow-card-kind").textContent).toBe("Workflow running");
     expect(view.getByTestId("workflow-card-status").textContent).toBe("Running");
-    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 1 agent working");
+    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 1 subagent working");
     expect(view.queryByTestId("workflow-run-card")).toBeNull();
     expect(view.queryByTestId("workflow-card-static-status")).toBeNull();
   });
@@ -803,7 +816,7 @@ describe("CreateWorkflowToolCallBlock 运行态", () => {
     const view = renderBlockDom(LOOP_TOOL_CALL, { workflowRun: joined() });
     expect(view.queryByTestId("workflow-card-footer")).toBeNull();
     const card = view.getByTestId("workflow-card").textContent ?? "";
-    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 1 agent working");
+    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 1 subagent working");
     expect(card).not.toContain("steps");
     expect(card).not.toContain("tokens");
     expect(view.container.querySelector("progress")).toBeNull();
@@ -847,7 +860,7 @@ describe("CreateWorkflowToolCallBlock 运行态", () => {
     expect(view.getByTestId("workflow-timeline-rail").getAttribute("data-rail-ink")).toBe("strong");
     const rounds = view.getAllByTestId("workflow-timeline-rounds");
     expect(rounds[0]!.textContent).toContain("2");
-    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 1 agent working");
+    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 1 subagent working");
     expect(view.queryByTestId("workflow-card-footer")).toBeNull();
   });
 
@@ -879,7 +892,7 @@ describe("CreateWorkflowToolCallBlock 运行态", () => {
     expect(view.getByTestId("workflow-timeline-arc").getAttribute("data-arc-ink")).toBe("faint");
     expect(view.getByTestId("workflow-card-header").querySelector(".animate-pulse")).toBeNull();
     expect(view.queryByTestId("workflow-card-footer")).toBeNull();
-    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 2 agents");
+    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 2 subagents");
     const card = view.getByTestId("workflow-card").textContent ?? "";
     expect(card).not.toContain("steps");
     expect(card).not.toContain("tokens");
@@ -954,7 +967,7 @@ describe("CreateWorkflowToolCallBlock 运行态", () => {
     expect(view.queryByTestId("workflow-card-body")).toBeNull();
     expect(view.queryByTestId("workflow-card-footer")).toBeNull();
     expect(view.getByTestId("workflow-card-status").textContent).toBe("Running");
-    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 1 agent working");
+    expect(view.getByTestId("workflow-card-detail").textContent).toBe("2 phases · 1 subagent working");
     fireEvent.click(view.getByTestId("workflow-card-toggle"));
     expect(view.getByTestId("workflow-card-body")).toBeTruthy();
   });
@@ -1491,7 +1504,9 @@ describe("CreateWorkflowToolCallBlock 名册站", () => {
     const column = view.getByTestId("workflow-timeline-pills");
     expect(column.getAttribute("data-station-roster")).toBe("true");
     const pills = within(column).getAllByTestId("workflow-agent-pill");
-    expect(pills.map((pill) => pill.textContent)).toEqual([
+    // Completed pills append an sr-only localized status word after the name, so
+    // read the dedicated name span instead of the whole pill's textContent.
+    expect(pills.map((pill) => pill.querySelector(".wf-pill-name")?.textContent)).toEqual([
       "reviewer-6",
       "reviewer-4",
       "reviewer-1",
@@ -1519,7 +1534,7 @@ describe("CreateWorkflowToolCallBlock 名册站", () => {
     ]);
     expect(within(row).queryByTestId("workflow-more-failed")).toBeNull();
     // 表头照旧。
-    expect(view.getByTestId("workflow-card-detail").textContent).toContain("1 agent working");
+    expect(view.getByTestId("workflow-card-detail").textContent).toContain("1 subagent working");
   });
 
   // 表外的那些（docs/dynamic-workflow/presentation.md「Past six participants」）：被归约淘汰的

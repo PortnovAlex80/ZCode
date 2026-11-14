@@ -156,7 +156,6 @@ function createOpenRemoteWorkspaceContext(options?: {
     setReconnectingRemoteWorkspaceKeys,
     loadCredential: vi.fn(async () => null),
     connectRemoteWorkspaceTarget: vi.fn(async () => "session-1"),
-    resolveRemoteWorkspaceCanonicalPath: vi.fn(async (_sessionId, workspacePath) => workspacePath),
     bindRemoteWorkspaceScope: createBindRemoteWorkspaceScopeMock(
       sessionEntry.workspaceIdentity ?? workspaceKey,
     ),
@@ -275,7 +274,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
         setReconnectingRemoteWorkspaceKeys: vi.fn((updater) => updater([])),
         loadCredential: vi.fn(async () => null),
         connectRemoteWorkspaceTarget,
-        resolveRemoteWorkspaceCanonicalPath: vi.fn(async () => sessionEntry.workspacePath),
         bindRemoteWorkspaceScope: createBindRemoteWorkspaceScopeMock(
           sessionEntry.workspaceIdentity!,
         ),
@@ -341,7 +339,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       resolveConnect = resolve;
     });
     const connectRemoteWorkspaceTarget = vi.fn(() => pendingConnect);
-    const resolveRemoteWorkspaceCanonicalPath = vi.fn(async () => "/workspace/demo");
     const bindRemoteWorkspaceScope = createBindRemoteWorkspaceScopeMock();
     const disposeRemoteWorkspaceSession = vi.fn(async () => undefined);
     const bindWorkspacePath = vi.fn();
@@ -368,7 +365,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       setReconnectingRemoteWorkspaceKeys,
       loadCredential,
       connectRemoteWorkspaceTarget,
-      resolveRemoteWorkspaceCanonicalPath,
       bindRemoteWorkspaceScope,
       disposeRemoteWorkspaceSession,
       bindRemoteWorkspacePath: bindWorkspacePath,
@@ -409,10 +405,8 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
         connectTrigger: "reconnect",
       },
     );
-    expect(resolveRemoteWorkspaceCanonicalPath).toHaveBeenCalledWith(
-      "session-1",
-      "/workspace/demo",
-    );
+    // Reconnect no longer realpaths the persisted path: an already-bound workspace keeps
+    // its first-bind path as identity, so bind receives the persisted path directly.
     expect(bindRemoteWorkspaceScope).toHaveBeenCalledWith(
       "session-1",
       "/workspace/demo",
@@ -454,13 +448,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
     });
     const connectRemoteWorkspaceTarget = vi.fn(async () => "session-1");
     const onSshHostReady = vi.fn();
-    const resolveRemoteWorkspaceCanonicalPath = vi.fn(async () => {
-      expect(onSshHostReady).toHaveBeenCalledWith({
-        password: "initiator-password",
-        privateKeyPassphrase: null,
-      });
-      return "/repo/b";
-    });
     const sessionEntry = createRemoteWorkspaceSessionEntry({
       workspacePath: "/repo/b",
       workspaceIdentity: "remote:ssh:root@mac-studio:/repo/b",
@@ -478,7 +465,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       setReconnectingRemoteWorkspaceKeys,
       loadCredential,
       connectRemoteWorkspaceTarget,
-      resolveRemoteWorkspaceCanonicalPath,
       bindRemoteWorkspaceScope: createBindRemoteWorkspaceScopeMock(sessionEntry.workspaceIdentity!),
       disposeRemoteWorkspaceSession: vi.fn(async () => undefined),
       bindRemoteWorkspacePath: vi.fn(),
@@ -503,6 +489,11 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       undefined,
       expect.objectContaining({ workspaceIdentity: sessionEntry.workspaceIdentity }),
     );
+    // Host ready is announced right after connect, before tab backfill and sibling reuse.
+    expect(onSshHostReady).toHaveBeenCalledWith({
+      password: "initiator-password",
+      privateKeyPassphrase: null,
+    });
   });
 
   it("rejects when mobile reconnect needs an explicit failure result", async () => {
@@ -515,7 +506,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
     const connectRemoteWorkspaceTarget = vi.fn(async () => {
       throw new Error("ssh closed");
     });
-    const resolveRemoteWorkspaceCanonicalPath = vi.fn(async () => "/workspace/demo");
     const bindRemoteWorkspaceScope = createBindRemoteWorkspaceScopeMock();
     const disposeRemoteWorkspaceSession = vi.fn(async () => undefined);
     const bindWorkspacePath = vi.fn();
@@ -533,7 +523,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
         setReconnectingRemoteWorkspaceKeys,
         loadCredential,
         connectRemoteWorkspaceTarget,
-        resolveRemoteWorkspaceCanonicalPath,
         bindRemoteWorkspaceScope,
         disposeRemoteWorkspaceSession,
         bindRemoteWorkspacePath: bindWorkspacePath,
@@ -562,7 +551,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
     });
     const loadCredential = vi.fn(async () => null);
     const connectRemoteWorkspaceTarget = vi.fn(async () => "session-1");
-    const resolveRemoteWorkspaceCanonicalPath = vi.fn(async () => "/workspace/demo");
     const bindRemoteWorkspaceScope = createBindRemoteWorkspaceScopeMock();
     const disposeRemoteWorkspaceSession = vi.fn(async () => undefined);
     const bindWorkspacePath = vi.fn();
@@ -579,7 +567,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       setReconnectingRemoteWorkspaceKeys,
       loadCredential,
       connectRemoteWorkspaceTarget,
-      resolveRemoteWorkspaceCanonicalPath,
       bindRemoteWorkspaceScope,
       disposeRemoteWorkspaceSession,
       bindRemoteWorkspacePath: bindWorkspacePath,
@@ -624,7 +611,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       return null;
     });
     const connectRemoteWorkspaceTarget = vi.fn(async () => "session-1");
-    const resolveRemoteWorkspaceCanonicalPath = vi.fn(async () => "/workspace/demo");
     const bindRemoteWorkspaceScope = createBindRemoteWorkspaceScopeMock(
       "remote:ssh:demo.internal:22:root:/workspace/demo",
     );
@@ -658,7 +644,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       setReconnectingRemoteWorkspaceKeys,
       loadCredential,
       connectRemoteWorkspaceTarget,
-      resolveRemoteWorkspaceCanonicalPath,
       bindRemoteWorkspaceScope,
       disposeRemoteWorkspaceSession,
       bindRemoteWorkspacePath: bindWorkspacePath,
@@ -709,7 +694,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       key.endsWith(":server-token") ? "server-secret" : null,
     );
     const connectRemoteWorkspaceTarget = vi.fn(async () => "session-1");
-    const resolveRemoteWorkspaceCanonicalPath = vi.fn(async () => "/workspace/demo");
     const bindRemoteWorkspaceScope = createBindRemoteWorkspaceScopeMock(
       "remote:server:studio:/workspace/demo",
     );
@@ -740,7 +724,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       setReconnectingRemoteWorkspaceKeys,
       loadCredential,
       connectRemoteWorkspaceTarget,
-      resolveRemoteWorkspaceCanonicalPath,
       bindRemoteWorkspaceScope,
       disposeRemoteWorkspaceSession,
       bindRemoteWorkspacePath: bindWorkspacePath,
@@ -776,7 +759,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
     });
     const loadCredential = vi.fn(async () => null);
     const connectRemoteWorkspaceTarget = vi.fn(async () => "session-1");
-    const resolveRemoteWorkspaceCanonicalPath = vi.fn(async () => "/workspace/demo");
     const bindRemoteWorkspaceScope = createBindRemoteWorkspaceScopeMock();
     const disposeRemoteWorkspaceSession = vi.fn(async () => undefined);
     const bindWorkspacePath = vi.fn();
@@ -802,7 +784,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       setReconnectingRemoteWorkspaceKeys,
       loadCredential,
       connectRemoteWorkspaceTarget,
-      resolveRemoteWorkspaceCanonicalPath,
       bindRemoteWorkspaceScope,
       disposeRemoteWorkspaceSession,
       bindRemoteWorkspacePath: bindWorkspacePath,
@@ -851,7 +832,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       setReconnectingRemoteWorkspaceKeys: vi.fn((updater) => updater([])),
       loadCredential: vi.fn(async () => null),
       connectRemoteWorkspaceTarget: vi.fn(async () => "session-1"),
-      resolveRemoteWorkspaceCanonicalPath: vi.fn(async () => "/home/dev"),
       bindRemoteWorkspaceScope,
       disposeRemoteWorkspaceSession,
       bindRemoteWorkspacePath: vi.fn(),
@@ -863,16 +843,20 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       toast: vi.fn(),
     });
 
+    // Reconnect no longer realpaths the persisted path (symlinked project roots used to be
+    // re-bound under a different identity and then discarded). Bind receives the persisted
+    // path; the tab backfill and history commit below still consume only the authoritative
+    // scope returned by bind (here: the bound identity for the canonical /home/dev scope).
     expect(bindRemoteWorkspaceScope).toHaveBeenCalledWith(
       "session-1",
-      "/home/dev",
+      "/dev",
       undefined,
       "project",
     );
     expect(bindRemoteWorkspaceScope.mock.invocationCallOrder[0]).toBeLessThan(
       upsertWorkspaceTab.mock.invocationCallOrder[0]!,
     );
-    expect(upsertWorkspaceTab).toHaveBeenCalledWith("/home/dev", {
+    expect(upsertWorkspaceTab).toHaveBeenCalledWith("/dev", {
       remoteSessionId: "session-1",
       remoteTarget: target,
       workspaceIdentity: boundWorkspaceIdentity,
@@ -881,7 +865,7 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       workspacePurpose: undefined,
     });
     expect(commitRemoteWorkspaceSessionMutation.mock.calls[0]?.[0]?.entry).toMatchObject({
-      workspacePath: "/home/dev",
+      workspacePath: "/dev",
       workspaceIdentity: boundWorkspaceIdentity,
       lastConnectionStatus: "connected",
     });
@@ -911,7 +895,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       setReconnectingRemoteWorkspaceKeys: vi.fn((updater) => updater([])),
       loadCredential: vi.fn(async () => null),
       connectRemoteWorkspaceTarget: vi.fn(async () => "session-1"),
-      resolveRemoteWorkspaceCanonicalPath: vi.fn(async () => "/home/dev"),
       bindRemoteWorkspaceScope,
       disposeRemoteWorkspaceSession: vi.fn(async () => undefined),
       bindRemoteWorkspacePath: bindWorkspacePath,
@@ -964,7 +947,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       setReconnectingRemoteWorkspaceKeys: vi.fn((updater) => updater([])),
       loadCredential: vi.fn(async () => null),
       connectRemoteWorkspaceTarget: vi.fn(async () => "session-1"),
-      resolveRemoteWorkspaceCanonicalPath: vi.fn(async () => "/home/dev"),
       bindRemoteWorkspaceScope,
       disposeRemoteWorkspaceSession,
       bindRemoteWorkspacePath: vi.fn(),
@@ -994,7 +976,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
     });
     const loadCredential = vi.fn(async () => null);
     const connectRemoteWorkspaceTarget = vi.fn(async () => "session-1");
-    const resolveRemoteWorkspaceCanonicalPath = vi.fn(async () => "/workspace/demo");
     const bindRemoteWorkspaceScope = createBindRemoteWorkspaceScopeMock();
     const disposeRemoteWorkspaceSession = vi.fn(async () => undefined);
     const bindWorkspacePath = vi.fn();
@@ -1020,7 +1001,6 @@ describe("reconnectRemoteWorkspaceHistoryEntry", () => {
       setReconnectingRemoteWorkspaceKeys,
       loadCredential,
       connectRemoteWorkspaceTarget,
-      resolveRemoteWorkspaceCanonicalPath,
       bindRemoteWorkspaceScope,
       disposeRemoteWorkspaceSession,
       bindRemoteWorkspacePath: bindWorkspacePath,
@@ -2878,7 +2858,6 @@ it("手动原地重连在密码缺失时交回凭据等待，不发起网络请�
       setReconnectingRemoteWorkspaceKeys: vi.fn(),
       loadCredential: vi.fn(async () => null),
       connectRemoteWorkspaceTarget: connect,
-      resolveRemoteWorkspaceCanonicalPath: vi.fn(async () => entry.workspacePath),
       bindRemoteWorkspaceScope: createBindRemoteWorkspaceScopeMock(),
       disposeRemoteWorkspaceSession: vi.fn(async () => undefined),
       bindRemoteWorkspacePath: vi.fn(),

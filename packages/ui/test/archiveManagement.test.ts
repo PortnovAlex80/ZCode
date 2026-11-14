@@ -9,6 +9,7 @@ import { useArchiveManagement } from "@/project-sidebar/useArchiveManagement.js"
 const mocks = vi.hoisted(() => ({
   directory: {} as any,
   mutateTask: vi.fn(),
+  previewArchivedTaskDeletion: vi.fn(),
   confirm: vi.fn(),
   removeTaskState: vi.fn(),
 }));
@@ -145,6 +146,18 @@ function setup() {
   };
   mocks.confirm.mockResolvedValue(true);
   mocks.mutateTask.mockResolvedValue(null);
+  // v3.18 delete flow: the dialog prepare phase previews every candidate through the
+  // controller before the batch executes; keep the preview unblocked in this fixture.
+  mocks.previewArchivedTaskDeletion.mockResolvedValue({
+    sessionId: "s",
+    revision: "rev-1",
+    sessionIds: ["s"],
+    forks: [],
+    retainedArtifacts: [],
+    deletedFiles: 0,
+    incomplete: false,
+    completed: true,
+  });
   return renderHook(() => useArchiveManagement());
 }
 it("cancelled deletion does not mutate; one in-flight batch rejects duplicate clicks and preserves failures", async () => {
@@ -176,17 +189,32 @@ it("cancelled deletion does not mutate; one in-flight batch rejects duplicate cl
     await pending;
   });
   expect(mocks.mutateTask).toHaveBeenCalledTimes(2);
-  expect(result.current.result).toEqual({ succeeded: 1, failed: 1, skipped: 0 });
+  // v3.18 contract: batch results carry per-row failure details next to the counters.
+  expect(result.current.result).toEqual({
+    succeeded: 1,
+    failed: 1,
+    skipped: 0,
+    details: [expect.stringMatching(/^beta · .* — archives\.incomplete/)],
+  });
   expect(mocks.directory.refresh).toHaveBeenCalledOnce();
   expect(result.current.busy).toBe(false);
 });
 it("does not expand the confirmed batch and skips rows unarchived while the dialog is open", async () => {
   const { result, rerender } = setup();
   let confirm!: (value: boolean) => void;
+  // v3.18 delete flow: the real dialog runs dialog.prepare() before confirming and the
+  // batch only covers rows that produced a deletion preview in that phase, so the mock
+  // must do the same instead of resolving true directly.
   mocks.confirm.mockImplementationOnce(
-    () =>
-      new Promise<boolean>((r) => {
-        confirm = r;
+    (dialog: {
+      prepare: (context: { signal: AbortSignal; update: (patch: unknown) => void }) => Promise<void>;
+    }) =>
+      new Promise<boolean>((resolve) => {
+        confirm = (value: boolean) => {
+          if (value)
+            void dialog.prepare({ signal: new AbortController().signal, update: () => {} });
+          resolve(value);
+        };
       }),
   );
   let pending!: Promise<void>;
@@ -203,5 +231,6 @@ it("does not expand the confirmed batch and skips rows unarchived while the dial
     await pending;
   });
   expect(mocks.mutateTask).not.toHaveBeenCalled();
+  expect(mocks.previewArchivedTaskDeletion).toHaveBeenCalledTimes(1);
   expect(result.current.result?.skipped).toBe(1);
 });

@@ -256,9 +256,11 @@ describe("ConversationShareReadonlyTimeline", () => {
       }),
     );
 
-    expect(html).toContain('data-conversation-share-work-group="executeGroup"');
-    expect(html).toContain("2 个命令");
-    expect(html).toContain("终端");
+    // Upstream replaced the share-specific executeGroup wrapper with the Desktop
+    // ConsecutiveSummaryGroup markup: collapsed group + counted statistics + terminal icon.
+    expect(html).toContain('data-consecutive-summary-group="true"');
+    expect(html).toContain("已执行 2 命令");
+    expect(html).toContain("lucide-square-terminal");
   });
 
   it("renders the public query summary for search rows", () => {
@@ -314,10 +316,13 @@ describe("ConversationShareReadonlyTimeline", () => {
       }),
     );
 
-    expect(html).toContain("上下文已压缩");
+    // Auto-origin compaction now distinguishes its copy: 上下文已自动压缩 (completedAuto).
+    expect(html).toContain("上下文已自动压缩");
     expect(html).not.toContain(">compact<");
     // 识别不了的类型整行不渲染，而不是退化成打印枚举名。
-    expect(html).not.toContain("goalVerify");
+    // The divider now also emits data-marker-type for diagnostics; assert the enum is
+    // never printed as visible text (">enum<"), which is what the original bug did.
+    expect(html).not.toContain(">goalVerify<");
   });
 
   it("artifact 显示公开文件元数据与下载入口", () => {

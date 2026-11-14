@@ -99,6 +99,34 @@ vi.mock("@/v4/composer/V4ComposerToolbar.js", async () => {
   };
 });
 
+vi.mock("@/voice-input/index.js", async () => {
+  const React = await import("react");
+  return {
+    // Composer voice input resolves services through the ServiceProvider;
+    // these tests only exercise error banners and submission gating, so keep
+    // the feature inert (available=false) with a stable stub instead.
+    useComposerVoiceInput: () => ({
+      available: false,
+      state: "idle" as const,
+      toggle: () => {},
+      settle: () => undefined,
+      permissionGuide: {
+        phase: null,
+        os: "windows" as const,
+        available: false,
+        busy: false,
+        show: () => {},
+        close: () => {},
+        openSettings: () => {},
+        reauthorize: () => {},
+        relaunch: () => {},
+      },
+      subscribeLevel: () => () => {},
+    }),
+    VoiceInputButton: () => React.createElement("span"),
+  };
+});
+
 const AnyConversationComposer = ConversationComposer as unknown as ComponentType<
   Record<string, unknown>
 >;

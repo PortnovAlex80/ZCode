@@ -37,7 +37,11 @@ vi.mock("@/hooks/useWorkspaceServices.js", () => {
     zcodeTaskService: { onDynamicWorkspaceEvent: () => () => ({ dispose() {} }) },
     broadcastService: { onMessage: () => ({ dispose() {} }) },
   };
-  return { useBaseWorkspaceServices: () => base };
+  return {
+    useBaseWorkspaceServices: () => base,
+    // Managed worktree entry reads the optional accessor; no host services in this fixture.
+    useOptionalBaseWorkspaceServices: () => null,
+  };
 });
 vi.mock("@/store/TabStoreProvider.js", () => ({
   useTabStore: (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),

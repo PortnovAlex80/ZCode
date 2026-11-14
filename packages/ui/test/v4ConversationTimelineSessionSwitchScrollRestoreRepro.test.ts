@@ -186,6 +186,9 @@ function installMinimalDom(): TestElement {
       ownerDocument: documentMock,
       parentNode: null,
     }),
+    // ZCodeIntlProvider syncs the active locale to <html lang>; the minimal
+    // document must expose a documentElement so that effect stays a no-op.
+    documentElement: { lang: "" },
     nodeType: 9,
     removeEventListener: () => {},
   } as unknown as Document & { defaultView?: unknown };

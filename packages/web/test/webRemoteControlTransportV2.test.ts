@@ -241,6 +241,12 @@ describe("terminal 与 V2 假 relay 的线级契约", () => {
 
   it("网络和5xx保持500ms指数退避，上限10秒", async () => {
     let fail: "server" | "network" | undefined = "server";
+    // The retry policy captures its random source at construction (same reason
+    // as the desktop sibling test). The asserted backoff curve only holds when
+    // the ±20% jitter draw is 0.5, which makes every delay land exactly on the
+    // 500/1000/.../10000ms boundaries the fake-clock loop advances to; a real
+    // draw up to 1.2x leaves the first retry untriggered at 500ms.
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     const h = await fixture({
       users: { jwt: "user-1" },
       onHttp: (call) =>

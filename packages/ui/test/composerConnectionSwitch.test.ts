@@ -22,13 +22,18 @@ const mocks = vi.hoisted(() => {
     update: vi.fn(async (patch: unknown) => {
       Object.assign(settings, patch);
     }),
+    // The fast connection path now re-reads the shared settings snapshot instead
+    // of relying on the save-time update to refresh it.
+    refreshSettings: vi.fn(async () => {}),
   };
 });
 vi.mock("@/hooks/useWorkspaceServices.js", () => ({
   useBaseWorkspaceServices: () => mocks.base,
   useWorkspaceServicesResolution: () => ({ services: mocks.target, rpcReady: true }),
 }));
-vi.mock("@/hooks/useSettingService.js", () => ({ useSettings: () => ({ update: mocks.update }) }));
+vi.mock("@/hooks/useSettingService.js", () => ({
+  useSettings: () => ({ update: mocks.update, refresh: mocks.refreshSettings }),
+}));
 vi.mock("@/i18n/IntlProvider.js", () => ({
   useZCodeIntl: () => ({ intl: { formatMessage: () => "Switch failed; select again to retry" } }),
 }));
@@ -99,7 +104,12 @@ describe("Composer connection switching ownership", () => {
       wait.resolve();
       await task;
     });
-    expect(onSelectModel).toHaveBeenCalledWith(encodeCustomModelValue(providerId, "GLM-5.3"));
+    // The hook now always submits the selection; the reasoning argument stays
+    // undefined for a non same-account source model.
+    expect(onSelectModel).toHaveBeenCalledWith(
+      encodeCustomModelValue(providerId, "GLM-5.3"),
+      undefined,
+    );
     expect(result.current.pending).toBe(false);
   });
   it("普通 API 进入团队时携带刚同步目录的思考档位，不能依赖旧 API 目录", async () => {
@@ -150,7 +160,14 @@ describe("Composer connection switching ownership", () => {
         await result.current.select(connection);
       });
       expect(mocks.update).toHaveBeenCalledTimes(1);
-      expect(onSelectModel).not.toHaveBeenCalled();
+      // Same-account switches now still submit the Session selection; the hook
+      // preserves the original reasoning level (undefined when none was set)
+      // instead of re-running model choice.
+      expect(onSelectModel).toHaveBeenCalledTimes(1);
+      expect(onSelectModel).toHaveBeenCalledWith(
+        encodeCustomModelValue(providerId, "GLM-5.3"),
+        undefined,
+      );
       expect(result.current.error).toBeNull();
     },
   );
@@ -228,8 +245,14 @@ describe("Composer connection switching ownership", () => {
       expect(result.current.pending).toBe(false);
       expect(result.current.error).toBeNull();
       expect(result.current.selection).toEqual({ ...original, providerId: id(kind) });
-      expect(onSelectModel).not.toHaveBeenCalled();
+      // Same-account switches submit the same model with the original reasoning
+      // preserved instead of skipping the Session submission.
+      expect(onSelectModel).toHaveBeenCalledWith(
+        encodeCustomModelValue(id(kind), "GLM-5.3"),
+        undefined,
+      );
     }
+    expect(onSelectModel).toHaveBeenCalledTimes(2);
     expect(mocks.update).toHaveBeenCalledTimes(2);
     expect(original.providerId).toBe(id(from));
   });
@@ -690,7 +713,9 @@ it("真实展示 hook 保留旧 ready 时，目标刷新失败也必须结束连
   await act(async () => {
     await hook.result.current.select(connection);
   });
-  expect(mocks.update).toHaveBeenCalledTimes(2);
+  // The first attempt already persisted the connection identity, so the retry
+  // takes the fast path: it re-synchronizes without rewriting the same settings.
+  expect(mocks.update).toHaveBeenCalledTimes(1);
   expect(hook.result.current.pending).toBe(false);
   expect(hook.result.current.error).toBeNull();
 });

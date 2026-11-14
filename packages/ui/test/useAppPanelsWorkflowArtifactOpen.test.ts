@@ -31,10 +31,19 @@ vi.mock("@/hooks/useServices.js", () => ({
     zcodeAgentService: { conversationWorkflowRunArtifactsV4 },
     zcodeSessionService: { closeSession: vi.fn(async () => {}) },
   }),
+  // v3.18: useAppPanels routes file opens through the extension file.viewer router, which
+  // reads the optional services accessor; no extension facade in this fixture.
+  useOptionalServices: () => null,
 }));
 
 vi.mock("@/logger.js", () => ({
-  logger: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+  logger: {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    lifecycle: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  },
 }));
 
 const WORKSPACE_PATH = "/repo";

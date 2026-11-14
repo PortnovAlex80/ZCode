@@ -181,8 +181,15 @@ describe("CodingPlanQuotaResetOpportunity", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "获得2次重置额度" }));
+    // Reset consumption is now a two-step flow: the row button opens a confirm
+    // page first, and only the confirm button consumes the opportunity.
+    fireEvent.click(screen.getByRole("button", { name: "重置 5 小时额度" }));
+    expect(screen.getByRole("heading", { name: "重置 5 小时额度？" })).toBeTruthy();
+    // The confirm button ignores clicks within 500ms of entering the page (anti
+    // double-click guard), so advance past the arm delay before confirming.
+    act(() => vi.advanceTimersByTime(500));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "重置 5 小时额度" }));
+      fireEvent.click(screen.getByRole("button", { name: "确认重置 5 小时额度" }));
       await Promise.resolve();
     });
 
@@ -213,8 +220,12 @@ describe("CodingPlanQuotaResetOpportunity", () => {
     expect(screen.getByText("2 次")).toBeTruthy();
     expect(screen.getByText("最快 20 分 0 秒后过期")).toBeTruthy();
 
+    // Two-step flow: row button opens the confirm page; the confirm button
+    // (after the 500ms arm delay) consumes one opportunity.
+    fireEvent.click(screen.getByRole("button", { name: "重置 5 小时额度" }));
+    act(() => vi.advanceTimersByTime(500));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "重置 5 小时额度" }));
+      fireEvent.click(screen.getByRole("button", { name: "确认重置 5 小时额度" }));
       await Promise.resolve();
     });
     expect(onReset.FIVE_HOUR).toHaveBeenCalledTimes(1);
@@ -232,9 +243,11 @@ describe("CodingPlanQuotaResetOpportunity", () => {
     act(() => vi.advanceTimersByTime(220));
     expect(screen.getByText("5 小时额度重置")).toBeTruthy();
 
-    // 不关闭弹框再次点击：真实调用第二次 onReset；机会耗尽后该行收起，周额度行不受影响。
+    // 不关闭弹框再次点击：再次经过确认页后才真实调用第二次 onReset；机会耗尽后该行收起，周额度行不受影响。
+    fireEvent.click(screen.getByRole("button", { name: "重置 5 小时额度" }));
+    act(() => vi.advanceTimersByTime(500));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "重置 5 小时额度" }));
+      fireEvent.click(screen.getByRole("button", { name: "确认重置 5 小时额度" }));
       await Promise.resolve();
     });
     expect(onReset.FIVE_HOUR).toHaveBeenCalledTimes(2);

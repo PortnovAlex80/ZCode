@@ -196,7 +196,9 @@ describe("getComposerBackgroundWorkCounts with dwf workflow runs", () => {
       ],
       1,
     );
-    const order = ["lucide-square-terminal", "lucide-workflow", "lucide-bot"].map((icon) =>
+    // The agent segment uses the shared subagent face avatar (wf-face SVG)
+    // instead of a lucide-bot icon; it is still the last typed segment.
+    const order = ["lucide-square-terminal", "lucide-workflow", "wf-face"].map((icon) =>
       html.indexOf(icon),
     );
 

@@ -9,9 +9,7 @@ import { describe, expect, it } from "vitest";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 import { StoreProvider } from "@/store/StoreProvider.js";
 import {
-  getReasoningBottomDistance,
   getReasoningSummaryMaskStyle,
-  isReasoningScrollAtBottom,
   Reasoning,
   ReasoningContent,
   ReasoningTrigger,
@@ -225,34 +223,11 @@ describe("Reasoning layout", () => {
     expect(html).toContain('data-state="closed"');
   });
 
-  it("treats only the bottom lock zone as auto-followable", () => {
-    expect(
-      getReasoningBottomDistance({
-        clientHeight: 100,
-        scrollHeight: 260,
-        scrollTop: 120,
-      }),
-    ).toBe(40);
-    expect(
-      isReasoningScrollAtBottom({
-        clientHeight: 100,
-        scrollHeight: 260,
-        scrollTop: 120,
-      }),
-    ).toBe(false);
-    expect(
-      isReasoningScrollAtBottom({
-        clientHeight: 100,
-        scrollHeight: 260,
-        scrollTop: 159,
-      }),
-    ).toBe(true);
-    expect(
-      isReasoningScrollAtBottom({
-        clientHeight: 100,
-        scrollHeight: 260,
-        scrollTop: 160,
-      }),
-    ).toBe(true);
-  });
+  // "treats only the bottom lock zone as auto-followable" was removed: the pure
+  // helpers getReasoningBottomDistance / isReasoningScrollAtBottom no longer exist.
+  // The follow decision now lives inline in the shared useBottomFollowingScroll
+  // hook (packages/ui/src/mentions/components/scrollMask.ts), which treats the
+  // container as at-bottom within a 2px tolerance on scroll events; it has no
+  // exported pure surface and needs a live DOM, so it is covered by the
+  // conversation E2E scenarios instead.
 });

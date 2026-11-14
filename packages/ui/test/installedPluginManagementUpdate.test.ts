@@ -95,6 +95,12 @@ function installMinimalDom() {
     nodeType: 9,
     removeEventListener: () => {},
   } as unknown as Document;
+  // IntlProvider syncs document.documentElement.lang on locale changes; the
+  // minimal DOM stub must expose a documentElement for that effect.
+  (documentMock as { documentElement: Element }).documentElement = createMinimalElement(
+    documentMock,
+    "html",
+  );
   const windowMock = {
     addEventListener: () => {},
     document: documentMock,
